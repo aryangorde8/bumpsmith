@@ -1,0 +1,9 @@
+# Qodo review configuration.
+# Repository-level config must live at the root of the default branch.
+# Review guidelines themselves are in REVIEW.md, not here.
+
+[review_agent_ux]
+# Keep each finding self-contained in the PR thread: the review trail is read
+# later, by people who were not present when it was posted.
+expand_evidence = true
+show_context_used = true
