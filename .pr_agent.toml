@@ -1,9 +1,18 @@
 # Qodo review configuration.
 # Repository-level config must live at the root of the default branch.
 # Review guidelines themselves are in REVIEW.md, not here.
+#
+# Section and key names verified against Qodo's configuration reference:
+# https://docs.qodo.ai/install-and-configure/configuration-overview/configuration-and-command-reference
+#
+#   [review_agent_ux].expand_evidence    documented default: false  -> set below
+#   [review_agent_ux].show_context_used  documented default: true   -> left alone
+#
+# pr_commands and handle_push_trigger under [github_app] are deliberately unset:
+# the reference lists the keys but not their default values, and review already
+# fires automatically on pull request open.
 
 [review_agent_ux]
 # Keep each finding self-contained in the PR thread: the review trail is read
 # later, by people who were not present when it was posted.
 expand_evidence = true
-show_context_used = true
