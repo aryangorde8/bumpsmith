@@ -33,6 +33,11 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 12 | [#8](https://github.com/aryangorde8/bumpsmith/pull/8) | Unstable match ordering | **Fixed** | this PR |
 | 13 | [#8](https://github.com/aryangorde8/bumpsmith/pull/8) | Ignores PEP 263 source encoding | **Fixed** | this PR |
 | 14 | [#8](https://github.com/aryangorde8/bumpsmith/pull/8) | Eager file list sorting | **Accepted on the measurement, not on the framing** | this PR |
+| 15 | [#9](https://github.com/aryangorde8/bumpsmith/pull/9) | Encode errors skip rollback | **Fixed** — reproduced | this PR |
+| 16 | [#9](https://github.com/aryangorde8/bumpsmith/pull/9) | Encoding mismatch corrupts restore | **Fixed** | this PR |
+| 17 | [#9](https://github.com/aryangorde8/bumpsmith/pull/9) | Symlink edit replaces the link | **Fixed** — reproduced | this PR |
+| 18 | [#9](https://github.com/aryangorde8/bumpsmith/pull/9) | CRLF round trip not exact | **Fixed** — reproduced | this PR |
+| 19 | [#9](https://github.com/aryangorde8/bumpsmith/pull/9) | Verify/apply race window | **Fixed** | this PR |
 
 ---
 
@@ -225,6 +230,52 @@ On a tree carrying 8,000 vendored files beside 50 real ones:
 
 Taken, with directory-level pruning. The suggestion was right; the reason given
 for it was not the reason it holds.
+
+## 15–19 · Five on the transaction, three of them reproduced
+
+The apply-and-revert module states three guarantees. Review found that **each
+one was false in a case the tests did not cover**, which makes this the most
+useful round so far.
+
+| the claim | what actually happened |
+|---|---|
+| the revert is byte for byte | a CRLF file came back **LF** |
+| nothing outside the root is touched | a symlink was **destroyed** and its target left unedited |
+| all of them land or none do | the first edit **stayed applied** after a later one failed |
+
+Each was reproduced before being fixed.
+
+**18 · CRLF.** `tokenize.open` wraps the file in a TextIOWrapper with universal
+newlines, so `\r\n` was read as `\n` and written back as `\n`. The revert changed
+the file — in the one operation that has to be exact. The existing
+byte-for-byte test passed because it used LF. Reading is raw bytes now, decoded
+with the detected encoding, and writing does not translate either.
+
+**17 · Symlink.** The write renames a temporary file over the path, which
+replaces a symlink itself rather than what it points at, while the check read
+*through* the link. The content verified and the object changed were not the
+same thing. Symlinks are refused.
+
+**15 · Rollback bypass.** `UnicodeEncodeError` is a `ValueError` and a bad codec
+name raises `LookupError`; neither is an `OSError`, so both escaped the rollback
+path. Both are refused up front now, and the handlers cover all three.
+
+**16 · Encoding not verified.** Only the text was compared, so an edit built
+with the wrong encoding verified and then wrote different bytes.
+
+**19 · Verify/apply race.** `before` was documented as checked "at the moment of
+applying" and was in fact checked in an earlier pass. Each file is now re-read
+immediately before it is written, and the documentation says what the code does.
+
+### Two bugs the fixes introduced, caught by their own tests
+
+Worth recording, because the fix is not automatically safer than the defect.
+
+`latin-1` and `iso-8859-1` are one codec, and `detect_encoding` does not always
+return the spelling the caller used — so comparing them as strings rejected an
+edit **for being written correctly**. Fixed by comparing canonical codec names.
+Then the same comparison in the second location was missed, and the just-in-time
+check rejected it again. Both now go through one function.
 
 ---
 
