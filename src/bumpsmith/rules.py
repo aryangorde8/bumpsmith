@@ -16,13 +16,13 @@ cannot.
 
 import ast
 import os
-import tokenize
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
 from bumpsmith.failures import BreakClass, Failure
+from bumpsmith.sources import read_source
 
 # Directories whose contents are not this project's code to change.
 _SKIP_DIRECTORIES = frozenset(
@@ -403,10 +403,9 @@ def find_matches(rule: Rule, root: Path) -> ScanResult:
     unreadable: list[Unreadable] = []
     for path in _candidate_files(root):
         try:
-            # tokenize.open honours a BOM or a `# coding:` cookie, so a valid
+            # read_source honours a BOM or a `# coding:` cookie, so a valid
             # non-UTF-8 source is read rather than written off as unreadable.
-            with tokenize.open(path) as handle:
-                source = handle.read()
+            source = read_source(path).text
         except (OSError, UnicodeDecodeError, SyntaxError, ValueError) as exc:
             unreadable.append(Unreadable(path=path, reason=f"could not read: {exc}"))
             continue
