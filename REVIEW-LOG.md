@@ -277,6 +277,61 @@ edit **for being written correctly**. Fixed by comparing canonical codec names.
 Then the same comparison in the second location was missed, and the just-in-time
 check rejected it again. Both now go through one function.
 
+## 20–22 · Three on the approval gate, one of them real
+
+The round where two of three were argued down. Both rejections were tested
+before being rejected, because "I disagree" and "I checked" are different claims.
+
+**21 · A refusal that left no trace. Accepted, and the crash was the smaller
+half.** `Gate.run` computed the request's fingerprint outside any guard, so a
+`detail` value that would not serialise raised `TypeError` instead of
+`NotApprovedError`. Reproduced:
+
+```
+ESCAPED as TypeError: Object of type object is not JSON serializable
+effect called : 0
+history       : []   <- the refusal left no trace
+```
+
+The effect was correctly never called — fail-closed held. What did not hold was
+the trail: **the gate refused something and recorded nothing**, which is the one
+failure this project has spent a week punishing elsewhere. `Request` now rejects
+a non-string detail where it is written, and the fingerprint call in `run` is
+guarded as a backstop that records the refusal.
+
+This is the third instance of the same shape: an exception escaping the path
+that was supposed to handle it. Finding 15 was `UnicodeError` slipping past an
+`OSError` handler; the surrogate filename bug in this PR was found by looking for
+it deliberately; this one was found by review. Worth naming as a class rather
+than fixing three times.
+
+**20 · "Bad cast breaks mypy." Rejected — the claim is false.** The finding says
+`cast("Approver", ...)` "will fail CI because mypy is configured to type-check
+`tests/`". `typing.cast` accepts a string as a forward reference by design.
+Tested rather than asserted:
+
+```python
+good = cast("Real", object())       # accepted
+bad  = cast("NoSuchType", object()) # error: Name "NoSuchType" is not defined
+```
+
+mypy flags the second, which proves it is evaluating the string rather than
+ignoring it, and accepts the first. CI had already passed on the exact commit
+under review. The suggested edit would also move away from ruff's own `TC006`,
+which prefers the quoted form.
+
+**22 · "Unbounded history memory growth." Rejected, with the arithmetic.**
+Literally true — `_records` has no cap. Measured: **460 bytes per decision**, so
+439 MiB needs a million records. Every record is one irreversible outward action
+that a human answered a question about. The rate is bounded by human attention,
+not by loop speed.
+
+The proposed remedy is worse than the condition. Trimming an audit trail drops
+the **oldest denial first** — the record most likely to be the one that matters.
+A gate that quietly forgets what it stopped is a gate with no evidence it ever
+stopped anything. Export exists already (`Record.as_dict`); a cap does not, and
+will not.
+
 ---
 
 ## How this stays honest
