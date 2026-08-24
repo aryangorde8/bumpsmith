@@ -48,6 +48,13 @@ comparing `HEAD` against the SHA that was asked for and fails if they differ.
 That is the same reasoning the CI workflow applies to its GitHub Actions, which
 are pinned to commit SHAs for the same reason.
 
+Fetching one commit by SHA is the cheap path — 11 MB for the largest fixture
+instead of a full history nobody reads — but whether a server will serve an
+object it never advertised is the server's decision, not ours. GitHub allows it,
+so all four fixtures take that path. A host that refuses gets an ordinary fetch
+of every branch and tag instead, and the pinned commit is verified the same way
+either way.
+
 Cloning never deletes anything. If a destination already holds files the command
 refuses and says so; removing a previous clone is a decision for whoever is
 running it.

@@ -6,10 +6,12 @@ the git behaviour under test is genuine while the dependency on GitHub is not.
 """
 
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
+from bumpsmith import fixtures as fixtures_module
 from bumpsmith.fixtures import (
     CloneResult,
     Fixture,
@@ -307,16 +309,61 @@ def test_clone_refuses_an_id_that_would_escape_the_root(tmp_path: Path) -> None:
 
 
 def test_a_git_failure_carries_gits_own_explanation(tmp_path: Path) -> None:
-    """A failure whose cause was discarded costs more than the call it saved."""
-    origin, _, _ = _origin_with_two_commits(tmp_path)
-    absent = "0" * 40
+    """A failure whose cause was discarded costs more than the call it saved.
+
+    An unreachable remote fails both the single-commit fetch and the fallback,
+    which is the case where git's own words are all the caller has to go on.
+    """
+    missing_origin = tmp_path / "no-such-repository"
 
     with pytest.raises(GitError) as caught:
-        clone(_fixture_for(origin, absent), tmp_path / "work")
+        clone(_fixture_for(missing_origin, "0" * 40), tmp_path / "work")
 
     message = str(caught.value)
-    assert "git fetch" in message
+    assert "single commit" in message
+    assert "every branch and tag" in message
     assert "git wrote nothing to stderr" not in message
+
+
+def test_a_sha_on_no_branch_or_tag_says_so(tmp_path: Path) -> None:
+    """The remote answers, and simply does not have the commit.
+
+    git would report this as a pathspec that did not match. The fixture-level
+    explanation -- force-pushed away, or the manifest is wrong -- is the one the
+    caller can act on.
+    """
+    origin, _, _ = _origin_with_two_commits(tmp_path)
+
+    with pytest.raises(GitError, match="on any branch or tag"):
+        clone(_fixture_for(origin, "0" * 40), tmp_path / "work")
+
+
+def test_the_full_fetch_recovers_when_a_single_commit_fetch_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Serving an object it never advertised is the server's decision.
+
+    GitHub allows it and every fixture in the manifest takes that cheap path, so
+    the refusal cannot be produced against a real remote here. It is simulated
+    instead: the point under test is our recovery, not git's negotiation.
+    """
+    origin, pinned, tip = _origin_with_two_commits(tmp_path)
+    real_git = fixtures_module._git
+    refusals: list[str] = []
+
+    def refusing_git(args: Sequence[str], *, cwd: Path, timeout: float) -> str:
+        if list(args[:3]) == ["fetch", "--quiet", "--depth"]:
+            refusals.append(" ".join(args))
+            raise GitError("Server does not allow request for unadvertised object")
+        return real_git(args, cwd=cwd, timeout=timeout)
+
+    monkeypatch.setattr(fixtures_module, "_git", refusing_git)
+    destination = clone(_fixture_for(origin, pinned), tmp_path / "work")
+
+    assert refusals, "the cheap single-commit fetch should be tried first"
+    assert _git("rev-parse", "HEAD", cwd=destination) == pinned
+    assert _git("rev-parse", "HEAD", cwd=destination) != tip
+    assert (destination / "marker.txt").read_text() == "pinned\n"
 
 
 def test_clone_all_reports_every_fixture_even_when_one_fails(tmp_path: Path) -> None:
@@ -356,6 +403,18 @@ def test_select_with_no_ids_returns_everything() -> None:
 def test_select_preserves_the_order_asked_for() -> None:
     fixtures = load_manifest()
     assert [fixture.id for fixture in select(fixtures, ["F4", "B"])] == ["F4", "B"]
+
+
+def test_select_refuses_a_repeated_id(tmp_path: Path) -> None:
+    """A repeated id can only collide with itself, so it is a usage error.
+
+    Before this was checked, `fixtures B B` cloned B and then reported that the
+    destination was not empty -- a clone failure for what is a typo.
+    """
+    fixtures = load_manifest()
+    with pytest.raises(FixtureError, match="may not repeat"):
+        select(fixtures, ["B", "B"])
+    assert not (tmp_path / "B").exists()
 
 
 def test_select_names_the_available_ids_when_one_is_unknown() -> None:
@@ -398,6 +457,17 @@ def test_the_printed_command_quotes_arguments_containing_spaces(
 def test_an_unknown_fixture_is_a_usage_error(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["--list", "nope"]) == 2
     assert "nope" in capsys.readouterr().err
+
+
+def test_repeated_ids_exit_two_without_cloning_anything(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "work"
+
+    assert main(["B", "B", "--root", str(root)]) == 2
+
+    assert not root.exists()
+    assert "may not repeat" in capsys.readouterr().err
 
 
 def test_a_non_positive_timeout_is_a_usage_error(tmp_path: Path) -> None:

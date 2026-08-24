@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -327,12 +328,61 @@ def _prepare_destination(root: Path, fixture: Fixture) -> Path:
     return destination
 
 
+def _fetch_pinned_commit(fixture: Fixture, destination: Path, timeout: float) -> str:
+    """Obtain the pinned commit and return the ref to check out.
+
+    Asking a server for one commit by SHA is the cheap path -- for the largest
+    fixture here that is 11 MB at depth 1 instead of a full history nobody
+    reads. But whether a server will serve an object it never advertised is the
+    *server's* decision (``uploadpack.allowAnySHA1InWant``), not ours. GitHub
+    allows it, which is why every fixture in this manifest takes the cheap path.
+
+    A host that refuses gets the ordinary fetch instead: every branch and tag,
+    which needs no server-side permission because those refs are advertised.
+    It costs more bytes and it is still the same commit at the end, because the
+    caller verifies ``HEAD`` either way.
+    """
+    try:
+        _git(
+            ["fetch", "--quiet", "--depth", "1", "origin", fixture.sha],
+            cwd=destination,
+            timeout=timeout,
+        )
+    except GitError as unadvertised_fetch_failed:
+        try:
+            _git(["fetch", "--quiet", "--tags", "origin"], cwd=destination, timeout=timeout)
+        except GitError as full_fetch_failed:
+            raise GitError(
+                f"Could not fetch {fixture.id} from {fixture.url}.\n"
+                f"Asking for the single commit {fixture.sha} failed:\n"
+                f"{unadvertised_fetch_failed}\n"
+                f"Fetching every branch and tag also failed:\n{full_fetch_failed}"
+            ) from full_fetch_failed
+
+        # The full fetch only brings down what the branches and tags reach. A
+        # commit that has been force-pushed away is reachable from none of them,
+        # and saying so is more use than git's "pathspec did not match" would be.
+        try:
+            _git(
+                ["cat-file", "-e", f"{fixture.sha}^{{commit}}"],
+                cwd=destination,
+                timeout=timeout,
+            )
+        except GitError as commit_absent:
+            raise GitError(
+                f"{fixture.url} does not have commit {fixture.sha} on any branch or "
+                f"tag. It may have been removed by a force-push, or the SHA in the "
+                f"manifest may be wrong. Either way this fixture cannot be rebuilt "
+                f"from that URL as recorded."
+            ) from commit_absent
+        return fixture.sha
+
+    # The single-commit fetch leaves the pinned commit, and only it, at FETCH_HEAD.
+    return "FETCH_HEAD"
+
+
 def clone(fixture: Fixture, root: Path, *, timeout: float = DEFAULT_TIMEOUT) -> Path:
     """Clone one fixture into ``root/<id>`` at its pinned SHA and return the path.
-
-    Fetches a single commit at depth 1 rather than the whole history: the pinned
-    commit is the only one that matters, and for the largest fixture here that is
-    11 MB instead of a full history nobody reads.
 
     Raises :class:`GitError` if git fails, and :class:`FixtureError` if the
     destination is unusable or the checked-out commit is not the pinned one.
@@ -340,12 +390,8 @@ def clone(fixture: Fixture, root: Path, *, timeout: float = DEFAULT_TIMEOUT) -> 
     destination = _prepare_destination(root, fixture)
     _git(["init", "--quiet", "."], cwd=destination, timeout=timeout)
     _git(["remote", "add", "origin", fixture.url], cwd=destination, timeout=timeout)
-    _git(
-        ["fetch", "--quiet", "--depth", "1", "origin", fixture.sha],
-        cwd=destination,
-        timeout=timeout,
-    )
-    _git(["checkout", "--quiet", "--detach", "FETCH_HEAD"], cwd=destination, timeout=timeout)
+    checkout_target = _fetch_pinned_commit(fixture, destination, timeout)
+    _git(["checkout", "--quiet", "--detach", checkout_target], cwd=destination, timeout=timeout)
 
     head = _git(["rev-parse", "HEAD"], cwd=destination, timeout=timeout)
     if head != fixture.sha:
@@ -386,6 +432,16 @@ def select(fixtures: dict[str, Fixture], ids: Sequence[str]) -> list[Fixture]:
     """
     if not ids:
         return list(fixtures.values())
+    # Each fixture clones into one directory named for it, so a repeated id can
+    # only ever collide with itself. Refusing here makes that a usage error the
+    # caller can see, instead of a "destination is not empty" failure reported
+    # after the first copy has already been cloned.
+    repeated = sorted(name for name, count in Counter(ids).items() if count > 1)
+    if repeated:
+        raise FixtureError(
+            f"Fixture ids may not repeat: {', '.join(repeated)}. Each fixture clones "
+            f"into a single directory named for it."
+        )
     unknown = [fixture_id for fixture_id in ids if fixture_id not in fixtures]
     if unknown:
         raise FixtureError(
@@ -472,11 +528,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"ok    {result.fixture_id}  ->  {result.path}")
             print(_describe(by_id[result.fixture_id]))
         else:
+            # stderr is unbuffered and a piped stdout is not, so without this the
+            # failures overtake the successes and the report reads out of order.
+            sys.stdout.flush()
             print(f"FAIL  {result.fixture_id}", file=sys.stderr)
             print(f"  {result.error}", file=sys.stderr)
 
     failed = [result.fixture_id for result in results if not result.succeeded]
     if failed:
+        sys.stdout.flush()
         print(
             f"\n{len(failed)} of {len(results)} fixtures failed: {', '.join(failed)}",
             file=sys.stderr,
