@@ -20,12 +20,14 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | # | PR | Finding | Disposition | Where |
 |---|----|---------|-------------|-------|
 | 1 | [#2](https://github.com/aryangorde8/bumpsmith/pull/2) | Unverified `.pr_agent.toml` key name | **Rejected** — the file already carried the citation | — |
-| 2 | [#3](https://github.com/aryangorde8/bumpsmith/pull/3) | Unpinned GitHub Actions tags | **Fixed**, and further than asked | `6d32305` |
-| 3 | [#4](https://github.com/aryangorde8/bumpsmith/pull/4) | Drops additional pytest errors | **Fixed** | `0612109` |
-| 4 | [#4](https://github.com/aryangorde8/bumpsmith/pull/4) | Exit code 2 mis-mapped | **Fixed** — it was right about the design | `0612109` |
+| 2 | [#3](https://github.com/aryangorde8/bumpsmith/pull/3) | Unpinned GitHub Actions tags | **Fixed**, and further than asked | [`6d32305`](https://github.com/aryangorde8/bumpsmith/commit/6d32305) |
+| 3 | [#4](https://github.com/aryangorde8/bumpsmith/pull/4) | Drops additional pytest errors | **Fixed** | [`0612109`](https://github.com/aryangorde8/bumpsmith/commit/0612109) |
+| 4 | [#4](https://github.com/aryangorde8/bumpsmith/pull/4) | Exit code 2 mis-mapped | **Fixed** — it was right about the design | [`0612109`](https://github.com/aryangorde8/bumpsmith/commit/0612109) |
 | 5 | [#4](https://github.com/aryangorde8/bumpsmith/pull/4) | Malformed multi-error fixture | **Fixed late** — missed at merge, found by audit | [#6](https://github.com/aryangorde8/bumpsmith/pull/6) |
-| 6 | [#5](https://github.com/aryangorde8/bumpsmith/pull/5) | Fetch-by-SHA often rejected | **Concern accepted, remedy rejected** | `e8f1bc7` |
-| 7 | [#5](https://github.com/aryangorde8/bumpsmith/pull/5) | Duplicate ids cause failures | **Fixed** | `e8f1bc7` |
+| 6 | [#5](https://github.com/aryangorde8/bumpsmith/pull/5) | Fetch-by-SHA often rejected | **Concern accepted, remedy rejected** | [`e8f1bc7`](https://github.com/aryangorde8/bumpsmith/commit/e8f1bc7) |
+| 7 | [#5](https://github.com/aryangorde8/bumpsmith/pull/5) | Duplicate ids cause failures | **Fixed** | [`e8f1bc7`](https://github.com/aryangorde8/bumpsmith/commit/e8f1bc7) |
+| 8 | [#7](https://github.com/aryangorde8/bumpsmith/pull/7) | Non-clickable doc references | **Fixed** | this PR |
+| 9 | [#7](https://github.com/aryangorde8/bumpsmith/pull/7) | Hardcoded GitHub PR URLs | **Premise accepted, remedy rejected** | this PR |
 
 ---
 
@@ -133,6 +135,31 @@ typo, and refusing matches how the manifest already treats an unrecognised key.
 Reproducing it turned up something separate — failures were printing before
 successes, because a piped stdout is block-buffered and stderr is not. Fixed in
 the same commit.
+
+## 8 · Non-clickable doc references — fixed
+
+The README named `REVIEW.md` and `REVIEW-LOG.md` as code spans while the pull
+request claimed they were "linked from the README". The text contradicted
+itself. They are links now.
+
+## 9 · Hardcoded GitHub PR URLs — premise accepted, remedy rejected
+
+Raised against this file, which is the right place to raise it: a long-lived
+record should not rot. The suggested fix was relative links — `../../pull/5`,
+which GitHub resolves correctly from a blob view.
+
+Not taken, for a reason specific to what this file is. A review log records
+events that happened in **one** repository. Relative links resolve against
+wherever the reader is: in a fork, `../../pull/5` points at that fork's pull
+request 5, which is either missing or an unrelated change. A link that silently
+points at the wrong artifact is worse than one that breaks loudly, and this file
+exists precisely to stop findings being confused with each other.
+
+The stated risk is also partly covered already — GitHub redirects old URLs after
+a rename or transfer, so the absolute links survive the two most likely cases.
+
+The optional half of the suggestion was taken: commit SHAs are now links too,
+which is the navigation this table was actually missing.
 
 ---
 

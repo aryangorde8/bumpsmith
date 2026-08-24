@@ -19,10 +19,11 @@ the deadline.
 
 ## Review
 
-`REVIEW.md` is the standard this repository is reviewed against, by people and
-by automated review alike. `REVIEW-LOG.md` is what that review has actually
-produced: every finding raised, and what happened to it — including the ones
-that were rejected, with the reasoning, and the one that was missed.
+[`REVIEW.md`](REVIEW.md) is the standard this repository is reviewed against,
+by people and by automated review alike. [`REVIEW-LOG.md`](REVIEW-LOG.md) is
+what that review has actually produced: every finding raised, and what happened
+to it — including the ones that were rejected, with the reasoning, and the one
+that was missed.
 
 ## AI assistant disclosure
 
