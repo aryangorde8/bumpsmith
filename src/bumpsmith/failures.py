@@ -53,42 +53,96 @@ _SYMBOL = re.compile(r"`(?P<symbol>[\w.]+:[\w]+)`")
 # The missing module in "No module named 'typing_inspect'".
 _MISSING_MODULE = re.compile(r"No module named ['\"](?P<module>[\w.]+)['\"]")
 
+# "____________ ERROR collecting tests/test_thing.py ____________" -- pytest
+# prints one of these per test module that failed to import.
+_COLLECT_BANNER = re.compile(r"^_+ ERROR collecting (?P<target>.+?) _+$", re.MULTILINE)
+
+# A conftest that fails to import stops the session before collection begins.
+_CONFTEST_HEADER = "ImportError while loading conftest"
+
+# Trailing sections that belong to the run as a whole, not to the last error.
+# Text after these must not be attributed to the error block above them.
+_TRAILER = re.compile(
+    r"^(?:=+ (?:warnings summary|short test summary info)|!+ Interrupted:)", re.MULTILINE
+)
+
 # Anything under an installed-packages directory is the library's own stack,
 # not code this project can edit.
 _VENDORED = "site-packages"
 
 
 class RunShape(Enum):
-    """Which output layout pytest produced, selected by its return code.
+    """Which output layout pytest produced.
 
-    The codes are pytest's own. Only the four below have been observed against
-    the fixture set; anything else is reported as :attr:`UNKNOWN` rather than
-    guessed at, because a wrong shape produces confidently wrong parsing.
+    The return code is the primary signal because it is available before any
+    parsing and cannot be confused by message content. It is not, however,
+    sufficient on its own: pytest documents exit code 2 as *interrupted* and
+    exit code 4 as *usage error*, and the layouts this parser cares about are
+    only two of the things each can mean. A collection failure and a Ctrl-C
+    both exit 2, and they print nothing alike.
+
+    So the code narrows the possibilities and one marker in the text picks
+    between them. Anything unrecognised is :attr:`UNKNOWN` rather than guessed,
+    because a wrong layout produces confidently wrong parsing.
     """
 
     PASSED = "passed"
     """rc 0 -- nothing to extract."""
 
     TESTS_FAILED = "tests-failed"
-    """rc 1 -- the suite ran. Per-test results exist and JUnit XML is meaningful."""
+    """rc 1 -- the suite ran. Per-test detail lives in JUnit XML, not in this text."""
 
     COLLECTION_ERROR = "collection-error"
-    """rc 2 -- a test module failed to import. Has banners and a summary line."""
+    """rc 2 with collection banners -- test modules failed to import. One block each."""
+
+    INTERRUPTED = "interrupted"
+    """rc 2 without banners -- the session was aborted. Not a migration break."""
 
     CONFTEST_IMPORT_ERROR = "conftest-import-error"
-    """rc 4 -- conftest itself failed to import. Bare traceback, no summary."""
+    """rc 4 with the conftest header -- bare traceback, no banners, no summary."""
+
+    USAGE_ERROR = "usage-error"
+    """rc 4 without it -- pytest was invoked wrongly. A harness bug, not a break."""
 
     UNKNOWN = "unknown"
 
     @classmethod
-    def from_returncode(cls, returncode: int) -> RunShape:
-        """Map a pytest return code to the layout it implies."""
-        return {
-            0: cls.PASSED,
-            1: cls.TESTS_FAILED,
-            2: cls.COLLECTION_ERROR,
-            4: cls.CONFTEST_IMPORT_ERROR,
-        }.get(returncode, cls.UNKNOWN)
+    def detect(cls, returncode: int, output: str) -> RunShape:
+        """Identify the layout from the return code, disambiguated by the text.
+
+        Args:
+            returncode: pytest's exit status.
+            output: the combined stdout and stderr of the same run.
+        """
+        if returncode == 0:
+            return cls.PASSED
+        if returncode == 1:
+            return cls.TESTS_FAILED
+        if returncode == 2:
+            # Collection errors are reported as an interrupted session, so the
+            # banner is what separates them from a real interruption.
+            if _COLLECT_BANNER.search(output):
+                return cls.COLLECTION_ERROR
+            return cls.INTERRUPTED
+        if returncode == 4:
+            if _CONFTEST_HEADER in output:
+                return cls.CONFTEST_IMPORT_ERROR
+            return cls.USAGE_ERROR
+        return cls.UNKNOWN
+
+    @property
+    def is_migration_break(self) -> bool:
+        """Whether this layout can carry a pydantic break at all.
+
+        An interrupted session and a misinvoked pytest are problems with the
+        harness, not with the code under migration. Treating them as breaks
+        would have the agent write a rule to fix a timeout.
+        """
+        return self in {
+            RunShape.TESTS_FAILED,
+            RunShape.COLLECTION_ERROR,
+            RunShape.CONFTEST_IMPORT_ERROR,
+        }
 
 
 class BreakClass(Enum):
@@ -192,6 +246,35 @@ def _error(text: str) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _blocks(output: str, shape: RunShape) -> list[str]:
+    """Split a run's output into one section per distinct error.
+
+    Only the collection-error layout is genuinely multi-error: pytest prints a
+    banner per test module that failed to import, and each carries its own
+    traceback and its own exception. A conftest failure stops the session before
+    collection, so it is one error by construction.
+
+    The rc 1 layout is also multi-error, but its per-test detail belongs in
+    JUnit XML rather than in scraped text, so it is not split here. Returning
+    the whole output as one block means a caller gets the first failure rather
+    than a wrong one.
+    """
+    if shape is not RunShape.COLLECTION_ERROR:
+        return [output]
+
+    banners = list(_COLLECT_BANNER.finditer(output))
+    if not banners:
+        return [output]
+
+    # Trailing sections describe the run, not the last error. Attributing them
+    # to the final block would let one error inherit another's docs link.
+    trailer = _TRAILER.search(output, banners[-1].end())
+    stop = trailer.start() if trailer is not None else len(output)
+
+    bounds = [m.start() for m in banners] + [stop]
+    return [output[bounds[i] : bounds[i + 1]] for i in range(len(banners))]
+
+
 def _classify(
     error_type: str | None,
     message: str | None,
@@ -262,29 +345,35 @@ def parse_failures(
     Returns:
         One :class:`Failure` per distinct error. Empty when the run passed.
 
+        The collection-error layout genuinely carries several: pytest prints a
+        banner per test module that failed to import, and each is parsed
+        separately. REVIEW.md requires that partial failure be reported per
+        item, and collapsing them would hide every break after the first.
+
     A run that failed but yielded nothing parseable returns a :class:`Failure`
     whose fields are ``None`` rather than an empty list. The caller must be able
     to tell "this suite passed" from "this suite broke in a way I could not
     read", and an empty list would collapse those into one answer.
     """
-    shape = RunShape.from_returncode(returncode)
+    shape = RunShape.detect(returncode, output)
     if shape is RunShape.PASSED:
         return []
 
-    error_type, message = _error(output)
-    doc = _DOC_URL.search(output)
-    pydantic_code = doc["slug"] if doc is not None else None
-    culprit = _culprit(_frames(output))
+    return [_failure_from(block, shape, project_packages) for block in _blocks(output, shape)]
+
+
+def _failure_from(block: str, shape: RunShape, project_packages: frozenset[str]) -> Failure:
+    """Build one :class:`Failure` from a single error's section of the output."""
+    error_type, message = _error(block)
+    doc = _DOC_URL.search(block)
     symbol_match = _SYMBOL.search(message) if message is not None else None
 
-    return [
-        Failure(
-            shape=shape,
-            break_class=_classify(error_type, message, pydantic_code, project_packages),
-            error_type=error_type,
-            message=message,
-            culprit=culprit,
-            pydantic_code=pydantic_code,
-            symbol=symbol_match["symbol"] if symbol_match is not None else None,
-        )
-    ]
+    return Failure(
+        shape=shape,
+        break_class=_classify(error_type, message, doc["slug"] if doc else None, project_packages),
+        error_type=error_type,
+        message=message,
+        culprit=_culprit(_frames(block)),
+        pydantic_code=doc["slug"] if doc else None,
+        symbol=symbol_match["symbol"] if symbol_match is not None else None,
+    )

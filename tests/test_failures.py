@@ -25,20 +25,65 @@ def _recorded(name: str) -> str:
 # --------------------------------------------------------------------------
 
 
+_COLLECT_BANNER_LINE = "_______ ERROR collecting tests/test_thing.py _______"
+
+
 @pytest.mark.parametrize(
-    ("returncode", "expected"),
+    ("returncode", "output", "expected"),
     [
-        (0, RunShape.PASSED),
-        (1, RunShape.TESTS_FAILED),
-        (2, RunShape.COLLECTION_ERROR),
-        (4, RunShape.CONFTEST_IMPORT_ERROR),
-        (3, RunShape.UNKNOWN),
-        (5, RunShape.UNKNOWN),
-        (99, RunShape.UNKNOWN),
+        (0, "", RunShape.PASSED),
+        (1, "", RunShape.TESTS_FAILED),
+        (2, _COLLECT_BANNER_LINE, RunShape.COLLECTION_ERROR),
+        (
+            4,
+            "ImportError while loading conftest '/work/repo/tests/conftest.py'.",
+            RunShape.CONFTEST_IMPORT_ERROR,
+        ),
+        (3, "", RunShape.UNKNOWN),
+        (5, "", RunShape.UNKNOWN),
+        (99, "", RunShape.UNKNOWN),
     ],
 )
-def test_return_code_selects_the_shape(returncode: int, expected: RunShape) -> None:
-    assert RunShape.from_returncode(returncode) is expected
+def test_return_code_plus_one_marker_selects_the_shape(
+    returncode: int, output: str, expected: RunShape
+) -> None:
+    assert RunShape.detect(returncode, output) is expected
+
+
+def test_rc2_without_banners_is_an_interruption_not_a_collection_error() -> None:
+    """pytest exits 2 for any interrupted session, not only for collection errors.
+
+    A timeout or a Ctrl-C lands here too, and prints nothing like a collection
+    failure. Calling it COLLECTION_ERROR would have the parser claim a layout
+    that is not present.
+    """
+    assert RunShape.detect(2, "!!!! KeyboardInterrupt !!!!") is RunShape.INTERRUPTED
+
+
+def test_rc4_without_the_conftest_header_is_a_usage_error() -> None:
+    """rc 4 is pytest's command-line usage error; a broken conftest merely also uses it."""
+    assert RunShape.detect(4, "ERROR: file or directory not found: nope/") is RunShape.USAGE_ERROR
+
+
+@pytest.mark.parametrize(
+    ("shape", "expected"),
+    [
+        (RunShape.TESTS_FAILED, True),
+        (RunShape.COLLECTION_ERROR, True),
+        (RunShape.CONFTEST_IMPORT_ERROR, True),
+        (RunShape.INTERRUPTED, False),
+        (RunShape.USAGE_ERROR, False),
+        (RunShape.PASSED, False),
+        (RunShape.UNKNOWN, False),
+    ],
+)
+def test_only_some_layouts_can_carry_a_migration_break(shape: RunShape, expected: bool) -> None:
+    """An interrupted or misinvoked run is a harness problem, not a pydantic break.
+
+    Without this distinction the agent could be asked to write a migration rule
+    that fixes a timeout.
+    """
+    assert shape.is_migration_break is expected
 
 
 def test_a_passing_run_yields_no_failures() -> None:
@@ -185,3 +230,53 @@ def test_ownership_is_unknowable_without_the_package_list() -> None:
     (failure,) = parse_failures(_TRANSITIVE, returncode=4)
 
     assert failure.break_class is BreakClass.UNKNOWN
+
+
+# --------------------------------------------------------------------------
+# Several errors in one run
+# --------------------------------------------------------------------------
+
+
+def _two_collection_errors() -> str:
+    """Compose one run that fails to collect two modules, from two real captures.
+
+    pytest prints a banner per failing module and one shared trailer. Both
+    blocks here are recorded output; only the arrangement is assembled, because
+    no single recorded run in the fixture set happens to fail two modules at
+    once.
+    """
+    b = _recorded("B")
+    f4 = _recorded("F4")
+    head, _, tail = f4.partition("=============================== warnings summary")
+    return b.replace("=========================== short test summary info", "") + head + tail
+
+
+def test_every_collection_error_is_reported() -> None:
+    """REVIEW.md: partial failure in a batch must be reported per item.
+
+    Returning only the first error would hide every break after it, and the
+    agent would write a rule for one class while the repository carries two.
+    """
+    failures = parse_failures(_two_collection_errors(), returncode=2)
+
+    assert len(failures) == 2
+    assert {f.break_class for f in failures} == {BreakClass.ROOT_MODEL, BreakClass.REMOVED_INTERNAL}
+
+
+def test_each_error_keeps_its_own_culprit_and_code() -> None:
+    """Blocks must not inherit each other's docs link or traceback.
+
+    The __root__ break emits no error code at all. If block boundaries leaked,
+    it would pick up the import-error slug from the block below it and be
+    misclassified with total confidence.
+    """
+    by_class = {f.break_class: f for f in parse_failures(_two_collection_errors(), returncode=2)}
+
+    root = by_class[BreakClass.ROOT_MODEL]
+    removed = by_class[BreakClass.REMOVED_INTERNAL]
+
+    assert root.pydantic_code is None
+    assert str(root.culprit) == "emnify/modules/api/models.py:397"
+
+    assert removed.pydantic_code == "import-error"
+    assert str(removed.culprit) == "connect/eaas/core/proto.py:10"
