@@ -1,0 +1,13 @@
+# Pinning actions to commit SHAs (see ci.yml) removes the supply-chain risk of
+# mutable tags, but it also freezes them: a pinned SHA never picks up a security
+# fix on its own. Dependabot is the other half of that trade -- it proposes the
+# bump as a pull request, so the update is reviewed rather than silently
+# inherited.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
