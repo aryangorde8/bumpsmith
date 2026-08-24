@@ -1,0 +1,61 @@
+# The migration fixtures.
+#
+# These are real third-party projects, not test doubles. Each one is pinned to a
+# full commit SHA so that "it worked on my machine" and "it works on the judge's
+# machine" mean the same thing. Nothing here is vendored into this repository:
+# `python -m bumpsmith.fixtures` clones each project from its own upstream at the
+# SHA recorded below.
+#
+# `expected_passed` is the baseline: the number of tests that pass *before* any
+# migration is attempted, using `pytest_args`. A fixture whose baseline does not
+# reproduce is not evidence of anything, so the number is recorded here rather
+# than remembered.
+
+[fixtures.A]
+url = "https://github.com/data-mie/dbt-cloud-cli.git"
+sha = "cb2680d353727f895b958fd8c5a8fec7657962b6"
+pydantic = "1.10.10"
+pytest_args = ["-m", "not integration"]
+expected_passed = 31
+notes = """
+Needs nine DBT_CLOUD_* environment variables to import at all: dbt_cloud/field.py
+uses default_factory=lambda: get_env(...), which raises during model construction.
+The `integration` marker is deselected because those 14 tests call the live dbt
+Cloud API; the marker is undeclared upstream, so it only warns.
+"""
+
+[fixtures.B]
+url = "https://github.com/emnify/emnify-sdk-python.git"
+sha = "1c595e4806022cb80748000e37cd52c413c248a5"
+pydantic = "1.10.26"
+pytest_args = []
+expected_passed = 24
+notes = "The smallest fixture. Clones in about a second, which makes it the one to develop against."
+
+[fixtures.C]
+url = "https://github.com/cloudblue/connect-eaas-core.git"
+sha = "898771a6cc05842ca2a00a1363682f11695b05a8"
+pydantic = "2.13.4"
+pytest_args = ["--ignore=tests/connect/eaas/core/contrib/django"]
+expected_passed = 347
+notes = """
+The negative control: already migrated to pydantic v2 and expected to stay green.
+An agent that "fixes" this one is broken.
+The django tests are ignored because django-rql sits in an optional Poetry group,
+so dj_rql is absent and collection aborts. That excludes 13 tests in test_rql.py —
+worth saying out loud rather than quoting a bare 347.
+"""
+
+[fixtures.F4]
+url = "https://github.com/cloudblue/connect-eaas-core.git"
+sha = "25ab907b9a4b0adbf354db450b137e29312bcfd5"
+pydantic = "1.10.26"
+pytest_args = ["--ignore=tests/connect/eaas/core/contrib/django"]
+expected_passed = 347
+notes = """
+The same project as C, one migration earlier: this is the commit C was migrated
+from. Its break arrives through a dependency rather than through its own source,
+and its traceback opens inside the standard library's importlib.
+Needs connect-openapi-client==34.0; 35.0 expects a newer pytest-httpx and fails
+with ModuleNotFoundError: pytest_httpx._options.
+"""

@@ -4,18 +4,60 @@ Entry for the **TrueForge Agent Harness Hackathon**, 24–30 August 2026.
 
 ---
 
-## Status: not started
+## Status: in progress
 
-This repository was provisioned on **20 August 2026** for tooling setup only —
-license, code review integration, and CI plumbing.
+The build window opened at **08:00 London on 24 August 2026** and closes at
+**20:00 London on 30 August**. Everything before the window is tooling only —
+license, code review integration, and CI plumbing, committed 19–21 August. Per
+hackathon rule 7, no project code or design work predates the start. The commit
+history is the record.
 
-**No project code or design work exists here yet.** Per hackathon rule 7, all
-coding and design work begins at the **08:00 London start on 24 August 2026**
-and ends at the **20:00 London deadline on 30 August**. The commit history is
-the record.
+A full README with setup steps, a demo video, and a write-up lands before the
+deadline.
 
-A full README with setup steps, a demo video, and a write-up will land before
-the deadline.
+## The fixtures
+
+bumpsmith is measured against four real repositories rather than against test
+doubles, because a pydantic v1-to-v2 migration only breaks in ways that real
+code produces. They are **not vendored here**. A vendored copy is a snapshot
+whose provenance decays, and the point of a fixture is that somebody else can
+obtain exactly the same one:
+
+```
+python -m bumpsmith.fixtures            # clone all four into ./fixtures
+python -m bumpsmith.fixtures B          # just the smallest one, about a second
+python -m bumpsmith.fixtures --list     # what they are, without cloning
+```
+
+`fixtures.toml` pins each one to a full 40-character commit SHA and records the
+baseline it is expected to produce — the number of tests that pass *before* any
+migration is attempted. A fixture whose baseline does not reproduce is not
+evidence of anything, so the number is written down rather than remembered.
+
+| id | repository | pydantic | baseline | role |
+|----|------------|----------|----------|------|
+| A  | `data-mie/dbt-cloud-cli` | 1.10.10 | 31 passed | breaks loudly |
+| B  | `emnify/emnify-sdk-python` | 1.10.26 | 24 passed | smallest; the one to develop against |
+| C  | `cloudblue/connect-eaas-core` | 2.13.4 | 347 passed | negative control — already v2, must stay green |
+| F4 | `cloudblue/connect-eaas-core` | 1.10.26 | 347 passed | the commit C was migrated from |
+
+Pinning to a SHA is only half of it: a tag can be moved and a branch always
+moves, so a SHA is the only reference that cannot change underneath us — but a
+reference that cannot change is still worth checking, so every clone ends by
+comparing `HEAD` against the SHA that was asked for and fails if they differ.
+That is the same reasoning the CI workflow applies to its GitHub Actions, which
+are pinned to commit SHAs for the same reason.
+
+Fetching one commit by SHA is the cheap path — 11 MB for the largest fixture
+instead of a full history nobody reads — but whether a server will serve an
+object it never advertised is the server's decision, not ours. GitHub allows it,
+so all four fixtures take that path. A host that refuses gets an ordinary fetch
+of every branch and tag instead, and the pinned commit is verified the same way
+either way.
+
+Cloning never deletes anything. If a destination already holds files the command
+refuses and says so; removing a previous clone is a decision for whoever is
+running it.
 
 ## Review
 
