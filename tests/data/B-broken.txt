@@ -1,0 +1,26 @@
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_emnify.py _____________________
+tests/test_emnify.py:9: in <module>
+    from emnify.emnify import EMnify as emnify_client
+emnify/__init__.py:1: in <module>
+    from .emnify import EMnify
+emnify/emnify.py:4: in <module>
+    from .modules.device.manager import DeviceManager
+emnify/modules/device/manager.py:2: in <module>
+    import emnify.modules.device.api_call_manager as device_call_managers
+emnify/modules/device/api_call_manager.py:2: in <module>
+    from emnify.api_manager import BaseApiManager
+emnify/api_manager.py:6: in <module>
+    from emnify.modules.api.models import AuthenticationResponse
+emnify/modules/api/models.py:397: in <module>
+    class StatsObject(BaseModel):
+../.venv/lib/python3.13/site-packages/pydantic/_internal/_model_construction.py:133: in __new__
+    private_attributes = inspect_namespace(
+../.venv/lib/python3.13/site-packages/pydantic/_internal/_model_construction.py:437: in inspect_namespace
+    raise TypeError("To define root models, use `pydantic.RootModel` rather than a field called '__root__'")
+E   TypeError: To define root models, use `pydantic.RootModel` rather than a field called '__root__'
+=========================== short test summary info ============================
+ERROR tests/test_emnify.py - TypeError: To define root models, use `pydantic....
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.68s

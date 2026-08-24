@@ -1,0 +1,28 @@
+ImportError while loading conftest '/work/repo/tests/conftest.py'.
+tests/conftest.py:5: in <module>
+    from dbt_cloud.command import (
+dbt_cloud/command/__init__.py:1: in <module>
+    from .job import (
+dbt_cloud/command/job/__init__.py:1: in <module>
+    from .get import DbtCloudJobGetCommand
+dbt_cloud/command/job/get.py:4: in <module>
+    from dbt_cloud.command.command import DbtCloudAccountCommand
+dbt_cloud/command/command.py:27: in <module>
+    class ClickBaseModel(BaseModel):
+../.venv/lib/python3.13/site-packages/pydantic/_internal/_model_construction.py:176: in __new__
+    cls.__pydantic_decorators__ = DecoratorInfos.build(cls, replace_wrapped_methods=True)
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../.venv/lib/python3.13/site-packages/pydantic/_internal/_decorators.py:471: in build
+    decorator_infos, to_replace = _decorator_infos_for_class(typ, collect_to_replace=True)
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../.venv/lib/python3.13/site-packages/pydantic/_internal/_decorators.py:518: in _decorator_infos_for_class
+    res.validators[var_name] = Decorator.build(typ, cls_var_name=var_name, shim=var_value.shim, info=info)
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../.venv/lib/python3.13/site-packages/pydantic/_internal/_decorators.py:260: in build
+    func = shim(func)
+           ^^^^^^^^^^
+../.venv/lib/python3.13/site-packages/pydantic/_internal/_decorators_v1.py:73: in make_generic_v1_field_validator
+    raise PydanticUserError(
+E   pydantic.errors.PydanticUserError: The `field` and `config` parameters are not available in Pydantic V2, please use the `info` parameter instead.
+E
+E   For further information visit https://errors.pydantic.dev/2.13/u/validator-field-config-info
