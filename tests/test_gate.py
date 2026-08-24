@@ -397,3 +397,35 @@ def test_a_filename_that_was_never_valid_utf8_can_still_be_fingerprinted() -> No
     assert request.fingerprint() == request.fingerprint()
     assert request.fingerprint() != Request("push", "push a change to models.py").fingerprint()
     assert Gate(_Yes()).run(request, _Spy()) == "done"
+
+
+def test_a_detail_that_is_not_strings_is_refused_where_it_is_written() -> None:
+    """A request that cannot be described is stopped at the request.
+
+    The annotation says `str` and nothing at runtime enforces an annotation, so
+    the check is real rather than decorative.
+    """
+    with pytest.raises(TypeError, match="describes itself in strings"):
+        Request("push", "push to main", {"commits": 3})  # type: ignore[dict-item]
+    with pytest.raises(TypeError, match="keys have to be strings"):
+        Request("push", "push to main", {7: "main"})  # type: ignore[dict-item]
+
+
+def test_a_request_that_cannot_be_described_is_a_recorded_refusal() -> None:
+    """The backstop behind that validation, and the reason it is worth having.
+
+    Reached here by assembling a request around its own `__post_init__`. What
+    matters is not the exception type but the trail: a refusal that raises
+    something else leaves `history` claiming nothing was ever asked.
+    """
+    request = Request("push", "push to main")
+    object.__setattr__(request, "detail", {"commits": object()})
+    spy = _Spy()
+    gate = Gate(_Yes())
+
+    with pytest.raises(NotApprovedError) as caught:
+        gate.run(request, spy)
+
+    assert spy.calls == 0
+    assert "could not be described" in caught.value.reason
+    assert [record.outcome for record in gate.history] == ["denied"]

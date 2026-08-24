@@ -81,7 +81,25 @@ class Request:
             raise ValueError("an approval request needs an action name")
         if not self.summary.strip():
             raise ValueError("an approval request needs a summary somebody can decide on")
-        object.__setattr__(self, "detail", MappingProxyType(dict(self.detail)))
+        # Typed loosely on purpose. The annotation above says `str`; nothing at
+        # runtime enforces an annotation, and a detail that will not serialise
+        # makes `fingerprint` raise. Refusing it here puts the error where the
+        # caller still has the context to fix it, and leaves fingerprinting
+        # total for every request that exists. A comprehension rather than
+        # `dict()` because `dict` is invariant, so the loose annotation is only
+        # honoured when the type is inferred against it.
+        snapshot: dict[object, object] = {key: value for key, value in self.detail.items()}
+        for key, value in snapshot.items():
+            if not isinstance(key, str):
+                raise TypeError(
+                    f"approval detail keys have to be strings; got {type(key).__name__}"
+                )
+            if not isinstance(value, str):
+                raise TypeError(
+                    "an approval request describes itself in strings; "
+                    f"detail[{key!r}] is {type(value).__name__}"
+                )
+        object.__setattr__(self, "detail", MappingProxyType(snapshot))
 
     def fingerprint(self) -> str:
         """A name for exactly this request and no other.
@@ -224,6 +242,17 @@ class Gate:
         thing has been approved, and hiding the failure would be worse than the
         failure.
         """
+        # Asked before the approver is, so that a request nobody could describe
+        # is refused without bothering anyone. `Request` validates its own
+        # detail, which is what makes this total; the guard is a backstop for a
+        # request assembled around that validation, and it is here because the
+        # alternative is an exception that skips the refusal path and leaves
+        # `history` with no record that anything was ever asked.
+        try:
+            expected = request.fingerprint()
+        except Exception as exc:
+            raise self._refuse(request, f"the request could not be described: {exc!r}") from exc
+
         # Typed `object` rather than `Decision`: an approver written elsewhere is
         # not bound by the protocol, and something that is not a decision has to
         # land on the safe side instead of raising from inside the gate.
@@ -239,7 +268,7 @@ class Gate:
                 request,
                 f"the approver answered with {type(decision).__name__}, which is not a decision",
             )
-        if decision.fingerprint != request.fingerprint():
+        if decision.fingerprint != expected:
             raise self._refuse(request, "the approval was made for a different request")
 
         try:
