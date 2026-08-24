@@ -12,6 +12,7 @@ do, the originals come back byte for byte, and nothing outside the root is
 touched.
 """
 
+import codecs
 import os
 import stat
 import tempfile
@@ -21,6 +22,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from bumpsmith.sources import read_source
+
+# Writing text can fail in three ways that all mean the same thing here: OSError
+# from the filesystem, UnicodeError when the text will not encode, and
+# LookupError when the codec name is not a codec. Only the first is an OSError,
+# and treating it as the only one let the other two escape rollback entirely.
+_WRITE_FAILED = (OSError, UnicodeError, LookupError)
+
+
+def _canonical(encoding: str) -> str:
+    """The one name a codec answers to.
+
+    `latin-1` and `iso-8859-1` are the same codec, and `tokenize.detect_encoding`
+    does not always return the spelling the caller used. Comparing the two as
+    strings rejects an edit for being written correctly, so every comparison of
+    encodings in this module goes through here.
+
+    Raises :class:`LookupError` if the name is not a codec at all.
+    """
+    return codecs.lookup(encoding).name
 
 
 class ApplyError(Exception):
@@ -39,9 +59,10 @@ class RevertError(ApplyError):
 class Edit:
     """One file's before and after, in the encoding both are written in.
 
-    ``before`` is not decoration. It is checked against what is on disk at the
-    moment of applying, so an edit planned against content that has since
-    changed is refused rather than used to overwrite the change.
+    ``before`` is not decoration. It is checked against what is on disk twice --
+    once across the whole set before anything is written, and again immediately
+    before this file is written -- so an edit planned against content that has
+    since changed is refused rather than used to overwrite the change.
     """
 
     path: Path
@@ -84,13 +105,13 @@ def _write(path: Path, text: str, encoding: str) -> None:
     )
     temporary = Path(temporary_name)
     try:
-        with os.fdopen(descriptor, "w", encoding=encoding) as handle:
+        with os.fdopen(descriptor, "w", encoding=encoding, newline="") as handle:
             handle.write(text)
         # mkstemp creates 0600. Renaming that over the original would quietly
         # change the file's permissions as a side effect of editing it.
         temporary.chmod(mode)
         temporary.replace(path)
-    except OSError:
+    except _WRITE_FAILED:
         temporary.unlink(missing_ok=True)
         raise
 
@@ -125,6 +146,38 @@ def _verify(edits: Sequence[Edit], root: Path) -> None:
         except (UnicodeDecodeError, SyntaxError, ValueError) as exc:
             raise ApplyError(f"Cannot read {edit.path} to check it before editing: {exc}") from exc
 
+        if edit.path.is_symlink():
+            raise ApplyError(
+                f"Refusing to edit {edit.path}: it is a symlink. The write renames a "
+                f"temporary file over the path, which would replace the link itself "
+                f"with a regular file and leave the file it points at untouched -- so "
+                f"the content checked and the object changed would not be the same "
+                f"thing."
+            )
+
+        try:
+            wanted = _canonical(edit.encoding)
+        except LookupError as exc:
+            raise ApplyError(
+                f"Cannot edit {edit.path}: {edit.encoding!r} is not a known codec."
+            ) from exc
+        if _canonical(current.encoding) != wanted:
+            raise ApplyError(
+                f"{edit.path} reads as {current.encoding} but this edit was written for "
+                f"{edit.encoding}. Applying it would write different bytes than the "
+                f"file holds, and reverting it would not restore the original."
+            )
+
+        for text, label in ((edit.before, "before"), (edit.after, "after")):
+            try:
+                text.encode(edit.encoding)
+            except UnicodeError as exc:
+                raise ApplyError(
+                    f"Cannot edit {edit.path}: its {label} text does not encode as "
+                    f"{edit.encoding} ({exc}). Refused here rather than discovered "
+                    f"halfway through writing."
+                ) from exc
+
         if current.text != edit.before:
             raise ApplyError(
                 f"{edit.path} has changed since this edit was planned. Refusing to "
@@ -144,7 +197,7 @@ def _restore(applied: Sequence[Edit]) -> None:
     for edit in applied:
         try:
             _write(edit.path, edit.before, edit.encoding)
-        except OSError as exc:
+        except _WRITE_FAILED as exc:
             unrestored.append(f"{edit.path}: {exc}")
     if unrestored:
         raise RevertError(
@@ -157,9 +210,31 @@ def _restore(applied: Sequence[Edit]) -> None:
 def _apply(edits: Sequence[Edit]) -> list[Edit]:
     applied: list[Edit] = []
     for edit in edits:
+        # Re-read immediately before writing. _verify checked every file up
+        # front so a bad set fails before anything is touched, but that check
+        # and this write are not the same moment, and anything that changed in
+        # between would be silently overwritten.
+        try:
+            current = read_source(edit.path)
+        except (OSError, UnicodeDecodeError, SyntaxError, ValueError) as exc:
+            _restore(applied)
+            raise ApplyError(
+                f"Could not re-read {edit.path} before writing it: {exc}. The "
+                f"{len(applied)} edit(s) already applied were taken back."
+            ) from exc
+
+        # _verify has already established both names are codecs.
+        if current.text != edit.before or _canonical(current.encoding) != _canonical(edit.encoding):
+            _restore(applied)
+            raise ApplyError(
+                f"{edit.path} changed between being checked and being written. "
+                f"Refusing to overwrite that change. The {len(applied)} edit(s) "
+                f"already applied were taken back, so nothing has changed."
+            )
+
         try:
             _write(edit.path, edit.after, edit.encoding)
-        except OSError as exc:
+        except _WRITE_FAILED as exc:
             _restore(applied)
             raise ApplyError(
                 f"Could not write {edit.path}: {exc}. The {len(applied)} edit(s) "
