@@ -237,6 +237,20 @@ def test_ownership_is_unknowable_without_the_package_list() -> None:
 # --------------------------------------------------------------------------
 
 
+# Landmarks for the composition below, quoted from the recordings rather than
+# matched with the parser's own regexes. A test that located its input using the
+# code under test would agree with that code even when both were wrong.
+_B_TRAILER_MARK = "short test summary info"
+_F4_BANNER_MARK = "ERROR collecting tests/connect/eaas/core/test_proto.py"
+
+
+def _line_index(lines: list[str], mark: str, source: str) -> int:
+    for index, line in enumerate(lines):
+        if mark in line:
+            return index
+    raise AssertionError(f"recording {source} no longer contains a line matching {mark!r}")
+
+
 def _two_collection_errors() -> str:
     """Compose one run that fails to collect two modules, from two real captures.
 
@@ -244,11 +258,44 @@ def _two_collection_errors() -> str:
     blocks here are recorded output; only the arrangement is assembled, because
     no single recorded run in the fixture set happens to fail two modules at
     once.
+
+    The seam is cut on line boundaries: B up to its trailer, then F4 from its
+    banner onward, so B's trailer and F4's duplicate ERRORS header both fall
+    away whole. An earlier version spliced by substring and left ` ====`
+    fragments behind that pytest cannot emit, and kept B's mid-run
+    `Interrupted:` line. :func:`test_the_composition_manufactures_no_lines`
+    pins that neither can come back.
     """
-    b = _recorded("B")
-    f4 = _recorded("F4")
-    head, _, tail = f4.partition("=============================== warnings summary")
-    return b.replace("=========================== short test summary info", "") + head + tail
+    b_lines = _recorded("B").splitlines(keepends=True)
+    f4_lines = _recorded("F4").splitlines(keepends=True)
+    b_end = _line_index(b_lines, _B_TRAILER_MARK, "B")
+    f4_start = _line_index(f4_lines, _F4_BANNER_MARK, "F4")
+    return "".join(b_lines[:b_end] + f4_lines[f4_start:])
+
+
+def test_the_composition_manufactures_no_lines() -> None:
+    """The vault's whole claim is that its contents are verbatim.
+
+    ``data/README.md`` promises nothing was edited -- not the tracebacks, not
+    the frame ordering, not the error text. A helper that assembles those
+    recordings into a line pytest could never print quietly breaks that promise,
+    and the parser would then be pinned against output no run produces.
+    """
+    recorded = set(_recorded("B").splitlines()) | set(_recorded("F4").splitlines())
+    manufactured = sorted(
+        {line for line in _two_collection_errors().splitlines() if line not in recorded}
+    )
+
+    assert manufactured == []
+
+
+def test_the_composition_keeps_one_shared_trailer() -> None:
+    """Two banners, and the trailer belongs to the run rather than to a block."""
+    composed = _two_collection_errors()
+
+    assert composed.count("ERROR collecting") == 2
+    assert composed.count(_B_TRAILER_MARK) == 1
+    assert "Interrupted:" in composed.split(_B_TRAILER_MARK)[1]
 
 
 def test_every_collection_error_is_reported() -> None:
