@@ -17,6 +17,13 @@ the record.
 A full README with setup steps, a demo video, and a write-up will land before
 the deadline.
 
+## Review
+
+`REVIEW.md` is the standard this repository is reviewed against, by people and
+by automated review alike. `REVIEW-LOG.md` is what that review has actually
+produced: every finding raised, and what happened to it — including the ones
+that were rejected, with the reasoning, and the one that was missed.
+
 ## AI assistant disclosure
 
 Per hackathon rule 11 — "AI coding assistants are allowed, but their use must be
