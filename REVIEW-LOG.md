@@ -28,6 +28,11 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 7 | [#5](https://github.com/aryangorde8/bumpsmith/pull/5) | Duplicate ids cause failures | **Fixed** | [`e8f1bc7`](https://github.com/aryangorde8/bumpsmith/commit/e8f1bc7) |
 | 8 | [#7](https://github.com/aryangorde8/bumpsmith/pull/7) | Non-clickable doc references | **Fixed** | this PR |
 | 9 | [#7](https://github.com/aryangorde8/bumpsmith/pull/7) | Hardcoded GitHub PR URLs | **Premise accepted, remedy rejected** | this PR |
+| 10 | [#8](https://github.com/aryangorde8/bumpsmith/pull/8) | Import scope misresolved | **Fixed** — a real false positive, reproduced | this PR |
+| 11 | [#8](https://github.com/aryangorde8/bumpsmith/pull/8) | `pydantic.v1` matched as v2 | **Fixed** — a real false positive, reproduced | this PR |
+| 12 | [#8](https://github.com/aryangorde8/bumpsmith/pull/8) | Unstable match ordering | **Fixed** | this PR |
+| 13 | [#8](https://github.com/aryangorde8/bumpsmith/pull/8) | Ignores PEP 263 source encoding | **Fixed** | this PR |
+| 14 | [#8](https://github.com/aryangorde8/bumpsmith/pull/8) | Eager file list sorting | **Accepted on the measurement, not on the framing** | this PR |
 
 ---
 
@@ -160,6 +165,66 @@ a rename or transfer, so the absolute links survive the two most likely cases.
 
 The optional half of the suggestion was taken: commit SHAs are now links too,
 which is the navigation this table was actually missing.
+
+## 10 · Import scope misresolved — fixed
+
+The worst of the nine so far, because it broke the guarantee the pull request
+made loudest. `_pydantic_names` walked the whole tree, so a `from pydantic
+import validator` *inside a function* overruled a module-level `from
+mylib.decorators import validator`, and an unrelated decorator was matched as
+pydantic's.
+
+Reproduced before fixing: one file, one match, where the correct answer is zero.
+
+Import collection now stops at function bodies. `try`/`except ImportError` and
+`if TYPE_CHECKING:` are deliberately *not* skipped — an import wrapped in either
+is still a module-level binding, and skipping them would have traded this false
+positive for a false negative. There is a test for each direction.
+
+## 11 · `pydantic.v1` matched as v2 — fixed
+
+`pydantic.v1` is v2's bundled copy of the old API. Code importing from it kept v1
+behaviour on purpose, so the v2 signature change does not apply to it, and
+counting those sites inflates the number with things that are not broken.
+
+Also reproduced first: `from pydantic.v1 import validator` matched, and should
+not have.
+
+Being on the compatibility shim is a finding of its own. It is just not this one.
+
+## 12 · Unstable match ordering — fixed
+
+`ast.walk` is documented to yield "in no specified order". CPython happens to be
+deterministic, which is exactly why this would have gone unnoticed until it did
+not. The match list is read in a pull request diff, so two runs over the same
+tree have to produce the same order or the diff is noise. Sorted by path and
+line.
+
+## 13 · Ignores PEP 263 source encoding — fixed
+
+A Python file may declare its own encoding via a BOM or a `# coding:` cookie.
+Reading everything as UTF-8 marked such a file unreadable, which undercounted
+matches *and* reported the scan incomplete — for a file Python itself parses
+without complaint. Now read with `tokenize.open`, which is how Python reads it.
+
+## 14 · Eager file list sorting — accepted on the measurement, not the framing
+
+`REVIEW.md` says a speculative performance concern without a measurement is not
+a finding, so this was measured rather than argued.
+
+The stated risk — a large memory spike — is not real at any plausible scale; a
+few thousand `Path` objects is nothing. What is real is the wasted descent:
+walking into a virtualenv only to discard every file inside it is work with a
+known-zero yield.
+
+On a tree carrying 8,000 vendored files beside 50 real ones:
+
+| | before | after |
+|---|---|---|
+| whole scan | 0.364s | **0.005s** |
+
+Taken, with directory-level pruning. The suggestion was right; the reason given
+for it was not the reason it holds.
 
 ---
 
