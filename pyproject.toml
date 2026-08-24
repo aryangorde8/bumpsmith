@@ -1,0 +1,80 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bumpsmith"
+version = "0.1.0"
+description = "An agent that turns a failing pydantic v1-to-v2 migration into a reviewed pull request."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { file = "LICENSE" }
+
+# No runtime dependencies yet. REVIEW.md: "Prefer the standard library; every
+# added dependency must earn its place." Each one added later needs a reason in
+# the pull request that adds it.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["ruff==0.14.5", "mypy==1.18.2", "pytest==9.1.1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bumpsmith"]
+
+# ---------------------------------------------------------------------------
+# Ruff
+#
+# Every rule group below is selected because REVIEW.md asks for it in prose.
+# The linter and the written standard are meant to say the same thing, so a
+# reviewer never has to arbitrate between them.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes: unused imports, undefined names
+    "I",        # isort: import order
+    "N",        # pep8-naming: "names say what the thing is"
+    "UP",       # pyupgrade: modern syntax for the pinned Python
+    "B",        # bugbear: mutable default arguments, which REVIEW.md calls a defect
+    "S",        # bandit: the "Security and secrets" section
+    "SIM",      # simplify
+    "RET",      # "prefer early return over deep nesting"
+    "TRY",      # exception handling: no bare except, re-raise with context
+    "ARG",      # unused arguments
+    "PTH",      # pathlib over os.path
+    "RUF",
+]
+ignore = [
+    # REVIEW.md, "What not to flag": formatting the formatter already handles.
+    "E501",   # line length is enforced by the formatter, not twice
+    "TRY003", # long messages inside raise: REVIEW.md explicitly *wants* these
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert; assert is not a security finding there.
+"tests/**" = ["S101"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+# ---------------------------------------------------------------------------
+# mypy — strict. REVIEW.md: "Type-annotate public functions", and "any function
+# that can return None must have that documented in its return annotation".
+# Strict mode is how that gets enforced rather than remembered.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unreachable = true
+warn_return_any = true
+show_error_codes = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"

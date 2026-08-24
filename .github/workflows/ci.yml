@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The token needs nothing beyond reading the checked-out code.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # Actions are pinned to full commit SHAs, not tags. A tag is a mutable
+      # pointer: the code CI executes could change without any commit in this
+      # repository. Renovate/Dependabot moves these; a human reviews the move.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      # Each check runs even if an earlier one fails, so one pull request
+      # surfaces every problem instead of one problem per push.
+      - name: Lint
+        if: '!cancelled()'
+        run: ruff check .
+
+      - name: Format
+        if: '!cancelled()'
+        run: ruff format --check .
+
+      - name: Types
+        if: '!cancelled()'
+        run: mypy
+
+      - name: Tests
+        if: '!cancelled()'
+        run: pytest
