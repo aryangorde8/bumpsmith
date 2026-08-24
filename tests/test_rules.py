@@ -130,6 +130,94 @@ def test_a_module_level_root_dunder_is_not_a_field(tmp_path: Path) -> None:
     assert find_matches(_rule(BreakClass.ROOT_MODEL), root).count == 0
 
 
+def test_a_function_local_pydantic_import_does_not_capture_a_module_level_name(
+    tmp_path: Path,
+) -> None:
+    """An import inside a function binds a local nothing outside it can see.
+
+    Collecting it let an unrelated import three functions down overrule the
+    module-level `from mylib.decorators import validator`, and the decorator was
+    matched as pydantic's.
+    """
+    root = _tree(
+        tmp_path,
+        {
+            "mine.py": """
+            from mylib.decorators import validator
+
+            class Survey:
+                @validator("topics")
+                def check(cls, value, field, config):
+                    return value
+
+            def helper():
+                from pydantic import validator
+                return validator
+            """
+        },
+    )
+
+    assert find_matches(_rule(BreakClass.VALIDATOR_FIELD_CONFIG), root).count == 0
+
+
+def test_a_pydantic_import_wrapped_in_try_except_still_counts(tmp_path: Path) -> None:
+    """The fix for function-local imports must not throw these away too.
+
+    A pydantic import guarded by try/except ImportError, or by TYPE_CHECKING, is
+    still a module-level binding, and both wrappings are common.
+    """
+    root = _tree(
+        tmp_path,
+        {
+            "mine.py": """
+            try:
+                from pydantic import validator
+            except ImportError:
+                validator = None
+
+            class Model:
+                @validator("x")
+                def check(cls, value, field):
+                    return value
+            """
+        },
+    )
+
+    assert find_matches(_rule(BreakClass.VALIDATOR_FIELD_CONFIG), root).count == 1
+
+
+def test_the_v1_compatibility_namespace_is_not_this_break(tmp_path: Path) -> None:
+    """`pydantic.v1` is v2's bundled copy of the old API.
+
+    Code importing from it kept v1 behaviour on purpose, so the v2 signature
+    change does not apply. Counting it would inflate the number with sites that
+    are not broken.
+    """
+    root = _tree(
+        tmp_path,
+        {
+            "from_import.py": """
+            from pydantic.v1 import validator
+
+            class Legacy:
+                @validator("x")
+                def check(cls, value, field):
+                    return value
+            """,
+            "module_import.py": """
+            import pydantic.v1 as pv1
+
+            class AlsoLegacy:
+                @pv1.validator("x")
+                def check(cls, value, config):
+                    return value
+            """,
+        },
+    )
+
+    assert find_matches(_rule(BreakClass.VALIDATOR_FIELD_CONFIG), root).count == 0
+
+
 def test_vendored_directories_are_not_scanned(tmp_path: Path) -> None:
     """Installed packages are not this project's code to change."""
     root = _tree(
@@ -243,6 +331,60 @@ def test_one_failure_can_imply_many_sites(tmp_path: Path) -> None:
 
     assert result.count == 3
     assert {match.path.name for match in result.matches} == {"one.py", "two.py"}
+
+
+def test_matches_come_back_in_a_stable_order(tmp_path: Path) -> None:
+    """ast.walk is documented to yield in no specified order.
+
+    The list is read in a pull request diff, so two runs over the same tree have
+    to produce the same order or the diff is noise.
+    """
+    root = _tree(
+        tmp_path,
+        {
+            "b.py": """
+            from pydantic import BaseModel
+
+            class Second(BaseModel):
+                __root__: int
+
+            class First(BaseModel):
+                __root__: str
+            """,
+            "a.py": """
+            from pydantic import BaseModel
+
+            class Only(BaseModel):
+                __root__: bytes
+            """,
+        },
+    )
+
+    matches = find_matches(_rule(BreakClass.ROOT_MODEL), root).matches
+
+    ordered = sorted(matches, key=lambda match: (match.path.as_posix(), match.line))
+    assert list(matches) == ordered
+    assert [match.path.name for match in matches] == ["a.py", "b.py", "b.py"]
+
+
+def test_a_source_with_a_coding_cookie_is_read_not_written_off(tmp_path: Path) -> None:
+    """PEP 263 says a Python file may declare its own encoding.
+
+    Forcing UTF-8 marked such a file unreadable, which undercounted the matches
+    and reported the scan incomplete for a file Python itself parses fine.
+    """
+    tmp_path.joinpath("latin.py").write_bytes(
+        "# -*- coding: latin-1 -*-\n"
+        "from pydantic import BaseModel\n\n"
+        "NOTE = 'caf\xe9'\n\n"
+        "class Model(BaseModel):\n"
+        "    __root__: int\n".encode("latin-1")
+    )
+
+    result = find_matches(_rule(BreakClass.ROOT_MODEL), tmp_path)
+
+    assert result.count == 1
+    assert result.is_complete
 
 
 def test_a_match_carries_the_line_and_the_source(tmp_path: Path) -> None:
