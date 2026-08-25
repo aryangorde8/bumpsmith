@@ -202,7 +202,7 @@ def _split_symbol(symbol: str | None) -> tuple[str, str] | None:
 
 
 @dataclass(frozen=True, slots=True)
-class _PydanticNames:
+class PydanticNames:
     """The names in one module that demonstrably came from pydantic.
 
     This is what separates a rule from a search-and-replace. ``validator`` is an
@@ -239,7 +239,7 @@ def _is_pydantic_path(dotted: str) -> bool:
     return dotted == "pydantic" or dotted.startswith("pydantic.")
 
 
-def _module_scope_nodes(tree: ast.Module) -> Iterator[ast.AST]:
+def module_scope_nodes(tree: ast.Module) -> Iterator[ast.AST]:
     """Yield every node reachable without entering a function body.
 
     A decorator resolves through module globals, and inside a class body through
@@ -262,10 +262,10 @@ def _module_scope_nodes(tree: ast.Module) -> Iterator[ast.AST]:
         pending.extend(ast.iter_child_nodes(node))
 
 
-def _pydantic_names(tree: ast.Module) -> _PydanticNames:
+def pydantic_names(tree: ast.Module) -> PydanticNames:
     direct: dict[str, str] = {}
     modules: set[str] = set()
-    for node in _module_scope_nodes(tree):
+    for node in module_scope_nodes(tree):
         if isinstance(node, ast.ImportFrom):
             # node.level > 0 is a relative import: `from .utils import validator`
             # is the project's own module, whatever it happens to be called.
@@ -278,18 +278,20 @@ def _pydantic_names(tree: ast.Module) -> _PydanticNames:
                     continue
                 # `import pydantic.utils` binds `pydantic`; with `as` it binds the alias.
                 modules.add(alias.asname or alias.name.split(".")[0])
-    return _PydanticNames(direct=direct, modules=frozenset(modules))
+    return PydanticNames(direct=direct, modules=frozenset(modules))
 
 
-def _pydantic_callable(node: ast.expr, names: _PydanticNames) -> str | None:
-    """Return the pydantic function this expression refers to, or ``None``.
+def pydantic_name(node: ast.expr, names: PydanticNames) -> str | None:
+    """Return the pydantic object this expression refers to, or ``None``.
 
     Handles the four shapes a decorator takes: bare, called, attribute, and
     called attribute -- `@validator`, `@validator("x")`, `@pydantic.validator`,
-    `@pydantic.validator("x")`.
+    `@pydantic.validator("x")`. A base class is the same question asked of a
+    different position, so :mod:`bumpsmith.rewrite` resolves `BaseModel` through
+    here rather than repeating the alias handling and drifting from it.
     """
     if isinstance(node, ast.Call):
-        return _pydantic_callable(node.func, names)
+        return pydantic_name(node.func, names)
     if isinstance(node, ast.Name):
         return names.direct.get(node.id)
     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
@@ -299,14 +301,14 @@ def _pydantic_callable(node: ast.expr, names: _PydanticNames) -> str | None:
 
 def _validator_sites(tree: ast.Module) -> Iterator[int]:
     """Yield the line of every pydantic validator still taking `field` or `config`."""
-    names = _pydantic_names(tree)
+    names = pydantic_names(tree)
     if not names.direct and not names.modules:
         return
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         decorated = any(
-            (_pydantic_callable(decorator, names) or "") in _V1_VALIDATORS
+            (pydantic_name(decorator, names) or "") in _V1_VALIDATORS
             for decorator in node.decorator_list
         )
         if not decorated:
@@ -335,11 +337,16 @@ def _root_model_sites(tree: ast.Module) -> Iterator[int]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
-        yield from (statement.lineno for statement in node.body if _declares_root_field(statement))
+        yield from (statement.lineno for statement in node.body if declares_root_field(statement))
 
 
-def _declares_root_field(statement: ast.stmt) -> bool:
-    """True when this class-body statement declares ``__root__``, annotated or not."""
+def declares_root_field(statement: ast.stmt) -> bool:
+    """True when this class-body statement declares ``__root__``, annotated or not.
+
+    Public because :mod:`bumpsmith.rewrite` has to agree with the scan about what
+    counts as a site. Two definitions of the same thing drift, and the one that
+    drifts here would edit a line the scan never reported.
+    """
     if isinstance(statement, ast.AnnAssign):
         return isinstance(statement.target, ast.Name) and statement.target.id == _ROOT_FIELD
     if isinstance(statement, ast.Assign):
