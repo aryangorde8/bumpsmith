@@ -9,7 +9,9 @@ as a deny that reaches the harness, because the failure this module exists to
 prevent is a client answering about a call it never read.
 """
 
+import json
 from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -451,3 +453,155 @@ def test_a_generator_of_events_is_read_once_for_every_call() -> None:
 
     assert [a.status for a in answers] == ["allowed", "allowed"]
     assert len(channel.sent) == 2
+
+
+# ---------------------------------------------------------------------------
+# the harness's call_tool wrapper
+# ---------------------------------------------------------------------------
+
+
+def _wrapped(arguments: str) -> dict[str, object]:
+    """A ``call_tool`` call: a system tool whose arguments name the real one."""
+    return _tool_call(name="call_tool", origin="truefoundry-system", arguments=arguments)
+
+
+WRAPPED_ARGS = json.dumps(
+    {
+        "mcp_server": "irreversible-things",
+        "tool_name": "open_pull_request",
+        "input": {"repository": "aryangorde8/bumpsmith", "branch": "wip", "title": "a change"},
+    }
+)
+
+
+def test_a_wrapped_call_is_named_as_the_tool_that_will_run() -> None:
+    question = read_question(_question_event())
+    call = read_call(question, question.calls[0], [_model_message(calls=[_wrapped(WRAPPED_ARGS)])])
+
+    assert (call.tool, call.origin) == ("open_pull_request", "mcp:irreversible-things")
+    assert call.via == "call_tool"
+    assert call.arguments == WRAPPED_ARGS
+
+
+def test_a_wrapped_call_shows_the_arguments_the_tool_receives() -> None:
+    """The wrapper's own keys are the same three every time and say nothing."""
+    question = read_question(_question_event())
+    request = describe(
+        read_call(question, question.calls[0], [_model_message(calls=[_wrapped(WRAPPED_ARGS)])])
+    )
+
+    assert request.action == "harness.tool_call:open_pull_request"
+    assert "arguments: branch, repository, title" in request.summary
+    assert "mcp_server" not in request.summary
+    assert request.detail["via"] == "call_tool"
+    assert request.detail["arguments"] == WRAPPED_ARGS
+
+
+def test_a_direct_call_says_nothing_about_a_wrapper() -> None:
+    question = read_question(_question_event())
+    request = describe(read_call(question, question.calls[0], [_model_message()]))
+
+    assert "via" not in request.detail
+    assert "reached through" not in request.summary
+
+
+def test_a_wrapped_call_with_no_input_has_no_arguments() -> None:
+    question = read_question(_question_event())
+    arguments = json.dumps({"mcp_server": "s", "tool_name": "ping"})
+    request = describe(
+        read_call(question, question.calls[0], [_model_message(calls=[_wrapped(arguments)])])
+    )
+
+    assert "no arguments" in request.summary
+
+
+def test_a_wrapped_call_whose_input_is_not_an_object_says_so() -> None:
+    question = read_question(_question_event())
+    arguments = json.dumps({"mcp_server": "s", "tool_name": "ping", "input": ["one"]})
+    request = describe(
+        read_call(question, question.calls[0], [_model_message(calls=[_wrapped(arguments)])])
+    )
+
+    assert "not a JSON object" in request.summary
+
+
+@pytest.mark.parametrize(
+    ("arguments", "fragment"),
+    [
+        ("not json", "which server"),
+        (json.dumps({"tool_name": "open_pull_request"}), "which server"),
+        (json.dumps({"mcp_server": "  "}), "which server"),
+        (json.dumps({"mcp_server": "s"}), "which tool"),
+        (json.dumps({"mcp_server": "s", "tool_name": ""}), "which tool"),
+    ],
+)
+def test_a_wrapper_that_does_not_say_what_it_would_call_is_unreadable(
+    arguments: str, fragment: str
+) -> None:
+    question = read_question(_question_event())
+    with pytest.raises(UnreadableCallError, match=fragment):
+        read_call(question, question.calls[0], [_model_message(calls=[_wrapped(arguments)])])
+
+
+@pytest.mark.parametrize("field", ["server_name", "server_id"])
+def test_a_server_the_harness_could_not_resolve_is_not_an_attribution(field: str) -> None:
+    """`unknown` is the harness's filler, and `mcp:unknown` would read as a name."""
+    call = _tool_call()
+    cast("dict[str, object]", call["tool_info"])[field] = "unknown"
+    question = read_question(_question_event())
+
+    with pytest.raises(UnreadableCallError, match="could not resolve one"):
+        read_call(question, question.calls[0], [_model_message(calls=[call])])
+
+
+# ---------------------------------------------------------------------------
+# against events the harness really produced
+# ---------------------------------------------------------------------------
+
+RECORDED = Path(__file__).parent / "data" / "approval-call-tool.json"
+RECORDED_ASKED = "01m0x812624c5jf5wkw9qwzjqt"
+RECORDED_UNRESOLVED = "01m0x80xcv0rmj9h5dt19shskc"
+
+
+def _recorded() -> tuple[dict[str, object], list[dict[str, object]]]:
+    payload = json.loads(RECORDED.read_text(encoding="utf-8"))
+    return payload["question"], payload["events"]
+
+
+def test_the_recorded_event_names_the_wrapper_and_not_the_tool() -> None:
+    """The fact the unwrapping exists for, pinned against a real recording."""
+    _, events = _recorded()
+    (asking,) = [event for event in events if event["id"] == RECORDED_ASKED]
+    (call,) = cast("Sequence[Mapping[str, object]]", asking["tool_calls"])
+
+    assert cast("Mapping[str, object]", call["function"])["name"] == "call_tool"
+    assert call["tool_info"] == {"type": "truefoundry-system", "name": "call_tool"}
+
+
+def test_a_real_paused_call_is_read_back_to_what_it_would_have_done() -> None:
+    bridge, gate, approver, channel = _bridge(_no)
+    question_event, events = _recorded()
+
+    (answer,) = bridge.answer(question_event, events)
+
+    assert answer.status == "denied"
+    assert answer.request.action == "harness.tool_call:open_pull_request"
+    assert answer.request.detail["origin"] == "mcp:irreversible-things"
+    assert answer.request.detail["via"] == "call_tool"
+    assert "arguments: branch, repository, title" in answer.request.summary
+    assert approver.seen[0].detail["tool"] == "open_pull_request"
+    assert channel.sent[0]["tool_call_id"] == "call_2bd2ef15af4b4203b789a730"
+    assert [r.outcome for r in gate.history] == ["denied"]
+
+
+def test_the_recorded_unresolved_server_is_refused() -> None:
+    """The same run also holds a call the harness could not attribute to a server."""
+    _, events = _recorded()
+    (asking,) = [event for event in events if event["id"] == RECORDED_UNRESOLVED]
+    (call,) = cast("Sequence[Mapping[str, object]]", asking["tool_calls"])
+    question = read_question(
+        _question_event(refs=((cast("str", call["id"]), RECORDED_UNRESOLVED),))
+    )
+
+    with pytest.raises(UnreadableCallError, match="could not resolve one"):
+        read_call(question, question.calls[0], events)
