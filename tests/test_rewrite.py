@@ -464,3 +464,72 @@ def test_two_declarations_on_one_line_are_both_rewritten(tmp_path: Path) -> None
     assert "__root__" not in after
     assert after.count("root = ") == 2
     assert result.rewritten == 2
+
+
+# ---------------------------------------------------------------------------
+# Class 3 -- the whole break is one word, which makes it a check on the machinery
+# ---------------------------------------------------------------------------
+
+
+_REGEX_RULE = Rule(
+    break_class=BreakClass.REGEX_KEYWORD,
+    kind=RuleKind.SOURCE,
+    summary="Rename the `regex=` argument to `pattern=`",
+    rationale="v2 renamed the constraint on Field and the constrained-string constructors.",
+)
+
+
+def _regex_plan(tmp_path: Path) -> Plan:
+    return plan(_REGEX_RULE, find_matches(_REGEX_RULE, tmp_path))
+
+
+def test_only_the_keyword_changes(tmp_path: Path) -> None:
+    source = """from pydantic import BaseModel, Field, constr
+
+
+class Account(BaseModel):
+    # regex in a comment must survive, and so must the pattern text itself
+    sort_code: str = Field(..., regex=r"^\\d{2}-regex-\\d{2}$")
+    branch: constr(regex=r"^\\w+$") = "x"
+"""
+    path = _write(tmp_path, "models.py", source)
+    result = _regex_plan(tmp_path)
+    assert result.is_complete, [str(s) for s in result.skipped]
+    after = result.edits[0].after
+
+    changed = _changed_lines(path.read_text(), after)
+    assert [line for line, _, _ in changed] == [6, 7]
+    assert 'Field(..., pattern=r"^\\d{2}-regex-\\d{2}$")' in after
+    assert 'constr(pattern=r"^\\w+$")' in after
+    assert "# regex in a comment must survive" in after
+    assert result.rewritten == 2
+
+
+def test_two_on_one_line_both_change(tmp_path: Path) -> None:
+    """The scan reports a line per site, so one line can be reported twice.
+
+    Applying the same line's replacements twice would corrupt it, and reporting
+    only one of them would leave the file broken in a way that looks fixed.
+    """
+    _write(
+        tmp_path,
+        "models.py",
+        'from pydantic import constr\n\nx = (constr(regex=r"^a$"), constr(regex=r"^b$"))\n',
+    )
+    result = _regex_plan(tmp_path)
+
+    after = result.edits[0].after
+    assert after.count("pattern=") == 2
+    assert "regex=" not in after
+
+
+def test_a_lookalike_from_another_library_is_left_alone(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "models.py",
+        'from mylib.helpers import constr\n\nx = constr(regex=r"^a$")\n',
+    )
+    result = _regex_plan(tmp_path)
+
+    assert result.edits == ()
+    assert result.skipped == ()

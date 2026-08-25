@@ -154,6 +154,19 @@ def write_rule(failure: Failure) -> Rule | None:
             ),
         )
 
+    if failure.break_class is BreakClass.REGEX_KEYWORD:
+        return Rule(
+            break_class=failure.break_class,
+            kind=RuleKind.SOURCE,
+            summary="Rename the `regex=` argument to `pattern=`",
+            rationale=(
+                "v2 renamed the constraint from `regex` to `pattern` on both `Field` and the "
+                "constrained-string constructors. `Field` reports it as a PydanticUserError "
+                "carrying `removed-kwargs`; `constr` never gets that far, because Python "
+                "rejects the unexpected keyword while binding the arguments."
+            ),
+        )
+
     if failure.break_class is BreakClass.REMOVED_INTERNAL:
         symbol = _split_symbol(failure.symbol)
         if symbol is None:
@@ -357,6 +370,32 @@ def declares_root_field(statement: ast.stmt) -> bool:
     return False
 
 
+_REGEX_CALLABLES = frozenset({"Field", "constr"})
+"""The pydantic callables observed taking `regex=`.
+
+`conint` and the rest of the constrained-type constructors never had it, so
+matching on the keyword alone would report sites that were never broken.
+"""
+
+
+def regex_keyword_sites(tree: ast.Module) -> Iterator[tuple[int, ast.keyword]]:
+    """Yield every `regex=` argument passed to one of pydantic's own callables.
+
+    The keyword node comes back with the line because the rewrite needs the
+    column too, and recomputing it from the line would mean finding the word
+    `regex` in text that may legitimately contain it more than once.
+    """
+    names = pydantic_names(tree)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if pydantic_name(node, names) not in _REGEX_CALLABLES:
+            continue
+        for word in node.keywords:
+            if word.arg == "regex":
+                yield word.lineno, word
+
+
 def _removed_import_sites(tree: ast.Module, module: str, name: str) -> Iterator[int]:
     """Yield the line of every ``from <module> import <name>``.
 
@@ -374,6 +413,8 @@ def _sites(rule: Rule, tree: ast.Module) -> Iterator[int]:
         return _validator_sites(tree)
     if rule.break_class is BreakClass.ROOT_MODEL:
         return _root_model_sites(tree)
+    if rule.break_class is BreakClass.REGEX_KEYWORD:
+        return (line for line, _ in regex_keyword_sites(tree))
     if rule.break_class is BreakClass.REMOVED_INTERNAL and rule.module and rule.name:
         return _removed_import_sites(tree, rule.module, rule.name)
     return iter(())

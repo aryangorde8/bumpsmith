@@ -1,0 +1,19 @@
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_account.py ____________________
+tests/test_account.py:1: in <module>
+    from mypkg import Account
+mypkg/__init__.py:4: in <module>
+    class Account(BaseModel):
+mypkg/__init__.py:5: in Account
+    sort_code: str = Field(..., regex=r"^\d{2}-\d{2}-\d{2}$")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/work/.venv/lib/python3.13/site-packages/pydantic/fields.py:1322: in Field
+    raise PydanticUserError('`regex` is removed. use `pattern` instead', code='removed-kwargs')
+E   pydantic.errors.PydanticUserError: `regex` is removed. use `pattern` instead
+E   
+E   For further information visit https://errors.pydantic.dev/2.12/u/removed-kwargs
+=========================== short test summary info ============================
+ERROR tests/test_account.py - pydantic.errors.PydanticUserError: `regex` is r...
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.27s

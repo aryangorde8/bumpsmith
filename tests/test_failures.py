@@ -327,3 +327,60 @@ def test_each_error_keeps_its_own_culprit_and_code() -> None:
 
     assert removed.pydantic_code == "import-error"
     assert str(removed.culprit) == "connect/eaas/core/proto.py:10"
+
+
+# --------------------------------------------------------------------------
+# Class 3 -- one break, two signatures, only one of them carrying a slug.
+# --------------------------------------------------------------------------
+
+
+def test_a_field_regex_break_is_classified_from_its_slug() -> None:
+    (failure,) = parse_failures(_recorded("field-regex"), returncode=2)
+
+    assert failure.break_class is BreakClass.REGEX_KEYWORD
+    assert failure.pydantic_code == "removed-kwargs"
+    assert str(failure.culprit) == "mypkg/__init__.py:5"
+
+
+def test_a_constr_regex_break_arrives_with_no_slug_at_all() -> None:
+    """`constr(regex=...)` never reaches pydantic's error machinery.
+
+    Python rejects the keyword while binding the call, so there is no code and no
+    docs link -- the same situation as `__root__`, reached a different way.
+    """
+    (failure,) = parse_failures(
+        _recorded("B-regex"), returncode=2, project_packages=frozenset({"emnify"})
+    )
+
+    assert failure.break_class is BreakClass.REGEX_KEYWORD
+    assert failure.pydantic_code is None
+    assert failure.error_type == "TypeError"
+
+
+def test_the_culprit_is_the_project_line_not_the_standard_library() -> None:
+    """A uv-managed interpreter keeps CPython outside any `site-packages`.
+
+    The deepest frame in this traceback is `typing.py`, reached through an
+    annotation pydantic was evaluating. Testing only for `site-packages` made the
+    standard library read as project code, and the answer to "where is the break"
+    came back as a line in `typing.py`.
+    """
+    recorded = _recorded("B-regex")
+    assert "/lib/python3.13/typing.py" in recorded, "the recording no longer has a stdlib frame"
+
+    (failure,) = parse_failures(recorded, returncode=2, project_packages=frozenset({"emnify"}))
+
+    assert str(failure.culprit) == "emnify/modules/api/models.py:640"
+
+
+def test_the_same_keyword_from_something_that_is_not_pydantic_is_not_this_class() -> None:
+    """The phrase is generic; the callable is not.
+
+    Any function in any library can be handed an unexpected `regex` argument, and
+    filing those here would be a confident answer to a question nobody asked.
+    """
+    mutated = _recorded("B-regex").replace("constr()", "some_other_helper()")
+
+    (failure,) = parse_failures(mutated, returncode=2, project_packages=frozenset({"emnify"}))
+
+    assert failure.break_class is BreakClass.UNKNOWN

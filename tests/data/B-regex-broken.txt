@@ -1,0 +1,155 @@
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_emnify.py _____________________
+tests/test_emnify.py:9: in <module>
+    from emnify.emnify import EMnify as emnify_client
+emnify/__init__.py:1: in <module>
+    from .emnify import EMnify
+emnify/emnify.py:4: in <module>
+    from .modules.device.manager import DeviceManager
+emnify/modules/device/manager.py:2: in <module>
+    import emnify.modules.device.api_call_manager as device_call_managers
+emnify/modules/device/api_call_manager.py:2: in <module>
+    from emnify.api_manager import BaseApiManager
+emnify/api_manager.py:6: in <module>
+    from emnify.modules.api.models import AuthenticationResponse
+emnify/modules/api/models.py:640: in <module>
+    class EndpointQuota(BaseModel):
+../../venv-b2/lib/python3.13/site-packages/pydantic/_internal/_model_construction.py:242: in __new__
+    set_model_fields(cls, config_wrapper=config_wrapper, ns_resolver=ns_resolver)
+../../venv-b2/lib/python3.13/site-packages/pydantic/_internal/_model_construction.py:566: in set_model_fields
+    fields, class_vars = collect_model_fields(cls, config_wrapper, ns_resolver, typevars_map=typevars_map)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../venv-b2/lib/python3.13/site-packages/pydantic/_internal/_fields.py:256: in collect_model_fields
+    type_hints = _typing_extra.get_model_type_hints(cls, ns_resolver=ns_resolver)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../venv-b2/lib/python3.13/site-packages/pydantic/_internal/_typing_extra.py:350: in get_model_type_hints
+    hints[name] = try_eval_type(value, globalns, localns)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../venv-b2/lib/python3.13/site-packages/pydantic/_internal/_typing_extra.py:404: in try_eval_type
+    return eval_type_backport(value, globalns, localns), True
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../venv-b2/lib/python3.13/site-packages/pydantic/_internal/_typing_extra.py:455: in eval_type_backport
+    return _eval_type_backport(value, globalns, localns, type_params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../venv-b2/lib/python3.13/site-packages/pydantic/_internal/_typing_extra.py:492: in _eval_type_backport
+    return _eval_type(value, globalns, localns, type_params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../venv-b2/lib/python3.13/site-packages/pydantic/_internal/_typing_extra.py:541: in _eval_type
+    return typing._eval_type(  # type: ignore
+../../../.local/share/uv/python/cpython-3.13.15-linux-x86_64-gnu/lib/python3.13/typing.py:474: in _eval_type
+    return t._evaluate(globalns, localns, type_params, recursive_guard=recursive_guard)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../.local/share/uv/python/cpython-3.13.15-linux-x86_64-gnu/lib/python3.13/typing.py:1077: in _evaluate
+    eval(self.__forward_code__, globalns, localns),
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<string>:1: in <module>
+    ???
+E   TypeError: constr() got an unexpected keyword argument 'regex'
+E   Unable to evaluate type annotation "Optional[constr(regex='^\\\\d{4}-\\\\d{2}-\\\\d{2} \\\\d{2}:\\\\d{2}:\\\\d{2}$')]".
+=============================== warnings summary ===============================
+emnify/modules/api/models.py:490
+  /work/repo/emnify/modules/api/models.py:490: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    submit_date: Optional[str] = Field(None, example="10/5/2019 1:56:59 PM")
+
+emnify/modules/api/models.py:491
+  /work/repo/emnify/modules/api/models.py:491: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    delivery_date: Optional[str] = Field(None, example="10/5/2019 1:56:59 PM")
+
+emnify/modules/api/models.py:492
+  /work/repo/emnify/modules/api/models.py:492: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    expiry_date: Optional[str] = Field(None, example="10/6/2019 1:56:59 PM")
+
+emnify/modules/api/models.py:493
+  /work/repo/emnify/modules/api/models.py:493: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    final_date: Optional[str] = Field(None, example="10/5/2019 1:57:03 PM")
+
+emnify/modules/api/models.py:495
+  /work/repo/emnify/modules/api/models.py:495: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    last_delivery_attempt: Optional[str] = Field(None, example="10/5/2019 1:57:00 PM")
+
+emnify/modules/api/models.py:496
+  /work/repo/emnify/modules/api/models.py:496: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    retry_count: Optional[str] = Field(None, example=0)
+
+emnify/modules/api/models.py:498
+  /work/repo/emnify/modules/api/models.py:498: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    dcs: Optional[int] = Field(None, example=0)
+
+emnify/modules/api/models.py:499
+  /work/repo/emnify/modules/api/models.py:499: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    pid: Optional[int] = Field(None, example=0)
+
+emnify/modules/api/models.py:500
+  /work/repo/emnify/modules/api/models.py:500: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    source_address: Optional[str] = Field(None, example=1234567890)
+
+emnify/modules/api/models.py:501
+  /work/repo/emnify/modules/api/models.py:501: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    endpoint: Optional[Dict[str, Any]] = Field(
+
+emnify/modules/api/models.py:504
+  /work/repo/emnify/modules/api/models.py:504: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    sim_id: Optional[str] = Field(None, example=625)
+
+emnify/modules/api/models.py:505
+  /work/repo/emnify/modules/api/models.py:505: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    iccid: Optional[str] = Field(None, example=8988303000000001000)
+
+emnify/modules/api/models.py:506
+  /work/repo/emnify/modules/api/models.py:506: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    msisdn: Optional[str] = Field(None, example="883XXXXXXXXXXXX")
+
+emnify/modules/api/models.py:507
+  /work/repo/emnify/modules/api/models.py:507: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    imsi: Optional[str] = Field(None, example="901XXXXXXXXXXXX")
+
+emnify/modules/api/models.py:508
+  /work/repo/emnify/modules/api/models.py:508: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    msc: Optional[str] = Field(None, example=491600190000)
+
+emnify/modules/api/models.py:510
+  /work/repo/emnify/modules/api/models.py:510: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    payload: Optional[str] = Field(None, example="test")
+
+emnify/modules/api/models.py:511
+  /work/repo/emnify/modules/api/models.py:511: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    id: Optional[int] = Field(None, example=590)
+
+emnify/modules/api/models.py:512
+  /work/repo/emnify/modules/api/models.py:512: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    status: Optional[Dict[str, Any]] = Field(
+
+emnify/modules/api/models.py:515
+  /work/repo/emnify/modules/api/models.py:515: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    sms_type: Optional[Dict[str, Any]] = Field(
+
+emnify/modules/api/models.py:518
+  /work/repo/emnify/modules/api/models.py:518: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    source_address_type: Optional[Dict[str, Any]] = Field(
+
+emnify/modules/api/models.py:562
+  /work/repo/emnify/modules/api/models.py:562: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    root: Any = Field(
+
+emnify/modules/api/models.py:570
+  /work/repo/emnify/modules/api/models.py:570: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    root: Any = Field(
+
+emnify/modules/api/models.py:578
+  /work/repo/emnify/modules/api/models.py:578: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    id: Optional[int] = Field(None, example=1)
+
+emnify/modules/api/models.py:579
+  /work/repo/emnify/modules/api/models.py:579: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    name: Optional[str] = Field(None, example="Telekom")
+
+emnify/modules/api/models.py:580
+  /work/repo/emnify/modules/api/models.py:580: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'example'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    country: Optional[Dict[str, Any]] = Field(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+ERROR tests/test_emnify.py - TypeError: constr() got an unexpected keyword ar...
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+25 warnings, 1 error in 0.74s

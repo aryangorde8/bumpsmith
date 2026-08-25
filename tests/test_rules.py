@@ -520,3 +520,72 @@ def test_the_removed_import_rule_carries_the_symbol_from_the_recording() -> None
     assert rule is not None
     assert rule.module == "pydantic.utils"
     assert rule.name == "DUNDER_ATTRIBUTES"
+
+
+# --------------------------------------------------------------------------
+# Class 3 -- the `regex=` keyword.
+# --------------------------------------------------------------------------
+
+
+_REGEX_FAILURE = Failure(
+    shape=RunShape.COLLECTION_ERROR,
+    break_class=BreakClass.REGEX_KEYWORD,
+    error_type="TypeError",
+    message="constr() got an unexpected keyword argument 'regex'",
+    culprit=None,
+)
+
+
+def test_a_regex_failure_becomes_a_rename_rule() -> None:
+    rule = write_rule(_REGEX_FAILURE)
+
+    assert rule is not None
+    assert rule.kind is RuleKind.SOURCE
+    assert "pattern" in rule.summary
+
+
+def test_both_pydantic_callables_that_took_regex_are_found(tmp_path: Path) -> None:
+    (tmp_path / "models.py").write_text(
+        "from pydantic import BaseModel, Field, constr\n"
+        "\n"
+        "\n"
+        "class Account(BaseModel):\n"
+        '    sort_code: str = Field(..., regex=r"^\\d+$")\n'
+        '    branch: constr(regex=r"^\\w+$") = "x"\n'
+    )
+    rule = write_rule(_REGEX_FAILURE)
+    assert rule is not None
+
+    scan = find_matches(rule, tmp_path)
+
+    assert scan.count == 2
+    assert [m.line for m in scan.matches] == [5, 6]
+
+
+def test_a_regex_argument_to_something_else_is_not_a_site(tmp_path: Path) -> None:
+    """`constr` is an ordinary identifier until an import says otherwise.
+
+    This is the same discipline as the validator rule: whether a name is
+    pydantic's depends on what the module imported, never on how it is spelled.
+    """
+    (tmp_path / "models.py").write_text(
+        "from mylib.helpers import constr, Field\n"
+        "\n"
+        "\n"
+        'x = constr(regex=r"^\\d+$")\n'
+        'y = Field(regex=r"^\\d+$")\n'
+    )
+    rule = write_rule(_REGEX_FAILURE)
+    assert rule is not None
+
+    assert find_matches(rule, tmp_path).count == 0
+
+
+def test_an_aliased_constr_is_still_found(tmp_path: Path) -> None:
+    (tmp_path / "models.py").write_text(
+        'from pydantic import constr as constrained\n\n\nx = constrained(regex=r"^\\d+$")\n'
+    )
+    rule = write_rule(_REGEX_FAILURE)
+    assert rule is not None
+
+    assert find_matches(rule, tmp_path).count == 1

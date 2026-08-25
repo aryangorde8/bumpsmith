@@ -66,9 +66,11 @@ _TRAILER = re.compile(
     r"^(?:=+ (?:warnings summary|short test summary info)|!+ Interrupted:)", re.MULTILINE
 )
 
-# Anything under an installed-packages directory is the library's own stack,
-# not code this project can edit.
+# Anything under an installed-packages directory is the library's own stack, and
+# anything under an interpreter's own `lib/pythonX.Y` is the standard library's.
+# Neither is code this project can edit.
 _VENDORED = "site-packages"
+_STDLIB = re.compile(r"/lib/python\d+\.\d+/")
 
 
 class RunShape(Enum):
@@ -157,6 +159,15 @@ class BreakClass(Enum):
     VALIDATOR_FIELD_CONFIG = 1
     """``@validator`` taking ``field`` or ``config``, which V2 replaced with ``info``."""
 
+    REGEX_KEYWORD = 3
+    """A ``regex=`` argument, which V2 renamed to ``pattern=``.
+
+    Two signatures reach here and only one carries pydantic's slug. ``Field``
+    raises ``PydanticUserError`` with ``removed-kwargs``; ``constr`` raises a
+    plain builtin ``TypeError`` from Python's own argument binding, before
+    pydantic sees the call at all. Both are recorded samples.
+    """
+
     ROOT_MODEL = 4
     """A field named ``__root__``, which V2 replaced with ``pydantic.RootModel``."""
 
@@ -177,9 +188,18 @@ class Frame:
     line: int
 
     @property
-    def is_vendored(self) -> bool:
-        """True when this frame is inside installed packages rather than the project."""
-        return _VENDORED in self.path
+    def is_foreign(self) -> bool:
+        """True when this frame is somebody else's code rather than the project's.
+
+        Two kinds of somebody else: installed packages under `site-packages`, and
+        the standard library under an interpreter's own `lib/pythonX.Y`. Testing
+        for the first alone was enough until a uv-managed interpreter turned up.
+        uv keeps CPython under `~/.local/share/uv/python/cpython-.../lib/python3.13/`,
+        which contains no `site-packages`, so `typing.py` read as project code --
+        and a tool whose job is to say where the break is would have answered
+        with a line in the standard library.
+        """
+        return _VENDORED in self.path or _STDLIB.search(self.path) is not None
 
     def __str__(self) -> str:
         return f"{self.path}:{self.line}"
@@ -213,12 +233,12 @@ def _frames(text: str) -> list[Frame]:
 
 
 def _culprit(frames: list[Frame]) -> Frame | None:
-    """The last frame that is not inside installed packages.
+    """The last frame that is the project's own code.
 
     Tracebacks read outermost-first, so the project's own code sits between the
     entry point above it and the library that actually raised below it. Taking
-    the *last* non-vendored frame therefore lands on the deepest line the project
-    owns, which is the line to edit.
+    the *last* frame the project owns therefore lands on the deepest line it can
+    edit, which is the line to report.
 
     This relies on the project's frames all preceding the library's. That holds
     whenever a library raises during import or construction, which is every case
@@ -228,7 +248,7 @@ def _culprit(frames: list[Frame]) -> Frame | None:
     would report the callback, which is still a defensible answer.
     """
     for frame in reversed(frames):
-        if not frame.is_vendored:
+        if not frame.is_foreign:
             return frame
     return None
 
@@ -283,16 +303,19 @@ def _classify(
 ) -> BreakClass:
     """Decide which break this is, preferring pydantic's own error slug.
 
-    The slug is authoritative when present. It is absent for exactly one class:
-    a ``__root__`` field raises a plain builtin ``TypeError`` from inside
-    pydantic's namespace inspection, with no error code and no docs link. For
-    that class, and only that class, the English message text is load-bearing --
-    which is why the fallbacks below exist at all.
+    The slug is authoritative when present. It is absent for two signatures, and
+    for the same underlying reason: the failure happens before pydantic can
+    attach one. A ``__root__`` field raises a plain builtin ``TypeError`` from
+    pydantic's namespace inspection, and ``constr(regex=...)`` raises one from
+    Python's argument binding. For those two, and only those two, the English
+    message text is load-bearing -- which is why the fallbacks below exist.
     """
     if pydantic_code == "validator-field-config-info":
         return BreakClass.VALIDATOR_FIELD_CONFIG
     if pydantic_code == "import-error":
         return BreakClass.REMOVED_INTERNAL
+    if pydantic_code == "removed-kwargs":
+        return BreakClass.REGEX_KEYWORD
 
     if error_type is None or message is None:
         return BreakClass.UNKNOWN
@@ -315,6 +338,13 @@ def _classify(
 
     if error_type == "TypeError" and "__root__" in message and "RootModel" in message:
         return BreakClass.ROOT_MODEL
+
+    # `constr(regex=...)` fails in Python's argument binding, so pydantic never
+    # gets to attach a slug. Narrowed to the one callable that ever took `regex`
+    # rather than to the phrase alone, which any function in any library can
+    # produce.
+    if error_type == "TypeError" and "constr()" in message and "'regex'" in message:
+        return BreakClass.REGEX_KEYWORD
 
     if error_type.endswith("PydanticUserError") and "field" in message and "config" in message:
         return BreakClass.VALIDATOR_FIELD_CONFIG

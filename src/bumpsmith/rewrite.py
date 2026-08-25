@@ -37,9 +37,12 @@ from bumpsmith.rules import (
     declares_root_field,
     pydantic_name,
     pydantic_names,
+    regex_keyword_sites,
 )
 from bumpsmith.sources import read_source
 
+_V1_REGEX = "regex"
+_V2_PATTERN = "pattern"
 _ROOT_FIELD = "__root__"
 _V2_ROOT_FIELD = "root"
 _BASE_MODEL = "BaseModel"
@@ -450,6 +453,61 @@ def _plan_root_model_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None
     return (edit if edit.changes_anything else None), skipped
 
 
+def _plan_regex_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, list[Skipped]]:
+    """Rename `regex=` to `pattern=` at the sites the scan reported in one file.
+
+    The whole break is one word, which is what makes it a good check on the
+    machinery: if the diff for this is bigger than one word per site, the
+    machinery is wrong.
+    """
+    try:
+        source = read_source(path)
+        tree = ast.parse(source.text)
+    except _UNREADABLE as exc:
+        return None, [Skipped(path, line, f"could not be read: {exc!r}") for line in lines]
+
+    # Grouped rather than keyed one-to-one: two `regex=` arguments can share a
+    # line, and the scan reports a line per site, so the mapping is not unique.
+    by_line: dict[int, list[ast.keyword]] = {}
+    for line, word in regex_keyword_sites(tree):
+        by_line.setdefault(line, []).append(word)
+
+    replacements: dict[tuple[int, int], _Replacement] = {}
+    skipped: list[Skipped] = []
+    for line in lines:
+        words = by_line.get(line)
+        if not words:
+            skipped.append(Skipped(path, line, "the site the scan reported is not there any more"))
+            continue
+        for word in words:
+            replacements[(word.lineno, word.col_offset)] = _Replacement(
+                word.lineno, word.col_offset, _V1_REGEX, _V2_PATTERN
+            )
+
+    if not replacements:
+        return None, skipped
+
+    after = _replace(source.text, replacements.values())
+    if after is None:
+        reason = "the source moved under the positions the parser reported"
+        return None, [Skipped(path, line, reason) for line in lines]
+
+    edit = Edit(path=path, before=source.text, after=after, encoding=source.encoding)
+    return (edit if edit.changes_anything else None), skipped
+
+
+_PLANNERS = {
+    BreakClass.ROOT_MODEL: _plan_root_model_file,
+    BreakClass.REGEX_KEYWORD: _plan_regex_file,
+}
+"""The break classes that can be carried out, not the ones that can be named.
+
+A rule is useful output on its own -- it says what is wrong and where, and a
+person can act on it. Only some of them reduce to an edit safe enough to write
+without asking.
+"""
+
+
 def _by_path(matches: Sequence[Match]) -> dict[Path, list[int]]:
     grouped: dict[Path, list[int]] = {}
     for match in matches:
@@ -466,7 +524,8 @@ def plan(rule: Rule, scan: ScanResult) -> Plan:
     A scan that could not read every candidate file is still planned from what it
     did read; the incompleteness belongs to the scan and is reported there.
     """
-    if rule.break_class is not BreakClass.ROOT_MODEL:
+    planner = _PLANNERS.get(rule.break_class)
+    if planner is None:
         raise UnsupportedRuleError(
             f"no rewriter is written for {rule.break_class.name}; "
             f"the rule is still the useful output, but it cannot be applied automatically"
@@ -476,7 +535,7 @@ def plan(rule: Rule, scan: ScanResult) -> Plan:
     skipped: list[Skipped] = []
     rewritten = 0
     for path, lines in sorted(_by_path(scan.matches).items(), key=lambda item: item[0].as_posix()):
-        edit, file_skipped = _plan_root_model_file(path, sorted(lines))
+        edit, file_skipped = planner(path, sorted(lines))
         skipped.extend(file_skipped)
         if edit is not None:
             edits.append(edit)
