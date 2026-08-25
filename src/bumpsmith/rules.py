@@ -378,6 +378,100 @@ matching on the keyword alone would report sites that were never broken.
 """
 
 
+def _locally_bound(node: ast.AST) -> tuple[dict[str, str], set[str], set[str]]:
+    """What one function binds in its own scope.
+
+    Returns the pydantic names it imports, the pydantic *modules* it imports, and
+    every name it binds by any means. Nested functions and class bodies are not
+    descended into -- their bindings are theirs, not this scope's -- though the
+    name a nested `def` or `class` introduces is bound here and is collected.
+    """
+    direct: dict[str, str] = {}
+    modules: set[str] = set()
+    bound: set[str] = set()
+
+    arguments = getattr(node, "args", None)
+    if isinstance(arguments, ast.arguments):
+        for argument in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]:
+            bound.add(argument.arg)
+        for extra in (arguments.vararg, arguments.kwarg):
+            if extra is not None:
+                bound.add(extra.arg)
+
+    body = getattr(node, "body", [])
+    pending: list[ast.AST] = list(body) if isinstance(body, list) else [body]
+    while pending:
+        child = pending.pop()
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(child.name)
+            continue
+        if isinstance(child, ast.Lambda):
+            continue
+        if isinstance(child, ast.ImportFrom):
+            if child.level == 0 and child.module is not None and _is_pydantic_path(child.module):
+                for alias in child.names:
+                    direct[alias.asname or alias.name] = alias.name
+            bound.update(alias.asname or alias.name.split(".")[0] for alias in child.names)
+        elif isinstance(child, ast.Import):
+            for alias in child.names:
+                name = alias.asname or alias.name.split(".")[0]
+                bound.add(name)
+                if _is_pydantic_path(alias.name):
+                    modules.add(name)
+        elif isinstance(child, ast.Assign):
+            for target in child.targets:
+                bound.update(_target_names(target))
+        elif isinstance(
+            child, (ast.AnnAssign, ast.AugAssign, ast.For, ast.AsyncFor, ast.NamedExpr)
+        ):
+            bound.update(_target_names(child.target))
+        elif isinstance(child, ast.withitem) and child.optional_vars is not None:
+            bound.update(_target_names(child.optional_vars))
+        elif isinstance(child, ast.ExceptHandler) and child.name is not None:
+            bound.add(child.name)
+        pending.extend(ast.iter_child_nodes(child))
+    return direct, modules, bound
+
+
+def _target_names(target: ast.expr) -> Iterator[str]:
+    """The names one assignment target binds, unpacking as far as it goes."""
+    if isinstance(target, ast.Name):
+        yield target.id
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            yield from _target_names(element)
+    elif isinstance(target, ast.Starred):
+        yield from _target_names(target.value)
+
+
+def _inside(names: PydanticNames, node: ast.AST) -> PydanticNames:
+    """The names in scope inside one function, given the names outside it."""
+    direct, modules, bound = _locally_bound(node)
+    inherited = {name: real for name, real in names.direct.items() if name not in bound}
+    inherited.update(direct)
+    return PydanticNames(
+        direct=inherited,
+        modules=frozenset({m for m in names.modules if m not in bound} | modules),
+    )
+
+
+def calls_in_scope(node: ast.AST, names: PydanticNames) -> Iterator[tuple[ast.Call, PydanticNames]]:
+    """Every call in the tree, paired with the names actually visible where it sits.
+
+    One module-wide import map applied to the whole tree gets this wrong in both
+    directions: it misses a pydantic import made inside a function, and -- the
+    dangerous half -- it claims a *parameter* named `constr` is pydantic's and
+    rewrites a call that has nothing to do with pydantic.
+    """
+    if isinstance(node, ast.Call):
+        yield node, names
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            yield from calls_in_scope(child, _inside(names, child))
+        else:
+            yield from calls_in_scope(child, names)
+
+
 def regex_keyword_sites(tree: ast.Module) -> Iterator[tuple[int, ast.keyword]]:
     """Yield every `regex=` argument passed to one of pydantic's own callables.
 
@@ -385,11 +479,8 @@ def regex_keyword_sites(tree: ast.Module) -> Iterator[tuple[int, ast.keyword]]:
     column too, and recomputing it from the line would mean finding the word
     `regex` in text that may legitimately contain it more than once.
     """
-    names = pydantic_names(tree)
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        if pydantic_name(node, names) not in _REGEX_CALLABLES:
+    for node, scope in calls_in_scope(tree, pydantic_names(tree)):
+        if pydantic_name(node, scope) not in _REGEX_CALLABLES:
             continue
         for word in node.keywords:
             if word.arg == "regex":

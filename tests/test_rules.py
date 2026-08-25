@@ -589,3 +589,52 @@ def test_an_aliased_constr_is_still_found(tmp_path: Path) -> None:
     assert rule is not None
 
     assert find_matches(rule, tmp_path).count == 1
+
+
+def test_a_parameter_shadowing_a_pydantic_name_is_not_a_site(tmp_path: Path) -> None:
+    """The dangerous direction of getting scope wrong.
+
+    One module-wide import map applied to the whole tree says this `constr` is
+    pydantic's. It is a parameter, and rewriting the call would change code that
+    has nothing to do with pydantic.
+    """
+    (tmp_path / "models.py").write_text(
+        'from pydantic import constr\n\n\ndef build(constr):\n    return constr(regex=r"^a$")\n'
+    )
+    rule = write_rule(_REGEX_FAILURE)
+    assert rule is not None
+
+    assert find_matches(rule, tmp_path).count == 0
+
+
+def test_a_pydantic_import_made_inside_a_function_is_a_site(tmp_path: Path) -> None:
+    """The other direction, which the same mistake caused."""
+    (tmp_path / "models.py").write_text(
+        'def build():\n    from pydantic import constr\n    return constr(regex=r"^a$")\n'
+    )
+    rule = write_rule(_REGEX_FAILURE)
+    assert rule is not None
+
+    scan = find_matches(rule, tmp_path)
+    assert scan.count == 1
+    assert scan.matches[0].line == 3
+
+
+def test_a_name_shadowed_only_inside_a_function_still_matches_outside_it(
+    tmp_path: Path,
+) -> None:
+    """Shadowing is scoped, so refusing the whole file would be its own bug."""
+    (tmp_path / "models.py").write_text(
+        "from pydantic import constr\n"
+        "\n"
+        'OUTSIDE = constr(regex=r"^a$")\n'
+        "\n"
+        "\n"
+        "def build(constr):\n"
+        '    return constr(regex=r"^b$")\n'
+    )
+    rule = write_rule(_REGEX_FAILURE)
+    assert rule is not None
+
+    scan = find_matches(rule, tmp_path)
+    assert [m.line for m in scan.matches] == [3]

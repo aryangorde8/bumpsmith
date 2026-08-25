@@ -192,14 +192,21 @@ class Frame:
         """True when this frame is somebody else's code rather than the project's.
 
         Two kinds of somebody else: installed packages under `site-packages`, and
-        the standard library under an interpreter's own `lib/pythonX.Y`. Testing
-        for the first alone was enough until a uv-managed interpreter turned up.
+        the standard library under an interpreter's own `lib/pythonX.Y` *that the
+        run had to leave the project to reach*. Testing for the first alone was
+        enough until a uv-managed interpreter turned up.
         uv keeps CPython under `~/.local/share/uv/python/cpython-.../lib/python3.13/`,
         which contains no `site-packages`, so `typing.py` read as project code --
         and a tool whose job is to say where the break is would have answered
         with a line in the standard library.
         """
-        return _VENDORED in self.path or _STDLIB.search(self.path) is not None
+        if _VENDORED in self.path:
+            return True
+        # A stdlib-shaped substring is not proof of an interpreter root: a project
+        # holding its own `lib/python3.13/` directory reads the same. pytest
+        # prints project files relative to rootdir, so anything that has to climb
+        # out or start from the root is by definition not in the project.
+        return _STDLIB.search(self.path) is not None and self.path.startswith(("/", "../"))
 
     def __str__(self) -> str:
         return f"{self.path}:{self.line}"
@@ -314,8 +321,6 @@ def _classify(
         return BreakClass.VALIDATOR_FIELD_CONFIG
     if pydantic_code == "import-error":
         return BreakClass.REMOVED_INTERNAL
-    if pydantic_code == "removed-kwargs":
-        return BreakClass.REGEX_KEYWORD
 
     if error_type is None or message is None:
         return BreakClass.UNKNOWN
@@ -344,6 +349,14 @@ def _classify(
     # rather than to the phrase alone, which any function in any library can
     # produce.
     if error_type == "TypeError" and "constr()" in message and "'regex'" in message:
+        return BreakClass.REGEX_KEYWORD
+
+    # `removed-kwargs` is the one slug in the set that does not identify a single
+    # break: `const` and `unique_items` were removed too and raise it with the
+    # same code. Filing those here would write a regex rule, find whatever
+    # `regex=` sites happen to exist, and rewrite them -- leaving the argument
+    # that actually stopped collection exactly where it was.
+    if pydantic_code == "removed-kwargs" and "regex" in message:
         return BreakClass.REGEX_KEYWORD
 
     if error_type.endswith("PydanticUserError") and "field" in message and "config" in message:

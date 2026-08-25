@@ -533,3 +533,30 @@ def test_a_lookalike_from_another_library_is_left_alone(tmp_path: Path) -> None:
 
     assert result.edits == ()
     assert result.skipped == ()
+
+
+def test_a_same_line_site_that_vanished_is_not_covered_by_its_neighbour(
+    tmp_path: Path,
+) -> None:
+    """Two sites on one line, one gone since the scan.
+
+    Letting the survivor stand in for both reports two rewritten, writes one, and
+    calls the plan complete -- the combination that looks like success.
+    """
+    path = _write(
+        tmp_path, "models.py", 'from pydantic import constr\n\nx = constr(regex=r"^a$")\n'
+    )
+    scan = ScanResult(
+        matches=(
+            Match(path=path, line=3, excerpt="constr(regex=...)"),
+            Match(path=path, line=3, excerpt="constr(regex=...)"),
+        ),
+        unreadable=(),
+    )
+
+    result = plan(_REGEX_RULE, scan)
+
+    assert not result.is_complete
+    assert len(result.skipped) == 1
+    assert result.rewritten == 1
+    assert result.edits[0].after.count("pattern=") == 1

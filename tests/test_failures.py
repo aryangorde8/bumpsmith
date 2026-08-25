@@ -11,7 +11,7 @@ import pathlib
 
 import pytest
 
-from bumpsmith.failures import BreakClass, RunShape, parse_failures
+from bumpsmith.failures import BreakClass, Frame, RunShape, parse_failures
 
 DATA = pathlib.Path(__file__).parent / "data"
 
@@ -384,3 +384,36 @@ def test_the_same_keyword_from_something_that_is_not_pydantic_is_not_this_class(
     (failure,) = parse_failures(mutated, returncode=2, project_packages=frozenset({"emnify"}))
 
     assert failure.break_class is BreakClass.UNKNOWN
+
+
+def test_another_removed_keyword_sharing_the_slug_is_not_this_class() -> None:
+    """`removed-kwargs` does not identify one break.
+
+    `const` and `unique_items` were removed too and raise it with the same code.
+    Filing those here would write a regex rule, find whatever `regex=` sites
+    happen to exist, rewrite them, and leave the argument that actually stopped
+    collection exactly where it was.
+    """
+    mutated = _recorded("field-regex").replace(
+        "`regex` is removed. use `pattern` instead",
+        "`const` is removed, use `Literal` instead",
+    )
+
+    (failure,) = parse_failures(mutated, returncode=2)
+
+    assert failure.pydantic_code == "removed-kwargs"
+    assert failure.break_class is not BreakClass.REGEX_KEYWORD
+
+
+def test_a_project_directory_shaped_like_an_interpreter_is_still_the_project() -> None:
+    """A project may hold its own `lib/python3.13/` directory.
+
+    pytest prints project files relative to rootdir, so the discriminator is not
+    the substring but whether the run had to leave the project to reach the file.
+    """
+    assert not Frame(path="lib/python3.13/thing.py", line=1).is_foreign
+    assert not Frame(path="src/lib/python3.13/thing.py", line=1).is_foreign
+
+    assert Frame(path="/opt/python/lib/python3.13/typing.py", line=1).is_foreign
+    assert Frame(path="../../../uv/python/x/lib/python3.13/typing.py", line=1).is_foreign
+    assert Frame(path="../../.venv/lib/python3.13/site-packages/pydantic/x.py", line=1).is_foreign

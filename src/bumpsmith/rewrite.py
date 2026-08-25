@@ -474,15 +474,19 @@ def _plan_regex_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, lis
 
     replacements: dict[tuple[int, int], _Replacement] = {}
     skipped: list[Skipped] = []
-    for line in lines:
-        words = by_line.get(line)
-        if not words:
-            skipped.append(Skipped(path, line, "the site the scan reported is not there any more"))
-            continue
-        for word in words:
+    # Matched one occurrence to one keyword rather than line to line. Two sites
+    # can share a line, and if one of them has gone since the scan the other must
+    # not quietly stand in for it: that reports two rewritten, writes one, and
+    # calls the plan complete.
+    for line in sorted(set(lines)):
+        wanted = lines.count(line)
+        words = by_line.get(line, [])
+        for word in words[:wanted]:
             replacements[(word.lineno, word.col_offset)] = _Replacement(
                 word.lineno, word.col_offset, _V1_REGEX, _V2_PATTERN
             )
+        for _ in range(wanted - len(words[:wanted])):
+            skipped.append(Skipped(path, line, "the site the scan reported is not there any more"))
 
     if not replacements:
         return None, skipped
