@@ -1,7 +1,7 @@
 # Review log
 
-Every finding automated review has raised on this repository, and what happened
-to each one.
+Every finding raised on this repository — by automated review, or by running the
+thing against something real — and what happened to each one.
 
 This file exists because the pull requests alone do not answer the question a
 reader actually has. A finding that was fixed and a finding that nobody read
@@ -38,6 +38,11 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 17 | [#9](https://github.com/aryangorde8/bumpsmith/pull/9) | Symlink edit replaces the link | **Fixed** — reproduced | this PR |
 | 18 | [#9](https://github.com/aryangorde8/bumpsmith/pull/9) | CRLF round trip not exact | **Fixed** — reproduced | this PR |
 | 19 | [#9](https://github.com/aryangorde8/bumpsmith/pull/9) | Verify/apply race window | **Fixed** | this PR |
+| 32 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | Wrapper named instead of the tool — *raised by the live harness* | **Fixed** — reproduced twice, before and after | this PR |
+| 33 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | `mcp:unknown` reported as an attribution — *raised by the live harness* | **Fixed** | this PR |
+
+Rows 20–31 are described in the sections below rather than listed here; they
+arrived in groups and the group is the unit that makes sense of them.
 
 ---
 
@@ -456,6 +461,71 @@ exposure. It is **not** fixed here, for a stated reason: nothing rewrites that
 class yet, so the consequence is a miscounted report rather than changed code. It
 is fixed when the validator rewriter lands, which is when it starts to matter.
 Recording it so that finding it later is a confirmation rather than a discovery.
+
+## 32–33 · Two the harness raised before the reviewer saw them
+
+Different provenance from everything above, and worth the distinction: these two
+were not raised by a reviewer reading a diff. `harness.py` was written from
+TrueForge's own wire schema, its tests passed against events built from that
+schema, and then it was pointed at the running harness. The harness disagreed.
+
+**32 · The name in the approval event is not the name that runs.** A tool the
+harness has not put in the model's context is called through the harness's own
+`call_tool` wrapper. The `tool_info` on that call says `truefoundry-system` /
+`call_tool`, truthfully. What would actually run is in the *arguments*:
+
+```json
+{"mcp_server": "irreversible-things",
+ "tool_name": "open_pull_request",
+ "input": {"repository": "aryangorde8/bumpsmith", "branch": "...", "title": "..."}}
+```
+
+The module believed `tool_info`, so the first live run produced:
+
+```
+action   harness.tool_call:call_tool
+summary  run call_tool from truefoundry-system on thread main
+         (arguments: input, mcp_server, tool_name)
+```
+
+Every deferred call on the machine describes itself that way — listing a
+directory and opening a pull request are the same sentence. The harness itself
+does not work this way: `DeferredTool.toolCallInfo` resolves the wrapper before
+approval is decided, so the pause was earned by `open_pull_request`'s
+`destructiveHint` while the event reported the wrapper. Reading only `tool_info`
+means describing a different tool from the one the harness stopped.
+
+After the fix, the same call on a second live run:
+
+```
+action   harness.tool_call:open_pull_request
+summary  run open_pull_request from mcp:irreversible-things on thread main,
+         reached through the harness's call_tool
+         (arguments: branch, repository, title)
+```
+
+`arguments` still carries the wrapper's own string untouched — that is the text
+the harness parses, and re-encoding it would show a human one string while the
+harness acted on another. Only the argument *names* in the summary come from
+`input`.
+
+**33 · An attribution that is present, well-formed and worth nothing.** The same
+recording holds a call the harness could not resolve to a server:
+
+```json
+"tool_info": {"type": "mcp", "name": "open_pull_request",
+              "server_id": "unknown", "server_name": "unknown"}
+```
+
+`mcp:unknown` reads like a server name. Two servers can publish the same tool
+name, so an origin that cannot be trusted is an origin that cannot be reported.
+It is now unreadable, and therefore denied. This also refuses a server somebody
+deliberately named `unknown`; the two cannot be told apart from here, and
+inventing an attribution is the worse failure of the two.
+
+Both live runs, the event stream, and the `tool.response` the harness recorded
+are in `tests/data/approval-call-tool.json`, and the module is tested against
+that recording rather than only against events written by hand.
 
 ---
 
