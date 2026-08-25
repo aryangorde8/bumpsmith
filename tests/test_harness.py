@@ -19,7 +19,6 @@ import pytest
 from bumpsmith.gate import Allow, Decision, Deny, Gate, Request
 from bumpsmith.harness import (
     DENIED_BY,
-    Answer,
     ApprovalBridge,
     MalformedEventError,
     PendingCall,
@@ -108,6 +107,33 @@ def _no(request: Request) -> Decision:  # noqa: ARG001 -- the signature is the p
     return Deny(reason="not that command")
 
 
+def _no_then_yes() -> Callable[[Request], Decision]:
+    """An approver that changes its mind, which any approver with a human does."""
+    asked = 0
+
+    def decide(request: Request) -> Decision:
+        nonlocal asked
+        asked += 1
+        return Deny(reason="not that command") if asked == 1 else Allow(request.fingerprint())
+
+    return decide
+
+
+def _yes_then_no() -> Callable[[Request], Decision]:
+    asked = 0
+
+    def decide(request: Request) -> Decision:
+        nonlocal asked
+        asked += 1
+        return Allow(request.fingerprint()) if asked == 1 else Deny(reason="changed my mind")
+
+    return decide
+
+
+def _status(event: Mapping[str, object]) -> object:
+    return cast("Mapping[str, object]", event["approval"])["status"]
+
+
 class _Channel:
     """Records what was sent; fails the first ``failures`` sends if asked to."""
 
@@ -182,12 +208,32 @@ def test_read_call_reads_the_message_that_asked() -> None:
     assert call.arguments == '{"command": "rm -rf /srv", "timeout": 30}'
 
 
-def test_read_call_keeps_both_names_when_a_tool_was_remapped() -> None:
-    """The name the model called and the name on the server are different facts."""
+def test_a_remapped_tool_is_identified_by_the_name_it_has_on_the_server() -> None:
+    """The model-facing name is derived and can move; the server's name cannot.
+
+    The harness builds the model-facing name by sanitising the server's and
+    appending an ordinal when two servers publish the same one -- so `exec1` is
+    `exec` on whichever server registered second. A policy keyed to the alias is
+    keyed to registration order.
+    """
     question = read_question(_question_event())
-    message = _model_message(calls=[_tool_call(name="shell_exec", declared="exec")])
+    message = _model_message(calls=[_tool_call(name="exec1", declared="exec")])
     call = read_call(question, question.calls[0], [message])
-    assert (call.tool, call.declared_tool) == ("shell_exec", "exec")
+
+    assert (call.tool, call.called_as) == ("exec", "exec1")
+
+    request = describe(call)
+    assert request.action == "harness.tool_call:exec"
+    assert request.detail["called_as"] == "exec1"
+    assert "which the model called exec1" in request.summary
+
+
+def test_an_unremapped_tool_records_no_alias() -> None:
+    question = read_question(_question_event())
+    request = describe(read_call(question, question.calls[0], [_model_message()]))
+
+    assert "called_as" not in request.detail
+    assert "which the model called" not in request.summary
 
 
 def test_read_call_reads_a_system_tool() -> None:
@@ -405,41 +451,103 @@ def test_one_bad_call_does_not_take_the_good_one_with_it() -> None:
     ]
 
 
-def test_an_undelivered_denial_is_not_remembered_as_delivered() -> None:
-    """A send that failed left the turn paused; the next look must try again."""
+def test_a_denial_that_could_not_be_sent_is_re_sent_and_not_re_decided() -> None:
+    """A closed socket must not be able to turn a refusal into an approval.
+
+    The approver here answers differently the second time, which is what any
+    approver with a human or a clock behind it does. Asking it again after a
+    failed send is the bug; delivering the decision already made is not.
+    """
+    approver = _Approver(_no_then_yes())
     channel = _Channel(failures=1)
-    bridge = ApprovalBridge(Gate(_Approver(_no)), channel)
+    bridge = ApprovalBridge(Gate(approver), channel)
 
     with pytest.raises(ConnectionError):
         bridge.answer(_question_event(), [_model_message()])
-    assert bridge.answered == {}
+    assert [a.status for a in bridge.answered] == ["denied"]
 
     (answer,) = bridge.answer(_question_event(), [_model_message()])
+
     assert answer.status == "denied"
-    assert len(channel.sent) == 2
+    assert len(approver.seen) == 1
+    assert [_status(event) for event in channel.sent] == ["deny", "deny"]
 
 
-def test_an_effect_that_failed_after_approval_is_recorded_as_failed() -> None:
+def test_an_approval_that_could_not_be_sent_is_re_sent_and_not_re_decided() -> None:
+    """The same rule in the direction that does not look dangerous."""
+    approver = _Approver(_yes_then_no())
     channel = _Channel(failures=1)
-    gate = Gate(_Approver(_yes))
+    gate = Gate(approver)
     bridge = ApprovalBridge(gate, channel)
 
     with pytest.raises(ConnectionError):
         bridge.answer(_question_event(), [_model_message()])
 
     assert [r.outcome for r in gate.history] == ["failed"]
-    assert bridge.answered == {}
+    assert [a.status for a in bridge.answered] == ["allowed"]
+
+    (answer,) = bridge.answer(_question_event(), [_model_message()])
+
+    assert answer.status == "allowed"
+    assert len(approver.seen) == 1
+    assert [_status(event) for event in channel.sent] == ["allow", "allow"]
 
 
-def test_answered_is_a_snapshot_the_caller_cannot_edit() -> None:
+def test_answered_holds_the_decisions_in_the_order_they_were_made() -> None:
     bridge, _, _, _ = _bridge(_yes)
-    bridge.answer(_question_event(), [_model_message()])
-    answered = bridge.answered
+    bridge.answer(
+        _question_event(refs=((CALL, ASKED), ("call_0002", "evt_missing"))),
+        [_model_message()],
+    )
 
-    assert set(answered) == {CALL}
-    with pytest.raises(TypeError):
-        cast("dict[str, Answer]", answered)["call_9999"] = answered[CALL]
-    assert set(bridge.answered) == {CALL}
+    assert [(a.tool_call_id, a.status) for a in bridge.answered] == [
+        (CALL, "allowed"),
+        ("call_0002", "denied"),
+    ]
+    assert all(a.thread_id == "main" for a in bridge.answered)
+
+
+# ---------------------------------------------------------------------------
+# one id, two questions
+# ---------------------------------------------------------------------------
+
+
+def test_a_call_id_that_comes_back_pointing_somewhere_else_is_denied() -> None:
+    """A tool call id is issued by the model, and nothing guarantees it is unique.
+
+    The harness addresses a decision by thread and call id, so an approval meant
+    for one of two colliding calls could release the other. Only a refusal is
+    safe to send into that.
+    """
+    bridge, gate, approver, channel = _bridge(_yes)
+    bridge.answer(_question_event(), [_model_message()])
+    asked_once = len(approver.seen)
+
+    second = _model_message(event_id="evt_model_0002", calls=[_tool_call(name="rm")])
+    (answer,) = bridge.answer(
+        _question_event(event_id="evt_question_0002", refs=((CALL, "evt_model_0002"),)),
+        [_model_message(), second],
+    )
+
+    assert answer.status == "denied"
+    assert "one id, two questions" in answer.reason
+    assert len(approver.seen) == asked_once
+    assert [_status(event) for event in channel.sent] == ["allow", "deny"]
+    assert [r.outcome for r in gate.history] == ["allowed", "denied"]
+
+
+def test_the_same_id_on_another_thread_is_a_different_question() -> None:
+    bridge, _, approver, channel = _bridge(_yes)
+    bridge.answer(_question_event(), [_model_message()])
+
+    (answer,) = bridge.answer(
+        _question_event(thread_id="agent_1", refs=((CALL, "evt_model_0002"),)),
+        [_model_message(), _model_message(event_id="evt_model_0002", thread_id="agent_1")],
+    )
+
+    assert answer.status == "allowed"
+    assert len(approver.seen) == 2
+    assert [event["thread_id"] for event in channel.sent] == ["main", "agent_1"]
 
 
 def test_a_generator_of_events_is_read_once_for_every_call() -> None:

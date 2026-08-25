@@ -40,6 +40,10 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 19 | [#9](https://github.com/aryangorde8/bumpsmith/pull/9) | Verify/apply race window | **Fixed** | this PR |
 | 32 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | Wrapper named instead of the tool — *raised by the live harness* | **Fixed** — reproduced twice, before and after | this PR |
 | 33 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | `mcp:unknown` reported as an attribution — *raised by the live harness* | **Fixed** | this PR |
+| 34 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | A failed send re-asks, so a refusal can become an approval | **Fixed** — my own test pinned the bug | this PR |
+| 35 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | No production path constructs the bridge | **Accepted, deferred to [#14](https://github.com/aryangorde8/bumpsmith/pull/14) with a reason** | — |
+| 36 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | Policy keyed to the model-facing alias, not the tool | **Fixed** — and the reason is worse than the finding said | this PR |
+| 37 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | A reused call id suppresses a real call | **Fixed** | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -526,6 +530,84 @@ inventing an attribution is the worse failure of the two.
 Both live runs, the event stream, and the `tool.response` the harness recorded
 are in `tests/data/approval-call-tool.json`, and the module is tested against
 that recording rather than only against events written by hand.
+
+## 34–37 · Four on the harness bridge, three fixed here
+
+**34 · A failed send could turn a refusal into an approval.** The highest-value
+finding in this round, and the test I wrote for it asserted the wrong thing.
+
+`_deny()` sent the event and *then* remembered the answer, so a `Channel` failure
+left nothing remembered. The next poll re-read the same question and asked the
+approver again — and an approver with a human or a clock behind it does not have
+to answer the same way twice. A transport failure could therefore overturn a
+refusal that had already been recorded as `denied` in `gate.history`. The trail
+and the action would disagree, which is the worst version of this bug rather than
+a variant of it.
+
+My reasoning at the time is in the commit: *"nothing is known to have reached the
+harness, and the safe reading of an undelivered refusal is that it still needs
+delivering."* That is true about *delivery* and I used it to justify forgetting
+the *decision*. They are two pieces of state and I had one.
+
+`test_an_undelivered_denial_is_not_remembered_as_delivered` asserted
+`bridge.answered == {}` after the failed send — it pinned the defect in place and
+passed. The replacement uses an approver that says no once and yes afterwards, so
+the test fails if anything asks twice.
+
+Decisions are now remembered when they are made; delivery is tracked separately;
+a retry re-sends the decision already taken and never re-asks. Both directions
+are tested, because the rule is about decisions and not about which answer looks
+dangerous.
+
+**36 · The alias is not the identity — and it moves.** `describe()` keyed the
+policy action to `function.name`, the model-facing name, while `tool_info.name`
+is the tool's name on the server that runs it. The finding called this a benign
+alias hiding a destructive tool. It is worse than that. From
+`packages/trueforge-core/src/core/mcp/toolNames.ts`, the harness derives the
+model-facing name by
+
+- replacing every character outside `[a-zA-Z0-9_-]` with `_`,
+- truncating to 64 characters, and
+- **appending an ordinal (`name1`, `name2`, …) when two servers publish the same
+  name.**
+
+So the alias is assigned partly by which servers happen to be registered, and in
+what order. A policy keyed to `create_pull_request1` is a policy that can come to
+mean a different server's tool after an unrelated connector is added. The pair
+that does not move is the tool's own name plus the server it is on, and that is
+what `action` and `origin` now carry; the alias is recorded as `called_as` when it
+differs, so nothing is hidden.
+
+This is finding 32 again, in the other direction. Twice in two rounds: **the name
+that is easiest to reach is not the name that identifies what runs.**
+
+**37 · One id, two questions.** Deduplication was keyed on `tool_call_id` alone,
+so a second, distinct pending call reusing that id was returned as `repeated`,
+was never read, never gated, never answered — leaving a real call paused with
+nothing in the record. Tool call ids come from the model; nothing guarantees
+they are unique, least of all across threads.
+
+The key is now the thread, the id **and** the event that asked. A collision on
+the first two with a different third is denied rather than decided, because the
+harness addresses a decision by thread and call id — an approval meant for one of
+two colliding calls could release the other, and only a refusal is safe to send
+into that ambiguity. The same id on a *different thread* is a different question
+and is decided on its own merits; there is a test for each.
+
+### 35 · No production wiring — accepted, and deferred on purpose
+
+True as stated: this PR ships the deciding and a one-method `Channel`, and
+nothing in the package constructs a bridge, polls TrueForge, or sends
+`user.tool_approval`. The live proof in the PR body was driven by a script in a
+scratch directory, which is exactly the finding's point.
+
+The remedy is not to relax the separation — keeping decisions free of transport
+is why they can be tested against a recorded event stream, and why the module
+cannot quietly grow a retry loop around an approval. The remedy is the transport
+itself: an HTTP `Channel` and the poll loop, in the package, shipped in
+[#14](https://github.com/aryangorde8/bumpsmith/pull/14) rather than bolted onto
+this diff. Recorded here so that a reader who checks finds a plan and a link
+rather than a gap.
 
 ---
 

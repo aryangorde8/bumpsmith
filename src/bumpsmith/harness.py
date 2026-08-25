@@ -59,7 +59,6 @@ import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
-from types import MappingProxyType
 from typing import Literal, Protocol, final
 
 from bumpsmith.gate import Gate, NotApprovedError, Request
@@ -124,11 +123,13 @@ class Question:
 class ToolCall:
     """A pending call, read back from the message that asked for it.
 
-    ``tool``, ``origin`` and ``declared_tool`` describe what will run, after any
-    unwrapping. ``via`` names the wrapper it arrived through, or is empty for a
-    call the model made directly; it is kept because "the agent called this tool"
-    and "the agent asked the harness to go and find this tool" are different
-    stories about the same run.
+    ``tool`` and ``origin`` are what will run: the tool's own name on the server
+    it lives on, after any unwrapping. ``called_as`` is the name the model used,
+    which is the same string almost always and is not the identity -- see
+    :func:`describe`. ``via`` names the wrapper the call arrived through, or is
+    empty for one the model made directly; it is kept because "the agent called
+    this tool" and "the agent asked the harness to go and find this tool" are
+    different stories about the same run.
 
     ``arguments`` is never rewritten. When the call arrived wrapped, this is still
     the wrapper's argument string -- the text the harness itself parses -- because
@@ -140,7 +141,7 @@ class ToolCall:
     thread_id: str
     tool: str
     origin: str
-    declared_tool: str
+    called_as: str
     arguments: str
     via: str = ""
 
@@ -259,7 +260,7 @@ def read_call(
     function = hit.get("function")
     if not isinstance(function, Mapping):
         raise UnreadableCallError(f"{where} carries no function to run")
-    tool = _string(function, "name", UnreadableCallError, where)
+    called_as = _string(function, "name", UnreadableCallError, where)
 
     arguments = function.get("arguments")
     if not isinstance(arguments, str):
@@ -267,14 +268,20 @@ def read_call(
         # here means the event is not the event this code was written against,
         # and re-encoding it would be inventing the text a human then approves.
         raise UnreadableCallError(
-            f"the arguments for {tool} arrived as {type(arguments).__name__}, "
+            f"the arguments for {called_as} arrived as {type(arguments).__name__}, "
             "not the JSON string the wire format defines"
         )
 
     info = hit.get("tool_info")
     if not isinstance(info, Mapping):
-        raise UnreadableCallError(f"{tool} came with no tool_info, so where it runs is unstated")
-    declared = _string(info, "name", UnreadableCallError, f"the tool_info of {where}")
+        raise UnreadableCallError(
+            f"{called_as} came with no tool_info, so what it runs is unstated"
+        )
+    # The tool's own name where it lives. This, not the model-facing name, is the
+    # identity: the harness derives the model-facing one by sanitising this and
+    # appending an ordinal on collision, so the same alias can belong to a
+    # different tool after a server is added.
+    tool = _string(info, "name", UnreadableCallError, f"the tool_info of {where}")
     origin_kind = info.get("type")
     if origin_kind == "mcp":
         server = _string(info, "server_name", UnreadableCallError, f"the tool_info of {where}")
@@ -300,21 +307,24 @@ def read_call(
 
     via = ""
     if origin == SYSTEM_ORIGIN and tool == WRAPPER_TOOL:
-        via, tool, origin, declared = _unwrap(arguments)
+        # The model named the inner tool itself, in the arguments, so there is no
+        # alias left to record once it is unwrapped.
+        via, tool, origin = _unwrap(arguments)
+        called_as = tool
 
     return ToolCall(
         tool_call_id=pending.tool_call_id,
         thread_id=question.thread_id,
         tool=tool,
         origin=origin,
-        declared_tool=declared,
+        called_as=called_as,
         arguments=arguments,
         via=via,
     )
 
 
-def _unwrap(arguments: str) -> tuple[str, str, str, str]:
-    """Read the real tool out of a ``call_tool`` call: ``(via, tool, origin, declared)``.
+def _unwrap(arguments: str) -> tuple[str, str, str]:
+    """Read the real tool out of a ``call_tool`` call: ``(via, tool, origin)``.
 
     The server name here comes from the model's own arguments rather than from the
     harness, which sounds weaker than it is: the harness routes on that same
@@ -327,7 +337,7 @@ def _unwrap(arguments: str) -> tuple[str, str, str, str]:
         raise UnreadableCallError(f"{WRAPPER_TOOL} did not say which server it would call")
     if not isinstance(inner, str) or not inner.strip():
         raise UnreadableCallError(f"{WRAPPER_TOOL} did not say which tool it would call")
-    return WRAPPER_TOOL, inner, f"mcp:{server}", inner
+    return WRAPPER_TOOL, inner, f"mcp:{server}"
 
 
 def _argument_names(call: ToolCall) -> tuple[str, ...] | None:
@@ -355,19 +365,25 @@ def _argument_names(call: ToolCall) -> tuple[str, ...] | None:
 def describe(call: ToolCall) -> Request:
     """The question a human is actually being asked.
 
-    ``action`` names the tool so a policy can match on it. ``detail`` carries the
-    arguments verbatim, exactly as the model wrote them: normalising them would
-    mean the text somebody approved and the text that runs are two different
-    strings, which is the whole failure this module exists to avoid.
+    ``detail`` carries the arguments verbatim, exactly as the model wrote them:
+    normalising them would mean the text somebody approved and the text that runs
+    are two different strings, which is the whole failure this module exists to
+    avoid.
 
     The fingerprint therefore covers ``tool_call_id`` as well, which makes an
     approval good for one call and not for the identical call next to it. That is
     deliberate -- "run this command" twice is two decisions, and a fingerprint
     that collapsed them would let one yes stand for both.
 
-    ``action`` names the unwrapped tool. Naming the wrapper instead would give
-    every deferred call on the machine the same action, and a policy written
-    against that would be a policy about nothing.
+    ``action`` names the tool as it exists on the server it runs on, unwrapped,
+    and not the name the model used. Those differ more often than they look like
+    they would: the harness builds the model-facing name by replacing every
+    character outside ``[a-zA-Z0-9_-]``, truncating to 64, and **appending an
+    ordinal when two servers publish the same name**. So the model-facing name is
+    assigned partly by which servers happen to be registered, and a policy keyed
+    to it is a policy that can come to mean a different tool after an unrelated
+    server is added. The pair that does not move is the tool's own name and the
+    server it is on, and that is what ``action`` and ``origin`` carry.
     """
     names = _argument_names(call)
     if names is None:
@@ -379,22 +395,27 @@ def describe(call: ToolCall) -> Request:
     detail = {
         "tool": call.tool,
         "origin": call.origin,
-        "declared_tool": call.declared_tool,
         "thread": call.thread_id,
         "tool_call_id": call.tool_call_id,
         "arguments": call.arguments,
     }
+    # Both of the following are recorded only when there is something to record.
+    # A line that says "not wrapped" or "no alias" on every ordinary call is a
+    # line that stops being read, and these two have to be read.
     through = ""
     if call.via:
-        # Only when there is one. A key saying "not wrapped" on every direct call
-        # is a line that stops being read, and this one has to be read.
         detail["via"] = call.via
         through = f", reached through the harness's {call.via}"
+    alias = ""
+    if call.called_as != call.tool:
+        detail["called_as"] = call.called_as
+        alias = f", which the model called {call.called_as}"
     return Request(
         action=f"harness.tool_call:{call.tool}",
         summary=(
-            f"run {call.tool} from {call.origin} on thread {call.thread_id}{through} "
-            f"({shown}); the values are in the detail, not in this line"
+            f"run {call.tool} from {call.origin} on thread {call.thread_id}"
+            f"{alias}{through} ({shown}); the values are in the detail, "
+            "not in this line"
         ),
         detail=detail,
     )
@@ -466,33 +487,68 @@ Status = Literal["allowed", "denied", "repeated"]
 
 @dataclass(frozen=True, slots=True)
 class Answer:
-    """What was decided about one call, and on the strength of what request."""
+    """What was decided about one call, and on the strength of what request.
+
+    Carries the thread and the asking event as well as the call id, because a
+    call id alone does not identify a question -- see :class:`ApprovalBridge`.
+    """
 
     tool_call_id: str
+    thread_id: str
+    source_event_id: str
     status: Status
     reason: str
     request: Request
+
+
+@dataclass(frozen=True, slots=True)
+class _Decided:
+    """A decision, the event that carries it, and whether that event got out.
+
+    The two are separate on purpose. A decision is made once; delivering it can
+    fail and be retried. Collapsing them means a failed send looks like a
+    question that was never answered, and the retry asks again -- which is how a
+    refusal turns into an approval because a socket closed.
+    """
+
+    answer: Answer
+    event: Mapping[str, object]
+    delivered: bool
 
 
 @final
 class ApprovalBridge:
     """The harness's question, the gate's answer.
 
-    Answers are remembered by ``tool_call_id``. Events are read by polling, so the
-    same ``tool.approval_required`` is delivered again every time the client looks
-    -- and a bridge that decided afresh each time would ask a human the same
-    question repeatedly and send an approval for a call already resolved.
+    Decisions are remembered, keyed by the thread, the call id **and** the event
+    that asked. Events are read by polling, so the same ``tool.approval_required``
+    arrives on every look; a bridge that decided afresh each time would ask a
+    human the same question repeatedly and send an approval for a call already
+    resolved.
+
+    The key is all three parts because a tool call id is issued by the model, not
+    by anything that guarantees it. Two different pending calls sharing one id are
+    two questions, and answering the second with the first's answer would leave a
+    real call paused with nothing in the record to say why. When that happens the
+    second is denied rather than decided: the harness addresses a decision by
+    thread and call id, so an approval meant for one of them could release the
+    other, and only a refusal is safe to send into that ambiguity.
     """
 
     def __init__(self, gate: Gate, channel: Channel) -> None:
         self._gate = gate
         self._channel = channel
-        self._answered: dict[str, Answer] = {}
+        self._decided: dict[tuple[str, str, str], _Decided] = {}
+        self._first_asked: dict[tuple[str, str], str] = {}
 
     @property
-    def answered(self) -> Mapping[str, Answer]:
-        """Every call this bridge has already decided, by id."""
-        return MappingProxyType(dict(self._answered))
+    def answered(self) -> tuple[Answer, ...]:
+        """Every decision this bridge has made, in the order it made them.
+
+        A decision appears here as soon as it is made, whether or not the event
+        carrying it reached the harness.
+        """
+        return tuple(decided.answer for decided in self._decided.values())
 
     def answer(
         self,
@@ -505,10 +561,8 @@ class ApprovalBridge:
         is materialised once, so a generator that would be consumed by the first
         call is safe to pass.
 
-        A :class:`Channel` that fails raises through, after the gate has recorded
-        what it decided. The answer is not remembered in that case: nothing is
-        known to have reached the harness, and the safe reading of an undelivered
-        refusal is that it still needs delivering.
+        A :class:`Channel` that fails raises through. The decision is kept, and
+        the next look re-sends *that* decision rather than making a new one.
         """
         question = read_question(event)
         seen = [item for item in events if isinstance(item, Mapping)]
@@ -520,59 +574,104 @@ class ApprovalBridge:
         pending: PendingCall,
         seen: Sequence[Mapping[str, object]],
     ) -> Answer:
-        already = self._answered.get(pending.tool_call_id)
+        key = (question.thread_id, pending.tool_call_id, pending.source_event_id)
+        already = self._decided.get(key)
         if already is not None:
+            if not already.delivered:
+                return self._deliver(key, already)
             return Answer(
                 tool_call_id=pending.tool_call_id,
+                thread_id=question.thread_id,
+                source_event_id=pending.source_event_id,
                 status="repeated",
-                reason=f"already {already.status}: {already.reason}",
-                request=already.request,
+                reason=f"already {already.answer.status}: {already.answer.reason}",
+                request=already.answer.request,
             )
+
+        asked_by = self._first_asked.get((question.thread_id, pending.tool_call_id))
+        if asked_by is not None and asked_by != pending.source_event_id:
+            problem = (
+                f"{pending.tool_call_id} on thread {question.thread_id} was already "
+                f"decided for the message {asked_by}, and this one points at "
+                f"{pending.source_event_id}; one id, two questions"
+            )
+            return self._refuse(key, question, pending, problem)
 
         try:
             call = read_call(question, pending, seen)
         except UnreadableCallError as exc:
-            problem = str(exc)
-            # Refused without asking. Putting an undescribable request in front of
-            # an approver is how an approver ends up approving one.
-            request = _unreadable_request(question, pending, problem)
-            self._gate.refuse(request, problem)
-            return self._deny(question, pending, request, problem)
+            return self._refuse(key, question, pending, str(exc))
 
         request = describe(call)
-        try:
-            self._gate.run(
-                request,
-                partial(self._channel.send, allow_event(question.thread_id, pending.tool_call_id)),
-            )
-        except NotApprovedError as exc:
-            # Already recorded by the gate; this only has to reach the harness.
-            return self._deny(question, pending, request, exc.reason)
-
         answer = Answer(
             tool_call_id=pending.tool_call_id,
+            thread_id=question.thread_id,
+            source_event_id=pending.source_event_id,
             status="allowed",
             reason="approved",
             request=request,
         )
-        self._answered[pending.tool_call_id] = answer
+        event = allow_event(question.thread_id, pending.tool_call_id)
+        try:
+            self._gate.run(request, partial(self._channel.send, event))
+        except NotApprovedError as exc:
+            # Already recorded by the gate; this only has to reach the harness.
+            return self._deny(key, question, pending, request, exc.reason)
+        except Exception:
+            # Approved, and then the delivery failed. Recording it is what stops
+            # the retry from asking again and getting a different answer.
+            self._remember(key, answer, event, delivered=False)
+            raise
+        self._remember(key, answer, event, delivered=True)
         return answer
+
+    def _refuse(
+        self,
+        key: tuple[str, str, str],
+        question: Question,
+        pending: PendingCall,
+        problem: str,
+    ) -> Answer:
+        """Deny without asking, for a call nobody could put in front of an approver."""
+        request = _unreadable_request(question, pending, problem)
+        self._gate.refuse(request, problem)
+        return self._deny(key, question, pending, request, problem)
 
     def _deny(
         self,
+        key: tuple[str, str, str],
         question: Question,
         pending: PendingCall,
         request: Request,
         reason: str,
     ) -> Answer:
-        self._channel.send(
-            deny_event(question.thread_id, pending.tool_call_id, f"{DENIED_BY}{reason}")
-        )
         answer = Answer(
             tool_call_id=pending.tool_call_id,
+            thread_id=question.thread_id,
+            source_event_id=pending.source_event_id,
             status="denied",
             reason=reason,
             request=request,
         )
-        self._answered[pending.tool_call_id] = answer
+        event = deny_event(question.thread_id, pending.tool_call_id, f"{DENIED_BY}{reason}")
+        self._remember(key, answer, event, delivered=False)
+        self._channel.send(event)
+        self._remember(key, answer, event, delivered=True)
         return answer
+
+    def _deliver(self, key: tuple[str, str, str], decided: _Decided) -> Answer:
+        """Send a decision already made. Never asks anybody anything."""
+        self._channel.send(decided.event)
+        self._remember(key, decided.answer, decided.event, delivered=True)
+        return decided.answer
+
+    def _remember(
+        self,
+        key: tuple[str, str, str],
+        answer: Answer,
+        event: Mapping[str, object],
+        *,
+        delivered: bool,
+    ) -> None:
+        self._decided[key] = _Decided(answer=answer, event=event, delivered=delivered)
+        self._first_asked.setdefault((answer.thread_id, answer.tool_call_id), key[2])
