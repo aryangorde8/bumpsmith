@@ -394,6 +394,69 @@ Verified against real fixture B afterwards: same 19 sites, same 5 sites, still
 `complete=True`. Strictness that refused real code would have been a worse bug
 than the one it fixed.
 
+## 28–31 · Four on the regex class, all accepted
+
+Two of these are the *same shape as 23–27, in a module the previous round did not
+touch*, which is worth stating plainly rather than quietly fixing: getting scope
+and binding right is not a thing this project has done once and finished.
+
+**29 · A function parameter was treated as pydantic's. Reproduced.**
+
+```python
+from pydantic import constr
+
+
+def build(constr):                    # a PARAMETER
+    return constr(regex=r"^a$")       # matched, and would have been rewritten
+```
+
+One module-wide import map was applied to every call in the tree. It is wrong in
+both directions — it misses a pydantic import made inside a function, and it
+claims a shadowing parameter is pydantic's. The second is the dangerous one, and
+it is the same failure as finding 24 wearing different clothes.
+
+Resolution is now scoped: calls are paired with the names actually visible where
+they sit. Both directions have tests, including one proving that shadowing inside
+a function does not disqualify sites outside it — refusing the whole file would
+have been its own bug.
+
+**28 · `removed-kwargs` does not identify one break.** Measured against pydantic
+2.12.5: `const` and `unique_items` raise the same slug.
+
+```
+const          -> PydanticUserError  code='removed-kwargs'
+unique_items   -> PydanticUserError  code='removed-kwargs'
+```
+
+Classifying on the slug alone would write a regex rule for a `const` failure,
+find whatever `regex=` sites happened to exist, rewrite them, and leave the
+argument that actually stopped collection untouched. The slug is still checked
+first; it is now required to name `regex` as well. **This is the one slug in the
+set that is not authoritative on its own**, which the module docstring now says.
+
+**31 · A stdlib-shaped substring is not an interpreter root.** The fix in #12
+tested for `/lib/pythonX.Y/` anywhere in the path, so a project holding its own
+`lib/python3.13/` directory would have had its frames skipped and reported a
+shallower culprit or none. pytest prints project files relative to rootdir, so
+the discriminator is not the substring but whether the run had to *leave the
+project* to reach the file. Both recorded interpreters still classify correctly.
+
+Worth noting this is a finding against a fix from the same PR — the fix for the
+stdlib culprit was itself too broad. Rounds 15–19 recorded the same lesson.
+
+**30 · Two sites on one line, one gone since the scan.** The survivor stood in
+for both: two reported rewritten, one written, plan `complete`. That combination
+is worse than either half, because it looks like success. Occurrences are matched
+to keywords one-to-one now, and any excess is a `Skipped`.
+
+### Knowingly deferred
+
+`_validator_sites` resolves names the same module-wide way and has the same
+exposure. It is **not** fixed here, for a stated reason: nothing rewrites that
+class yet, so the consequence is a miscounted report rather than changed code. It
+is fixed when the validator rewriter lands, which is when it starts to matter.
+Recording it so that finding it later is a confirmation rather than a discovery.
+
 ---
 
 ## How this stays honest
