@@ -260,7 +260,7 @@ class Items(Base):
 
     assert result.edits == ()
     assert len(result.skipped) == 1
-    assert "does not inherit pydantic's BaseModel exactly once" in result.skipped[0].reason
+    assert "does not demonstrably inherit" in result.skipped[0].reason
     assert result.skipped[0].line == 9
 
 
@@ -340,3 +340,127 @@ class C(BaseModel):
     assert len(result.edits) == 1
     assert result.rewritten == 3
     assert result.edits[0].after.count("RootModel") == 4  # the import, and three bases
+
+
+# ---------------------------------------------------------------------------
+# Binding, which is the difference between a rule and a search-and-replace
+# ---------------------------------------------------------------------------
+
+
+def test_a_base_rebound_after_the_import_is_not_treated_as_pydantic(tmp_path: Path) -> None:
+    """The worst failure this module can have, so it gets the plainest test.
+
+    Reading the import alone says `BaseModel` is pydantic's. The assignment below
+    it says otherwise, and rewriting the base of a class that was never a
+    pydantic model changes code that was working.
+    """
+    _write(
+        tmp_path,
+        "models.py",
+        "from pydantic import BaseModel\n"
+        "from mylib import Other\n"
+        "\n"
+        "BaseModel = Other\n"
+        "\n"
+        "\n"
+        "class Items(BaseModel):\n"
+        "    __root__: list[int]\n",
+    )
+    result = _plan_for(tmp_path)
+
+    assert result.edits == ()
+    assert "does not demonstrably inherit" in result.skipped[0].reason
+
+
+def test_a_rootmodel_rebound_after_its_import_still_counts_as_a_collision(
+    tmp_path: Path,
+) -> None:
+    """Having been imported once is not the same as still meaning that.
+
+    The emitted `class X(RootModel)` would inherit whatever the rebinding put
+    there, which usually fails at import time and occasionally does not.
+    """
+    _write(
+        tmp_path,
+        "models.py",
+        "from pydantic import BaseModel, RootModel\n"
+        "from mylib import Other\n"
+        "\n"
+        "RootModel = Other\n"
+        "\n"
+        "\n"
+        "class Items(BaseModel):\n"
+        "    __root__: list[int]\n",
+    )
+    result = _plan_for(tmp_path)
+
+    assert result.edits == ()
+    assert "already used in this file for something else" in result.skipped[0].reason
+
+
+def test_a_name_taken_by_unpacking_is_still_a_collision(tmp_path: Path) -> None:
+    """`RootModel, other = pair()` binds `RootModel` just as firmly as `=` does."""
+    _write(
+        tmp_path,
+        "models.py",
+        "from pydantic import BaseModel\n"
+        "from mylib import pair\n"
+        "\n"
+        "RootModel, other = pair()\n"
+        "\n"
+        "\n"
+        "class Items(BaseModel):\n"
+        "    __root__: list[int]\n",
+    )
+    result = _plan_for(tmp_path)
+
+    assert result.edits == ()
+    assert "already used in this file for something else" in result.skipped[0].reason
+
+
+def test_an_import_that_does_not_run_is_not_extended(tmp_path: Path) -> None:
+    """`if TYPE_CHECKING:` binds nothing at runtime.
+
+    Adding `RootModel` to an import inside it produces a file that raises
+    NameError while defining the very class this rewrite just changed.
+    """
+    _write(
+        tmp_path,
+        "models.py",
+        "from typing import TYPE_CHECKING\n"
+        "\n"
+        "if TYPE_CHECKING:\n"
+        "    from pydantic import BaseModel\n"
+        "\n"
+        "\n"
+        "class Items(BaseModel):\n"
+        "    __root__: list[int]\n",
+    )
+    result = _plan_for(tmp_path)
+
+    assert result.edits == ()
+    assert "no plain pydantic import" in result.skipped[0].reason
+
+
+def test_two_declarations_on_one_line_are_both_rewritten(tmp_path: Path) -> None:
+    """The scan reports a line per site, so one line can be reported twice.
+
+    Keeping one statement per line silently dropped the other, left the file
+    half-rewritten, and still counted both as done.
+    """
+    _write(
+        tmp_path,
+        "models.py",
+        "from pydantic import BaseModel\n"
+        "\n"
+        "\n"
+        "class Items(BaseModel):\n"
+        "    __root__ = 1; __root__ = 2\n",
+    )
+    result = _plan_for(tmp_path)
+
+    assert result.is_complete, [str(s) for s in result.skipped]
+    after = result.edits[0].after
+    assert "__root__" not in after
+    assert after.count("root = ") == 2
+    assert result.rewritten == 2

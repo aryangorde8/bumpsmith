@@ -24,7 +24,7 @@ is what puts them on disk -- and takes them back by default.
 
 import ast
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,7 +35,6 @@ from bumpsmith.rules import (
     Rule,
     ScanResult,
     declares_root_field,
-    module_scope_nodes,
     pydantic_name,
     pydantic_names,
 )
@@ -161,34 +160,125 @@ def _replace(text: str, replacements: Iterable[_Replacement]) -> str | None:
     return "".join(lines)
 
 
-def _module_bindings(tree: ast.Module) -> set[str]:
-    """Every name bound at module scope, however it was bound."""
-    bound: set[str] = set()
-    for node in module_scope_nodes(tree):
+def _own_namespace_nodes(tree: ast.Module) -> Iterator[ast.AST]:
+    """Yield every node that can bind a name in the module's own namespace.
+
+    Narrower than :func:`bumpsmith.rules.module_scope_nodes`, deliberately. That
+    one descends into class bodies, because for *counting* sites an import is
+    evidence about the file whatever block it sits in. A class body has its own
+    namespace, so an import inside one binds an attribute rather than a module
+    name. Fine to notice; wrong to extend, and wrong to trust for a name about to
+    be written into a base class.
+    """
+    pending: list[ast.AST] = [tree]
+    while pending:
+        node = pending.pop()
+        yield node
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue
+        pending.extend(ast.iter_child_nodes(node))
+
+
+def _targets(target: ast.expr) -> Iterator[str]:
+    """The names one assignment target binds, unpacking as far as it goes.
+
+    `RootModel, other = pair()` binds `RootModel`. Reading only bare
+    :class:`ast.Name` targets misses it, and a missed binding is a name this
+    module believes it owns when it does not.
+    """
+    if isinstance(target, ast.Name):
+        yield target.id
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            yield from _targets(element)
+    elif isinstance(target, ast.Starred):
+        yield from _targets(target.value)
+
+
+def _bindings(tree: ast.Module) -> dict[str, list[ast.AST]]:
+    """Every module-scope binding of every name, keyed by name.
+
+    A list rather than a set because the count is the point. One binding can be
+    checked; two mean something rebound the name, and which one is live where the
+    class is defined is not a question this can answer by reading imports.
+    """
+    found: dict[str, list[ast.AST]] = {}
+
+    def note(name: str, node: ast.AST) -> None:
+        found.setdefault(name, []).append(node)
+
+    for node in _own_namespace_nodes(tree):
         if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            bound.add(node.name)
+            note(node.name, node)
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            bound.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
+            for alias in node.names:
+                note(alias.asname or alias.name.split(".")[0], node)
         elif isinstance(node, ast.Assign):
-            bound.update(t.id for t in node.targets if isinstance(t, ast.Name))
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            bound.add(node.target.id)
-    return bound
+            for target in node.targets:
+                for name in _targets(target):
+                    note(name, node)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign, ast.For, ast.AsyncFor, ast.NamedExpr)):
+            for name in _targets(node.target):
+                note(name, node)
+        elif isinstance(node, ast.withitem) and node.optional_vars is not None:
+            for name in _targets(node.optional_vars):
+                note(name, node)
+        elif isinstance(node, ast.ExceptHandler) and node.name is not None:
+            note(node.name, node)
+    return found
 
 
-def _root_sites(tree: ast.Module) -> dict[int, tuple[ast.ClassDef, ast.stmt]]:
+def _bound_only_by_pydantic(bindings: dict[str, list[ast.AST]], bound: str, real: str) -> bool:
+    """Whether ``bound`` is this module's name for pydantic's ``real``, and only that.
+
+    Two bindings is a refusal, not a tie-break. `from pydantic import BaseModel`
+    followed by `BaseModel = Other` leaves a name that reads as pydantic's and is
+    not, and rewriting the base of a class that was never a pydantic model is the
+    exact search-and-replace failure the rule machinery exists to avoid.
+    """
+    found = bindings.get(bound, [])
+    if len(found) != 1:
+        return False
+    node = found[0]
+    return (
+        isinstance(node, ast.ImportFrom)
+        and node.level == 0
+        and node.module == "pydantic"
+        and any(
+            (alias.asname or alias.name) == bound and alias.name == real for alias in node.names
+        )
+    )
+
+
+def _bound_only_by_importing_pydantic(bindings: dict[str, list[ast.AST]], bound: str) -> bool:
+    """Whether ``bound`` is this module's name for the pydantic module itself."""
+    found = bindings.get(bound, [])
+    if len(found) != 1:
+        return False
+    node = found[0]
+    return isinstance(node, ast.Import) and any(
+        (alias.asname or alias.name.split(".")[0]) == bound and _is_pydantic_module(alias.name)
+        for alias in node.names
+    )
+
+
+def _is_pydantic_module(dotted: str) -> bool:
+    return dotted == "pydantic" or dotted.startswith("pydantic.")
+
+
+def _root_sites(tree: ast.Module) -> dict[int, list[tuple[ast.ClassDef, ast.stmt]]]:
     """Every ``__root__`` declaration in the tree, keyed by the line it is on.
 
     Walks the whole tree and uses the scan's own predicate, because a site the
     scan reported has to be findable here by the same definition.
     """
-    sites: dict[int, tuple[ast.ClassDef, ast.stmt]] = {}
+    sites: dict[int, list[tuple[ast.ClassDef, ast.stmt]]] = {}
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
         for statement in node.body:
             if declares_root_field(statement):
-                sites[statement.lineno] = (node, statement)
+                sites.setdefault(statement.lineno, []).append((node, statement))
     return sites
 
 
@@ -199,6 +289,20 @@ def _field_targets(statement: ast.stmt) -> list[ast.Name]:
     if isinstance(statement, ast.Assign):
         return [t for t in statement.targets if isinstance(t, ast.Name) and t.id == _ROOT_FIELD]
     return []
+
+
+def _base_is_certain(base: ast.expr, bindings: dict[str, list[ast.AST]]) -> bool:
+    """Whether this base demonstrably *is* pydantic's BaseModel where it is written.
+
+    `pydantic_name` answers what the imports imply, which is the right question
+    for counting sites. Changing a base class needs the stronger one: that no
+    later statement rebound the name out from under the import.
+    """
+    if isinstance(base, ast.Name):
+        return _bound_only_by_pydantic(bindings, base.id, _BASE_MODEL)
+    if isinstance(base, ast.Attribute) and isinstance(base.value, ast.Name):
+        return _bound_only_by_importing_pydantic(bindings, base.value.id)
+    return False
 
 
 def _base_replacement(base: ast.expr) -> _Replacement | None:
@@ -227,8 +331,13 @@ def _import_replacement(tree: ast.Module) -> _Replacement | None:
 
     Appended after the last name rather than rebuilt, so a parenthesised import
     spanning several lines keeps its shape and a one-line import keeps its line.
+
+    Only a direct child of the module body qualifies. An import nested in a class
+    body binds an attribute, and one under `if TYPE_CHECKING:` binds nothing at
+    all at runtime -- extending either produces a file that raises `NameError`
+    while defining the class this rewrite just changed.
     """
-    for node in module_scope_nodes(tree):
+    for node in tree.body:
         if not isinstance(node, ast.ImportFrom) or node.level != 0 or node.module != "pydantic":
             continue
         if not node.names or any(alias.name == "*" for alias in node.names):
@@ -249,8 +358,14 @@ def _plan_root_model_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None
         return None, [Skipped(path, line, f"could not be read: {exc!r}") for line in lines]
 
     names = pydantic_names(tree)
-    already_imported = names.direct.get(_ROOT_MODEL) == _ROOT_MODEL
-    if not already_imported and _ROOT_MODEL in _module_bindings(tree):
+    bindings = _bindings(tree)
+
+    # `RootModel` is about to be written into this file, so the question is not
+    # whether it was imported once but whether the name still means what the
+    # import said. An import followed by a rebinding is a name that reads as
+    # pydantic's and is not.
+    already_imported = _bound_only_by_pydantic(bindings, _ROOT_MODEL, _ROOT_MODEL)
+    if not already_imported and _ROOT_MODEL in bindings:
         reason = f"the name {_ROOT_MODEL} is already used in this file for something else"
         return None, [Skipped(path, line, reason) for line in lines]
 
@@ -262,41 +377,59 @@ def _plan_root_model_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None
     needs_import = False
     rewritten = 0
 
+    # A line can hold more than one declaration -- `__root__: int = 1; x: int = 2`
+    # is one line and two statements -- and the scan reports a line per site, so
+    # the same line can also arrive twice. Both are handled by working through
+    # every statement on a reported line and counting each statement once.
+    seen: set[tuple[int, int]] = set()
     for line in lines:
-        site = sites.get(line)
-        if site is None:
+        found = sites.get(line)
+        if not found:
             skipped.append(Skipped(path, line, "the site the scan reported is not there any more"))
             continue
-        node, statement = site
-        targets = _field_targets(statement)
-        if not targets:
-            skipped.append(Skipped(path, line, f"{_ROOT_FIELD} is bound in a shape not handled"))
-            continue
 
-        bases = [base for base in node.bases if pydantic_name(base, names) == _BASE_MODEL]
-        if len(bases) != 1:
-            skipped.append(
-                Skipped(
-                    path,
-                    line,
-                    f"{node.name} declares {_ROOT_FIELD} but does not inherit pydantic's "
-                    f"{_BASE_MODEL} exactly once, so what its base should become is a guess",
+        for node, statement in found:
+            here = (statement.lineno, statement.col_offset)
+            if here in seen:
+                continue
+            seen.add(here)
+
+            targets = _field_targets(statement)
+            if not targets:
+                skipped.append(
+                    Skipped(path, line, f"{_ROOT_FIELD} is bound in a shape not handled")
                 )
-            )
-            continue
+                continue
 
-        base_replacement = _base_replacement(bases[0])
-        if base_replacement is None:
-            skipped.append(Skipped(path, line, f"{node.name}'s base is in a shape not handled"))
-            continue
+            bases = [
+                base
+                for base in node.bases
+                if pydantic_name(base, names) == _BASE_MODEL and _base_is_certain(base, bindings)
+            ]
+            if len(bases) != 1:
+                skipped.append(
+                    Skipped(
+                        path,
+                        line,
+                        f"{node.name} declares {_ROOT_FIELD} but does not demonstrably inherit "
+                        f"pydantic's {_BASE_MODEL} exactly once, so what its base should become "
+                        f"is a guess",
+                    )
+                )
+                continue
 
-        for target in targets:
-            replacements[(target.lineno, target.col_offset)] = _Replacement(
-                target.lineno, target.col_offset, _ROOT_FIELD, _V2_ROOT_FIELD
-            )
-        replacements[(base_replacement.line, base_replacement.col)] = base_replacement
-        needs_import = needs_import or isinstance(bases[0], ast.Name)
-        rewritten += 1
+            base_replacement = _base_replacement(bases[0])
+            if base_replacement is None:
+                skipped.append(Skipped(path, line, f"{node.name}'s base is in a shape not handled"))
+                continue
+
+            for target in targets:
+                replacements[(target.lineno, target.col_offset)] = _Replacement(
+                    target.lineno, target.col_offset, _ROOT_FIELD, _V2_ROOT_FIELD
+                )
+            replacements[(base_replacement.line, base_replacement.col)] = base_replacement
+            needs_import = needs_import or isinstance(bases[0], ast.Name)
+            rewritten += 1
 
     if not replacements:
         return None, skipped
