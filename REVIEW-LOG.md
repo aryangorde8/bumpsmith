@@ -332,6 +332,68 @@ A gate that quietly forgets what it stopped is a gate with no evidence it ever
 stopped anything. Export exists already (`Record.as_dict`); a cap does not, and
 will not.
 
+## 23–27 · Five on the rewriter, all accepted, all one root cause
+
+The most useful round since the transaction. Five separate findings that are the
+same sentence said five ways:
+
+> **`rules.py` resolves names well enough to *count* sites. `rewrite.py` used the
+> same answer to *change code*, and those are different questions.**
+
+Reading imports is the right way to count. An import is evidence about the file
+whatever block it sits in, and over-counting a site costs a line in a report.
+Changing a base class needs the harder question — not what the imports imply, but
+what the name still means at the line being edited — and getting that wrong
+changes code that was working.
+
+**24 · A rebound base was rewritten. Reproduced exactly as reported.**
+
+```python
+from pydantic import BaseModel
+from mylib import Other
+
+BaseModel = Other          # rebound: no longer pydantic's
+
+
+class Items(BaseModel):    # a NON-pydantic class
+    __root__: list[int]
+```
+
+The rewriter changed `Items`' base to `RootModel`. **That is the
+search-and-replace failure this machinery exists to prevent, committed by the
+machinery itself** — and the docstring one module over claims name resolution is
+"what separates a rule from a search-and-replace".
+
+**25 · An import is not a guarantee the name still means that.** `from pydantic
+import RootModel` followed by `RootModel = Other` set `already_imported`, which
+skipped the collision check entirely and emitted a class inheriting the
+replacement.
+
+**26 · `RootModel, other = pair()` binds `RootModel`.** Binding collection read
+only bare `Name` targets, so unpacking went unseen.
+
+**27 · An import under `if TYPE_CHECKING:` binds nothing at runtime**, and one
+inside a class body binds an attribute. Either could be selected as the import to
+extend, producing a file that raises `NameError` while defining the very class
+that had just been rewritten.
+
+**23 · Two declarations on one line: one dropped, both counted.** Sites were keyed
+by line rather than grouped by it. Rare enough to be unreachable in ordinary code
+and worth fixing anyway, because the failure mode is a file left half-rewritten
+and reported as complete.
+
+### The fix, stated once
+
+A name is trusted only when it has **exactly one** module-scope binding and that
+binding is the pydantic import it claims to be. **Two bindings is a refusal, not a
+tie-break.** Bindings now include unpacking, loops, with-items and except
+handlers, and exclude class bodies, which have their own namespace. The import to
+extend must be a direct child of the module body.
+
+Verified against real fixture B afterwards: same 19 sites, same 5 sites, still
+`complete=True`. Strictness that refused real code would have been a worse bug
+than the one it fixed.
+
 ---
 
 ## How this stays honest
