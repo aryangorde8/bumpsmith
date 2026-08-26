@@ -429,3 +429,38 @@ def test_a_request_that_cannot_be_described_is_a_recorded_refusal() -> None:
     assert spy.calls == 0
     assert "could not be described" in caught.value.reason
     assert [record.outcome for record in gate.history] == ["denied"]
+
+
+def test_refuse_records_a_denial_without_asking_anybody() -> None:
+    """A caller that already knows the answer is no still owes the trail a record."""
+
+    class _Counting:
+        def __init__(self) -> None:
+            self.asked = 0
+
+        def decide(self, request: Request) -> Decision:
+            self.asked += 1
+            return Allow(request.fingerprint())
+
+    approver = _Counting()
+    gate = Gate(approver)
+    request = Request(action="push", summary="push to origin")
+
+    error = gate.refuse(request, "the request could not be described")
+
+    assert approver.asked == 0
+    assert isinstance(error, NotApprovedError)
+    assert error.request is request
+    assert [(r.outcome, r.reason) for r in gate.history] == [
+        ("denied", "the request could not be described")
+    ]
+
+
+def test_there_is_no_allow_counterpart_to_refuse() -> None:
+    """Recording an approval nobody gave would be the bypass this module denies having.
+
+    Written as a test rather than left to the docstring because the tempting
+    addition is a one-line method, and the reason not to add it lives here.
+    """
+    assert not hasattr(Gate, "allow")
+    assert not hasattr(Gate, "approve")

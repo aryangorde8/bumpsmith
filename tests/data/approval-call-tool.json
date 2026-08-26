@@ -1,0 +1,234 @@
+{
+  "recorded": "2026-08-25T19:58Z",
+  "harness": "TrueForge 0.1.4 standalone",
+  "model": "bedrock-mantle/qwen-3-coder-480b",
+  "question": {
+    "type": "tool.approval_required",
+    "id": "01m0x8138anffd6z2pwje052r4",
+    "created_at": "2026-08-25T19:58:18.378Z",
+    "thread_id": "main",
+    "tool_calls": [
+      {
+        "id": "call_2bd2ef15af4b4203b789a730",
+        "source_event_id": "01m0x812624c5jf5wkw9qwzjqt"
+      }
+    ]
+  },
+  "events": [
+    {
+      "tool_calls": [
+        {
+          "id": "call_6e33c047a101461db3fae91b",
+          "type": "function",
+          "function": {
+            "name": "open_pull_request",
+            "arguments": "{\"repo_owner\": \"aryangorde8\", \"repo_name\": \"bumpsmith\", \"branch\": \"feat/harness-approvals\", \"title\": \"wire the harness approval event to the gate\"}"
+          },
+          "tool_info": {
+            "type": "mcp",
+            "name": "open_pull_request",
+            "server_id": "unknown",
+            "server_name": "unknown"
+          }
+        }
+      ],
+      "type": "model.message",
+      "id": "01m0x80xcv0rmj9h5dt19shskc",
+      "created_at": "2026-08-25T19:58:14.441Z",
+      "thread_id": "main",
+      "finish_reason": "tool_calls",
+      "usage": {
+        "input_tokens": 2188,
+        "output_tokens": 71,
+        "cache_read_tokens": 2160,
+        "input_tokens_breakdown": {
+          "harness": 1908,
+          "skills": 0,
+          "instructions": 36,
+          "tool_definitions": 0,
+          "messages": 244
+        }
+      }
+    },
+    {
+      "tool_call_id": "call_6e33c047a101461db3fae91b",
+      "content": "Tool open_pull_request not found in tool mapping",
+      "type": "tool.response",
+      "id": "01m0x80zdct88aw9s1kw7zgwtr",
+      "created_at": "2026-08-25T19:58:14.444Z",
+      "thread_id": "main"
+    },
+    {
+      "content": "I apologize for the confusion. It seems I don't have access to the `open_pull_request` tool. Let me check if there are any alternative tools available that might help with creating a pull request.\n\n",
+      "tool_calls": [
+        {
+          "id": "call_727f6a7c4fb448bb866d16a7",
+          "type": "function",
+          "function": {
+            "name": "list_tools",
+            "arguments": "{\"mcp_server\": \"irreversible-things\"}"
+          },
+          "tool_info": {
+            "type": "truefoundry-system",
+            "name": "list_tools"
+          }
+        }
+      ],
+      "type": "model.message",
+      "id": "01m0x80zddk8j4h4dv3dxt3j4c",
+      "created_at": "2026-08-25T19:58:16.355Z",
+      "thread_id": "main",
+      "finish_reason": "tool_calls",
+      "usage": {
+        "input_tokens": 2282,
+        "output_tokens": 68,
+        "cache_read_tokens": 2240,
+        "input_tokens_breakdown": {
+          "harness": 1908,
+          "skills": 0,
+          "instructions": 36,
+          "tool_definitions": 0,
+          "messages": 338
+        }
+      }
+    },
+    {
+      "tool_call_id": "call_727f6a7c4fb448bb866d16a7",
+      "content": "irreversible-things:\n  open_pull_request",
+      "type": "tool.response",
+      "id": "01m0x8119rxtfj5xgjmbk3d7xt",
+      "created_at": "2026-08-25T19:58:16.374Z",
+      "thread_id": "main"
+    },
+    {
+      "content": "I see that the `open_pull_request` tool is available through the `irreversible-things` MCP server. Let me get more information about how to use this tool correctly.\n\n",
+      "tool_calls": [
+        {
+          "id": "call_3c31804298ab48e38b11bba3",
+          "type": "function",
+          "function": {
+            "name": "get_tool_info",
+            "arguments": "{\"mcp_server\": \"irreversible-things\", \"tool_name\": \"open_pull_request\"}"
+          },
+          "tool_info": {
+            "type": "truefoundry-system",
+            "name": "get_tool_info"
+          }
+        }
+      ],
+      "type": "model.message",
+      "id": "01m0x8119tmyp1bvv9rxdc829j",
+      "created_at": "2026-08-25T19:58:17.277Z",
+      "thread_id": "main",
+      "finish_reason": "tool_calls",
+      "usage": {
+        "input_tokens": 2374,
+        "output_tokens": 78,
+        "cache_read_tokens": 2320,
+        "input_tokens_breakdown": {
+          "harness": 1908,
+          "skills": 0,
+          "instructions": 36,
+          "tool_definitions": 0,
+          "messages": 430
+        }
+      }
+    },
+    {
+      "tool_call_id": "call_3c31804298ab48e38b11bba3",
+      "content": "{\"description\":\"Open a pull request on a GitHub repository. Irreversible: the branch is pushed and the pull request becomes visible to everyone with repo access.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"repository\":{\"type\":\"string\",\"description\":\"owner/name\"},\"branch\":{\"type\":\"string\",\"description\":\"head branch to push\"},\"title\":{\"type\":\"string\"},\"body\":{\"type\":\"string\"}},\"required\":[\"repository\",\"branch\",\"title\"]},\"outputSchema\":null}",
+      "type": "tool.response",
+      "id": "01m0x81260h0tg4tkbcy7vsytw",
+      "created_at": "2026-08-25T19:58:17.280Z",
+      "thread_id": "main"
+    },
+    {
+      "content": "Now I understand how to use the `open_pull_request` tool. Let me proceed to create the pull request with the provided details.\n\n",
+      "tool_calls": [
+        {
+          "id": "call_2bd2ef15af4b4203b789a730",
+          "type": "function",
+          "function": {
+            "name": "call_tool",
+            "arguments": "{\"mcp_server\": \"irreversible-things\", \"tool_name\": \"open_pull_request\", \"input\": {\"repository\": \"aryangorde8/bumpsmith\", \"branch\": \"feat/harness-approvals\", \"title\": \"wire the harness approval event to the gate\"}}"
+          },
+          "tool_info": {
+            "type": "truefoundry-system",
+            "name": "call_tool"
+          }
+        }
+      ],
+      "type": "model.message",
+      "id": "01m0x812624c5jf5wkw9qwzjqt",
+      "created_at": "2026-08-25T19:58:18.376Z",
+      "thread_id": "main",
+      "finish_reason": "tool_calls",
+      "usage": {
+        "input_tokens": 2557,
+        "output_tokens": 111,
+        "cache_read_tokens": 2432,
+        "input_tokens_breakdown": {
+          "harness": 1908,
+          "skills": 0,
+          "instructions": 36,
+          "tool_definitions": 0,
+          "messages": 613
+        }
+      }
+    },
+    {
+      "type": "tool.approval_required",
+      "id": "01m0x8138anffd6z2pwje052r4",
+      "created_at": "2026-08-25T19:58:18.378Z",
+      "thread_id": "main",
+      "tool_calls": [
+        {
+          "id": "call_2bd2ef15af4b4203b789a730",
+          "source_event_id": "01m0x812624c5jf5wkw9qwzjqt"
+        }
+      ]
+    },
+    {
+      "tool_call_id": "call_2bd2ef15af4b4203b789a730",
+      "content": "{\"error\":[{\"type\":\"text\",\"text\":\"{\\\"error\\\":\\\"User denied tool call: bumpsmith: unattended run: no human was asked about call_tool, and an unapproved irreversible action is a denied one\\\"}\"}]}",
+      "type": "tool.response",
+      "id": "01m0x813a0mkb9v4fqr8vx77hp",
+      "created_at": "2026-08-25T19:58:18.432Z",
+      "thread_id": "main"
+    },
+    {
+      "content": "I apologize for the issue. It seems that creating a pull request is considered an irreversible action that requires explicit user approval. Let me ask for your permission before proceeding.\n\n",
+      "tool_calls": [
+        {
+          "id": "call_21344000dd3341b9be0f5e2f",
+          "type": "function",
+          "function": {
+            "name": "ask_user_question",
+            "arguments": "{\"question\": \"I need to create a pull request on aryangorde8/bumpsmith repository from the branch feat/harness-approvals with the title 'wire the harness approval event to the gate'. This action is irreversible and will make the PR visible to everyone with repo access. Do you want me to proceed?\", \"options\": [\"Yes, please proceed\", \"No, don't create the PR\"]}"
+          },
+          "tool_info": {
+            "type": "truefoundry-system",
+            "name": "ask_user_question"
+          }
+        }
+      ],
+      "type": "model.message",
+      "id": "01m0x813a2p2aq6yk5tq5z9687",
+      "created_at": "2026-08-25T19:58:19.969Z",
+      "thread_id": "main",
+      "finish_reason": "tool_calls",
+      "usage": {
+        "input_tokens": 2727,
+        "output_tokens": 138,
+        "cache_read_tokens": 2640,
+        "input_tokens_breakdown": {
+          "harness": 1908,
+          "skills": 0,
+          "instructions": 36,
+          "tool_definitions": 0,
+          "messages": 783
+        }
+      }
+    }
+  ]
+}

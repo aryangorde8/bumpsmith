@@ -279,6 +279,21 @@ class Gate:
         self._records.append(Record(request, "allowed", decision.reason or "approved"))
         return result
 
+    def refuse(self, request: Request, reason: str) -> NotApprovedError:
+        """Record a refusal that was decided before the approver was reached.
+
+        For the caller that already knows the answer is no -- typically because it
+        could not describe the request well enough to be worth asking about. It
+        returns the exception rather than raising it, because a caller in that
+        position usually has an answer to send somewhere rather than a stack to
+        unwind.
+
+        There is deliberately no matching ``allow``. A method that recorded an
+        approval nobody gave would be exactly the bypass this module says it does
+        not have; one that records a refusal cannot let anything through.
+        """
+        return self._refuse(request, reason)
+
     def _refuse(self, request: Request, reason: str) -> NotApprovedError:
         """Record a refusal and build the exception that carries it.
 

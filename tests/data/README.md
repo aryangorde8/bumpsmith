@@ -33,3 +33,36 @@ Python while binding the arguments, before pydantic can attach one. Keeping both
 is the point: one class, two signatures, and only one of them can be classified
 the reliable way. Real pytest output against pydantic 2.12.5, captured 25 August
 2026.
+
+---
+
+# Recorded harness events
+
+`approval-call-tool.json` is not pytest output. It is the event stream of one
+real TrueForge turn, captured 25 August 2026 from the standalone harness at
+v0.1.4 running `bedrock-mantle/qwen-3-coder-480b`, and it is here because the
+schema and the harness disagree about something that matters.
+
+The agent was asked to open a pull request. The tool it wanted lives on an MCP
+server and was annotated `destructiveHint: true`, so the harness's **default**
+approval policy paused it -- no configuration was added to make that happen. The
+recording holds ten events: a first attempt to call a tool that was not in
+context, the deferred-discovery round trip that finds it, the call that was
+actually paused, the `tool.approval_required` that paused it, and the
+`tool.response` carrying the refusal that `bumpsmith.harness` sent back.
+
+Two things in it are worth the file's size.
+
+The paused call is `call_tool`, a `truefoundry-system` tool, and its `tool_info`
+says exactly that. The tool that would have run -- `open_pull_request` on
+`irreversible-things` -- appears only inside the *arguments*. A client that
+describes the call from `tool_info` names the wrong tool, and names it
+identically for every deferred call on the machine. `tests/test_harness.py` pins
+both halves: what the event says, and what the module reports after unwrapping it.
+
+The first attempt carries `"server_id": "unknown", "server_name": "unknown"` --
+what the harness fills in when it cannot resolve a server. It is a real example
+of an attribution that is present, well-formed, and worth nothing.
+
+Nothing in the file was edited. It contains no credentials; the repository and
+branch names in it are this project's own and are public.
