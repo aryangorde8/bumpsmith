@@ -66,3 +66,15 @@ of an attribution that is present, well-formed, and worth nothing.
 
 Nothing in the file was edited. It contains no credentials; the repository and
 branch names in it are this project's own and are public.
+
+# Recorded sandbox runs
+
+`sandbox-exec-regex.json` — one `exec` tool result, verbatim from a TrueForge
+0.1.4 session with the Daytona sandbox provider (26 Aug 2026). The command built
+a project with the class-3 break and ran pytest against it in the sandbox; the
+result came back `{"success": true, "response": {"exitCode": 2, "result": …}}`.
+
+It is here because `bumpsmith.run` is a module about reading one wire format
+correctly, and a hand-written example of that format only proves the module
+agrees with its author. The `exitCode: 2` is pytest's collection-error layout,
+so the same file exercises the join to `bumpsmith.failures` as well.

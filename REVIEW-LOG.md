@@ -41,9 +41,14 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 32 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | Wrapper named instead of the tool — *raised by the live harness* | **Fixed** — reproduced twice, before and after | this PR |
 | 33 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | `mcp:unknown` reported as an attribution — *raised by the live harness* | **Fixed** | this PR |
 | 34 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | A failed send re-asks, so a refusal can become an approval | **Fixed** — my own test pinned the bug | this PR |
-| 35 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | No production path constructs the bridge | **Accepted, deferred to [#14](https://github.com/aryangorde8/bumpsmith/pull/14) with a reason** | — |
+| 35 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | No production path constructs the bridge | **Accepted, deferred to the transport PR** — [#14](https://github.com/aryangorde8/bumpsmith/pull/14) found the same gap for `exec`; both land together | — |
 | 36 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | Policy keyed to the model-facing alias, not the tool | **Fixed** — and the reason is worse than the finding said | this PR |
 | 37 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | A reused call id suppresses a real call | **Fixed** | this PR |
+| 38 | [#14](https://github.com/aryangorde8/bumpsmith/pull/14) | A test helper substituted a valid answer for the invalid one under test — *found by another test* | **Fixed** | this PR |
+| 39 | [#14](https://github.com/aryangorde8/bumpsmith/pull/14) | Sandbox runner is never wired | **Accepted** — the same gap as 35, from the other side. Deferred to #15 | — |
+| 40 | [#14](https://github.com/aryangorde8/bumpsmith/pull/14) | A sandbox timeout is reported as never having run | **Fixed** — the module breaking its own stated guarantee | this PR |
+| 41 | [#14](https://github.com/aryangorde8/bumpsmith/pull/14) | A timeout leaves what the command started running | **Fixed** — and the reason is worse than the finding said | this PR |
+| 42 | [#14](https://github.com/aryangorde8/bumpsmith/pull/14) | Output that is not UTF-8 escapes the contract | **Fixed** | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -604,10 +609,140 @@ scratch directory, which is exactly the finding's point.
 The remedy is not to relax the separation — keeping decisions free of transport
 is why they can be tested against a recorded event stream, and why the module
 cannot quietly grow a retry loop around an approval. The remedy is the transport
-itself: an HTTP `Channel` and the poll loop, in the package, shipped in
-[#14](https://github.com/aryangorde8/bumpsmith/pull/14) rather than bolted onto
-this diff. Recorded here so that a reader who checks finds a plan and a link
-rather than a gap.
+itself: an HTTP client and the poll loop, in the package, rather than bolted onto
+this diff. Recorded here so that a reader who checks finds a plan rather than a
+gap.
+
+**Amended 26 Aug.** [#14](https://github.com/aryangorde8/bumpsmith/pull/14) was
+expected to carry that transport and does not. Building the sandbox seam first
+turned up the same gap from the other side — `bumpsmith.run` decides what an
+`exec` result *means* and takes the transport as a protocol, exactly as
+`harness.py` does for approvals — and both need the same session, turn and poll
+machinery. Writing it twice would be the wrong shape, so it is written once, in
+the PR after this one, and serves both. The gap now stands against two merged
+modules instead of one, which is worse than the original entry claimed and is
+the reason to say so here.
+
+---
+
+## 38 · A test that was testing nothing, caught by the test next to it
+
+`bumpsmith.run` exists to keep two things apart: a command that ran and failed,
+and a command that never ran. The first is a test result. The second is a
+sandbox outage, and reading it as the first would report a suite with no
+failures — which would be kept, and recorded as verified.
+
+So the module refuses a long list of malformed answers, and the tests walk that
+list. One entry is `None`: the harness said nothing at all. The helper that
+replays a prepared answer took it as a default:
+
+```python
+def __init__(self, answer: object = None, ...):
+    self.answer = answer if answer is not None else _ok()
+```
+
+`_ok()` is a *valid* result. The one case written to prove that nothing becomes
+a `Completed` was quietly handed something that becomes a `Completed`, and it
+had been passing for exactly as long as it existed.
+
+What found it was not review. It was
+`test_no_bad_answer_ever_becomes_a_result`, which asserts the property over
+every malformed shape at once instead of one `pytest.raises` per case. A
+per-case test would have gone green here: `pytest.raises(NeverRanError)` around
+a helper that returns a valid answer fails loudly, but only because the
+substitution happened to be visible — and the parametrised case that *did*
+fail pointed at the payload, not the helper. The aggregate test is what made
+the pattern obvious across two failures at once.
+
+Recorded because it is the same shape as finding 34, where my own test held a
+real defect in place. Twice now the test has been the thing that was wrong, and
+both times what caught it was a second test asserting the guarantee rather than
+the mechanism. That is worth more than the fix: a suite where every test checks
+one case is a suite that can be wrong in one case, silently.
+
+---
+
+## 39–42 · Four on the runner, three fixed here
+
+### 39 · Never wired — accepted, and the second time
+
+True as stated: nothing in the package constructs an `Exec`, so no real suite
+rerun happens in the sandbox. This is finding 35 seen from the other side, and
+recording it as a fresh discovery would be dishonest — the PR body said so
+before Qodo did.
+
+What is new is that it now stands against **two** merged modules. `run.py` takes
+its transport as a protocol for exactly the reason `harness.py` takes a
+`Channel`: the decision is testable against a recorded stream, and the module
+cannot quietly grow a retry loop around it. That was the right call twice and it
+has the same debt twice. The transport is written once, in #15, and serves both.
+Two is the limit; a third module taking a transport it does not have would stop
+being a design and start being a habit.
+
+### 40 · The module breaking its own guarantee
+
+`bumpsmith.run` exists to keep "ran and failed" apart from "never ran". Its
+transport handler was:
+
+```python
+except Exception as exc:
+    raise NeverRanError(f"the sandbox could not be reached: {exc!r}") from exc
+```
+
+`NeverRanError` promises, in its own docstring, that "the working tree is
+untouched by anything this run did, because it did nothing." Daytona is
+configured with `exec_timeout_ms: 60000`. A command that ran for a minute in the
+sandbox and then had its request abandoned would arrive here and be described to
+the caller as never having started — a false claim, and one a caller could
+retry on, running twice something whose first run had already done everything.
+
+The fix puts the classification where the knowledge is. Only the transport can
+tell whether a request was in flight, so a `RunError` it raises now passes
+through unchanged, and the `Exec` protocol documents that a transport giving up
+mid-flight should raise `TimedOutError`. Everything else is still read as never
+having started, because the safe reading of "I do not know" is that it did not.
+
+Worth naming plainly: this is the second time a defect in this project was the
+module contradicting a guarantee written in its own docstring. Prose stating a
+property is not the property.
+
+### 41 · Worse than reported: cleanup that kills the caller
+
+The finding says a timed-out suite can leave descendants running — true, and it
+matters more here than "Medium" suggests, because a surviving pytest worker
+writes to the same checkout `bumpsmith.apply` is about to revert. That is the
+"tree in a state nobody chose" that `RevertError` exists to prevent, arriving
+by a route the transaction cannot see.
+
+Then the fix was measured, and the finding was understating it. Reverting
+`start_new_session` and running the new orphan test did not produce a failure.
+It produced **no output at all**: the run terminated, and so did the shell around
+it. Without its own session the child sits in the *caller's* process group, so
+`os.killpg` aimed at "the command's group" is aimed at pytest, the agent, and
+everything else sharing it.
+
+So the isolation and the group-kill are not a mechanism plus a precaution. They
+are one mechanism, and holding only half of it is not degraded cleanup but a
+self-kill. `_end_process_tree` now refuses to signal the caller's own group and
+falls back to killing the single process, so the coupling is safe by
+construction rather than by whoever edits it next remembering. Both halves are
+tested, including one test whose entire assertion is that the process reached
+the next line.
+
+### 42 · Output that was never text
+
+`text=True` decodes with the locale's encoding and a strict error policy. A
+project printing bytes that are not valid UTF-8 — a test dumping binary, a
+traceback naming a file whose name never was text — raised `UnicodeDecodeError`
+straight past a contract promising either a `Completed` or a `RunError`.
+
+`gate.py` already reasons about exactly this, down to surrogates arriving from
+`os.fsdecode`, so the codebase knew the hazard and this module did not inherit
+the knowledge. Output is now captured as bytes and decoded with a pinned
+encoding and `errors="replace"`: losing a byte to U+FFFD costs a character in a
+diagnostic, and raising costs the run. Pinning it also means the same suite
+reads the same way here and in the sandbox, which the locale-dependent version
+did not guarantee.
 
 ---
 
