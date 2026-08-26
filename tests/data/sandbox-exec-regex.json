@@ -1,0 +1,13 @@
+{
+  "_comment": "One `exec` tool result, recorded verbatim from a TrueForge 0.1.4 session with the Daytona sandbox provider on 26 Aug 2026. The command built a project with the class-3 break (`regex=` removed in pydantic v2) and ran pytest against it. exitCode 2 is pytest's collection-error layout. Kept so the contract in bumpsmith.run is tested against what the harness actually sends rather than against a hand-written idea of it.",
+  "session_id": "01m0y73v348g2v593aerqj30rj",
+  "turn_id": "01m0y73v3b0v6y6p4c8qqfyfnx.local",
+  "command": "cd /tmp && rm -rf demo && mkdir demo && cd demo && printf 'from pydantic import BaseModel, Field\\n\\nclass User(BaseModel):\\n    name: str = Field(..., regex=\"^[a-z]+$\")\\n' > app.py && printf 'from app import User\\n\\ndef test_user():\\n    assert User(name=\"ada\").name == \"ada\"\\n' > test_app.py && (python -m pip install -q pydantic pytest >/dev/null 2>&1 || true) && python -m pytest -q",
+  "result": {
+    "success": true,
+    "response": {
+      "exitCode": 2,
+      "result": "\n==================================== ERRORS ====================================\n_________________________ ERROR collecting test_app.py _________________________\ntest_app.py:1: in <module>\n    from app import User\napp.py:3: in <module>\n    class User(BaseModel):\napp.py:4: in User\n    name: str = Field(..., regex=\"^[a-z]+$\")\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.13/site-packages/pydantic/fields.py:1322: in Field\n    raise PydanticUserError('`regex` is removed. use `pattern` instead', code='removed-kwargs')\nE   pydantic.errors.PydanticUserError: `regex` is removed. use `pattern` instead\nE   \nE   For further information visit https://errors.pydantic.dev/2.12/u/removed-kwargs\n=========================== short test summary info ============================\nERROR test_app.py - pydantic.errors.PydanticUserError: `regex` is removed. us...\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n1 error in 0.15s\n"
+    }
+  }
+}
