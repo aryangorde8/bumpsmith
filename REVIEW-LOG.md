@@ -69,6 +69,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 60 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The README said the loop ends one of ten ways; there were eleven — *self-found* | **Fixed** — stale since `WRONG_PLACE` landed in #16 | this PR |
 | 61 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The use check could not see `locals()["field"]`, so the deletion looked safe | **Fixed** — a body that can reach its locals by name is refused | this PR |
 | 62 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The proof accepted an exception type without the reason it was claiming | **Fixed** — stage, type and message, all three | this PR |
+| 63 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | `globals` sat in the dynamic-scope guard, which refused safe sites with a false reason — *self-found re-reading the fix for 61* | **Fixed** — a parameter is a local and the module namespace does not hold one | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -1266,6 +1267,39 @@ things the rewriter's design rests on.
 Demonstrated by breaking the claim rather than the check: pointing the `info`
 case at the field/config message passes under the old verdict and fails under the
 new one.
+
+---
+
+## 63 · A guard member that could not do the thing it was guarding against
+
+Found re-reading the fix for 61 before merging it, which is the only reason it
+is here rather than in somebody else's review.
+
+`_DYNAMIC_SCOPE` held `locals`, `vars`, `globals`, `eval` and `exec` — names
+whose presence means a parameter's uses cannot be read off the tree. Four of
+those can reach a local by name. `globals` cannot: a parameter is a local, and
+the module namespace does not hold it. Checked rather than reasoned about:
+
+```
+globals sees it      False
+locals sees it       True
+vars() sees it       True
+eval reaches it      True
+```
+
+The cost is not a wrong rewrite — it is a refusal, which is the safe direction.
+What makes it a finding is the *reason* attached to the refusal:
+
+> `check` calls `globals`, so what it reads cannot be settled by reading it; a
+> parameter removed here could still be reached by name at runtime
+
+Which is not true of `globals`. A guard is allowed to cost a false refusal only
+when the reason it gives for one is honest; otherwise the log of skipped sites —
+the thing a person reads to decide whether to finish the migration by hand —
+contains a sentence that will not survive being checked.
+
+The boundary is now pinned from both sides: a test that `globals()` alone does
+not stop the rewrite, and one that `exec` still does.
 
 ---
 

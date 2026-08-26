@@ -44,13 +44,19 @@ from bumpsmith.sources import read_source
 
 _V1_REGEX = "regex"
 _V2_PATTERN = "pattern"
-_DYNAMIC_SCOPE = frozenset({"locals", "vars", "globals", "eval", "exec"})
+_DYNAMIC_SCOPE = frozenset({"locals", "vars", "eval", "exec"})
 """Names whose presence means a parameter's uses cannot be read off the tree.
 
 `locals()["field"]` is a read of `field` that is not an :class:`ast.Name` for
 it, so the use detector below cannot see it and the deletion would look safe.
 Anything here is a refusal rather than a puzzle to solve: whether the string
 handed to `eval` names a parameter is not a question a parser answers.
+
+Each member has to be able to reach a *local* by name, which is why `globals`
+is not one. It was, briefly. A parameter is a local and the module namespace
+does not hold it, so a body doing nothing dynamic but calling `globals()` was
+being refused with a reason that was not true of it -- and a guard is allowed
+to cost a false refusal only when the reason it gives for one is honest.
 """
 
 _SEPARATOR = re.compile(r"^\s*,\s*$")

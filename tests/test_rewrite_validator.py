@@ -561,3 +561,41 @@ def test_the_dynamic_check_is_asked_before_the_use_check(tmp_path: Path) -> None
 
     assert result.edits == ()
     assert "calls `vars`" in result.skipped[0].reason
+
+
+def test_globals_alone_does_not_stop_the_rewrite(tmp_path: Path) -> None:
+    """A parameter is a local, and `globals()` cannot reach one.
+
+    Pins the boundary of `_DYNAMIC_SCOPE` from the safe side. The set costs a
+    refusal for every name in it, so a name that cannot actually reach a
+    parameter is a site refused for a reason that is not true of it.
+    """
+    source = (
+        _HEAD + "class Device(BaseModel):\n"
+        "    status: int\n"
+        "\n"
+        '    @validator("status")\n'
+        "    def check(cls, v, field):\n"
+        '        return v if globals().get("SOMETHING") else None\n'
+    )
+    _write(tmp_path, source)
+
+    assert _signature(_rewritten(tmp_path)) == "cls, v"
+
+
+def test_exec_is_still_refused(tmp_path: Path) -> None:
+    """`exec` reads the same namespace `eval` does, so it stays in the set."""
+    source = (
+        _HEAD + "class Device(BaseModel):\n"
+        "    status: int\n"
+        "\n"
+        '    @validator("status")\n'
+        "    def check(cls, v, config):\n"
+        '        exec("v = config")\n'
+        "        return v\n"
+    )
+    _write(tmp_path, source)
+    result = _plan_for(tmp_path)
+
+    assert result.edits == ()
+    assert "calls `exec`" in result.skipped[0].reason
