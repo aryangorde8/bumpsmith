@@ -497,3 +497,67 @@ def test_a_validator_with_neither_parameter_is_not_a_site(tmp_path: Path) -> Non
 
     assert result.edits == ()
     assert result.rewritten == 0
+
+
+def test_a_body_that_reaches_its_locals_by_name_is_skipped(tmp_path: Path) -> None:
+    """`locals()["field"]` is a read of `field` that leaves no `ast.Name` for it.
+
+    The use check below it would come back clean, and clean would mean "no
+    evidence of a use" rather than "evidence of no use". Removing the parameter
+    then trades an ImportError everybody sees for a KeyError raised only when
+    that validator runs -- quieter, later, and in somebody else's repository.
+    """
+    source = (
+        _HEAD + "class Device(BaseModel):\n"
+        "    status: int\n"
+        "\n"
+        '    @validator("status")\n'
+        "    def check(cls, v, field):\n"
+        '        return v if locals()["field"] else None\n'
+    )
+    _write(tmp_path, source)
+    result = _plan_for(tmp_path)
+
+    assert result.edits == ()
+    assert not result.is_complete
+    assert "calls `locals`" in result.skipped[0].reason
+    assert "reached by name at runtime" in result.skipped[0].reason
+
+
+def test_eval_in_the_body_is_skipped_too(tmp_path: Path) -> None:
+    """Whether the string handed to `eval` names a parameter is not a parser's question."""
+    source = (
+        _HEAD + "class Device(BaseModel):\n"
+        "    status: int\n"
+        "\n"
+        '    @validator("status")\n'
+        "    def check(cls, v, config):\n"
+        '        return eval("config").x\n'
+    )
+    _write(tmp_path, source)
+    result = _plan_for(tmp_path)
+
+    assert result.edits == ()
+    assert "calls `eval`" in result.skipped[0].reason
+
+
+def test_the_dynamic_check_is_asked_before_the_use_check(tmp_path: Path) -> None:
+    """A body doing both is refused for the reason that generalises.
+
+    `vars()` makes the question unanswerable whether or not this particular body
+    also happens to name the parameter, and the reason given should be the one
+    that would still hold if it did not.
+    """
+    source = (
+        _HEAD + "class Device(BaseModel):\n"
+        "    status: int\n"
+        "\n"
+        '    @validator("status")\n'
+        "    def check(cls, v, field):\n"
+        "        return field if vars() else v\n"
+    )
+    _write(tmp_path, source)
+    result = _plan_for(tmp_path)
+
+    assert result.edits == ()
+    assert "calls `vars`" in result.skipped[0].reason

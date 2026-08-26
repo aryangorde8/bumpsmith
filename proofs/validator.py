@@ -78,6 +78,24 @@ class Case:
     expected: str
     """``ok``, or the exception type the run has to end with."""
 
+    stage: str
+    """Where it has to happen: ``build``, ``call``, or ``ok``.
+
+    Load-bearing rather than decoration. Two of these cases raise the same
+    exception type for different reasons, and one of them raises at a different
+    moment entirely -- which is most of what this proof is for.
+    """
+
+    says: str
+    """Text the message has to contain.
+
+    Without it a case passes on the exception *type* alone, and the type is not
+    what is being claimed. `validator with info` and `validator with field and
+    config` both end in ``PydanticUserError``; the whole reason to run the first
+    is that it fails for a different reason than the second, and a check that
+    could not tell them apart would keep saying so after that stopped being true.
+    """
+
     why: str
     """What the rewriter would get wrong if this case came back differently."""
 
@@ -88,6 +106,8 @@ ROOT = "root_validator"
 CASES = (
     Case(
         name="validator with field and config",
+        stage="build",
+        says="are not available in Pydantic V2",
         decorator=VALIDATOR,
         arguments='"y"',
         signature="cls, v, values, field, config",
@@ -97,6 +117,8 @@ CASES = (
     ),
     Case(
         name="validator with values only",
+        stage="ok",
+        says="M(x=1, y=2)",
         decorator=VALIDATOR,
         arguments='"y"',
         signature="cls, v, values",
@@ -106,6 +128,8 @@ CASES = (
     ),
     Case(
         name="validator with neither",
+        stage="ok",
+        says="M(x=1, y=2)",
         decorator=VALIDATOR,
         arguments='"y"',
         signature="cls, v",
@@ -115,6 +139,8 @@ CASES = (
     ),
     Case(
         name="validator with info",
+        stage="build",
+        says="Unsupported signature for V1 style validator",
         decorator=VALIDATOR,
         arguments='"y"',
         signature="cls, v, info",
@@ -124,6 +150,8 @@ CASES = (
     ),
     Case(
         name="validator with field alone",
+        stage="build",
+        says="are not available in Pydantic V2",
         decorator=VALIDATOR,
         arguments='"y"',
         signature="cls, v, field",
@@ -133,6 +161,8 @@ CASES = (
     ),
     Case(
         name="validator with config alone",
+        stage="build",
+        says="are not available in Pydantic V2",
         decorator=VALIDATOR,
         arguments='"y"',
         signature="cls, v, config",
@@ -142,6 +172,8 @@ CASES = (
     ),
     Case(
         name="root_validator with field and config",
+        stage="call",
+        says="missing 2 required positional arguments",
         decorator=ROOT,
         arguments="skip_on_failure=True",
         signature="cls, values, field, config",
@@ -154,6 +186,8 @@ CASES = (
     ),
     Case(
         name="root_validator with values only",
+        stage="ok",
+        says="M(x=1, y=2)",
         decorator=ROOT,
         arguments="skip_on_failure=True",
         signature="cls, values",
@@ -204,10 +238,19 @@ def _version(python: str) -> str | None:
 
 
 def _verdict(case: Case, outcome: dict[str, object]) -> bool:
-    """Whether this run says what the rewriter was built on the strength of."""
-    if case.expected == "ok":
-        return outcome.get("stage") == "ok"
-    return outcome.get("error") == case.expected
+    """Whether this run says what the rewriter was built on the strength of.
+
+    All three of stage, type and message, because any two of them can be right
+    while the claim is wrong. A future pydantic that refused every V1 validator
+    with one blanket ``PydanticUserError`` would satisfy a check on the type
+    alone, and this script would go on reporting that `values` still works.
+    """
+    if outcome.get("stage") != case.stage:
+        return False
+    if case.expected != "ok" and outcome.get("error") != case.expected:
+        return False
+    message = outcome.get("message")
+    return isinstance(message, str) and case.says in message
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -252,12 +295,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             wrong.append(case.name)
         got = outcome.get("error") or outcome.get("stage")
         print(f"  {'OK ' if ok else 'NO '} {case.name:38} expected {case.expected:18} got {got}")
+        if not ok:
+            print(f"      wanted {case.stage}/{case.says!r}")
+            print(f"      got    {outcome.get('stage')}/{str(outcome.get('message'))[:120]!r}")
         recorded.append(
             {
                 "case": case.name,
                 "decorator": case.decorator,
                 "signature": case.signature,
                 "expected": case.expected,
+                "expected_stage": case.stage,
+                "expected_message_contains": case.says,
                 "outcome": outcome,
                 "as_expected": ok,
                 "why_it_matters": case.why,

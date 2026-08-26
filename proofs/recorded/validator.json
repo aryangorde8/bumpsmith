@@ -8,6 +8,8 @@
       "decorator": "validator",
       "signature": "cls, v, values, field, config",
       "expected": "PydanticUserError",
+      "expected_stage": "build",
+      "expected_message_contains": "are not available in Pydantic V2",
       "outcome": {
         "stage": "build",
         "error": "PydanticUserError",
@@ -21,6 +23,8 @@
       "decorator": "validator",
       "signature": "cls, v, values",
       "expected": "ok",
+      "expected_stage": "ok",
+      "expected_message_contains": "M(x=1, y=2)",
       "outcome": {
         "stage": "ok",
         "error": null,
@@ -34,6 +38,8 @@
       "decorator": "validator",
       "signature": "cls, v",
       "expected": "ok",
+      "expected_stage": "ok",
+      "expected_message_contains": "M(x=1, y=2)",
       "outcome": {
         "stage": "ok",
         "error": null,
@@ -47,6 +53,8 @@
       "decorator": "validator",
       "signature": "cls, v, info",
       "expected": "PydanticUserError",
+      "expected_stage": "build",
+      "expected_message_contains": "Unsupported signature for V1 style validator",
       "outcome": {
         "stage": "build",
         "error": "PydanticUserError",
@@ -60,6 +68,8 @@
       "decorator": "validator",
       "signature": "cls, v, field",
       "expected": "PydanticUserError",
+      "expected_stage": "build",
+      "expected_message_contains": "are not available in Pydantic V2",
       "outcome": {
         "stage": "build",
         "error": "PydanticUserError",
@@ -73,6 +83,8 @@
       "decorator": "validator",
       "signature": "cls, v, config",
       "expected": "PydanticUserError",
+      "expected_stage": "build",
+      "expected_message_contains": "are not available in Pydantic V2",
       "outcome": {
         "stage": "build",
         "error": "PydanticUserError",
@@ -86,6 +98,8 @@
       "decorator": "root_validator",
       "signature": "cls, values, field, config",
       "expected": "TypeError",
+      "expected_stage": "call",
+      "expected_message_contains": "missing 2 required positional arguments",
       "outcome": {
         "stage": "call",
         "error": "TypeError",
@@ -99,6 +113,8 @@
       "decorator": "root_validator",
       "signature": "cls, values",
       "expected": "ok",
+      "expected_stage": "ok",
+      "expected_message_contains": "M(x=1, y=2)",
       "outcome": {
         "stage": "ok",
         "error": null,

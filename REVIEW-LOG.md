@@ -67,6 +67,8 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 58 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The class-1 rule told you to write `info`, which pydantic refuses — *found by asking pydantic instead of reading its error* | **Fixed** — the rule says remove, and `proofs/validator.py` is the run behind it | this PR |
 | 59 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | `BreakClass` said class 3 had no recorded sample, three lines above the class 3 that had two — *self-found* | **Fixed** — and class 2 now has a sample named, with why it still has no classifier | this PR |
 | 60 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The README said the loop ends one of ten ways; there were eleven — *self-found* | **Fixed** — stale since `WRONG_PLACE` landed in #16 | this PR |
+| 61 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The use check could not see `locals()["field"]`, so the deletion looked safe | **Fixed** — a body that can reach its locals by name is refused | this PR |
+| 62 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The proof accepted an exception type without the reason it was claiming | **Fixed** — stage, type and message, all three | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -1202,6 +1204,68 @@ Small, and recorded at the same size as the others because the alternative is a
 log that only lists findings flattering to the person keeping it. It is also the
 second time in two pull requests that a number stated in prose has drifted from
 the code it describes, which is the argument for stating fewer of them.
+
+---
+
+## 61–62 · Two from Qodo, both accepted
+
+Both are the same shape as findings this log already holds, which is the useful
+thing about them: the pattern was known and the code was written into it anyway.
+
+### 61 · A read the parser could not see
+
+`_names_used` collects `ast.Name` nodes, and refuses the deletion if `field` or
+`config` is among them. A body doing `locals()["field"]` reads the parameter
+without producing an `ast.Name` for it, so the check came back clean and the
+rewriter wrote the edit. Reproduced before fixing:
+
+```python
+@validator("status")
+def check(cls, v, field):
+    return v if locals()["field"] else None
+```
+
+went to `def check(cls, v):` with the body untouched.
+
+What makes it worth the finding rather than the shrug it first invites — nobody
+writes that in a pydantic validator — is the direction of the damage. The
+original break is an `ImportError` at collection: loud, immediate, every test in
+the module. What the rewrite produces is a `KeyError` raised only when that one
+validator runs. **Quieter, later, and conditional**, in a repository the tool was
+asked to make safer.
+
+The fix is not a cleverer detector. `locals`, `vars`, `globals`, `eval` and
+`exec` in a validator's body mean this function cannot answer the question it is
+being asked, and the honest answer to a question you cannot answer is to say so.
+Asked *before* the use check, because it is a different question: the use check
+finds uses, and this one establishes whether finding them is possible at all. A
+clean answer from a detector that cannot see is an absence of evidence read as
+evidence of absence.
+
+### 62 · The proof checked the type and called it the reason
+
+`_verdict` compared the exception class and nothing else. Four of the eight cases
+expect `PydanticUserError`, and **two of them expect it for different reasons** --
+that is the entire point of running both. `validator with field and config`
+raises it because those parameters are gone; `validator with info` raises it
+because the V1 shim will not take an `info` parameter at all. A check on the type
+could not tell those apart, so a future pydantic that refused every V1 validator
+with one blanket error would satisfy every case while the conclusion the script
+exists to support quietly stopped being true.
+
+Same shape as finding 54 on #16, where "nonzero and something parsed" accepted a
+sandbox failure that had nothing to do with the break being demonstrated. A proof
+that accepts a superset of what it claims is worth less than no proof, because it
+reports confidence at exactly the moment it has least.
+
+Now checked three ways -- stage, type, and a fragment of the message -- and the
+stage is load-bearing on its own: `root_validator` fails at *call* time where
+every `validator` case fails at *build* time, and that difference is one of the
+things the rewriter's design rests on.
+
+Demonstrated by breaking the claim rather than the check: pointing the `info`
+case at the field/config message passes under the old verdict and fails under the
+new one.
 
 ---
 

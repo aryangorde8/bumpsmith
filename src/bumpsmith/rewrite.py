@@ -44,6 +44,15 @@ from bumpsmith.sources import read_source
 
 _V1_REGEX = "regex"
 _V2_PATTERN = "pattern"
+_DYNAMIC_SCOPE = frozenset({"locals", "vars", "globals", "eval", "exec"})
+"""Names whose presence means a parameter's uses cannot be read off the tree.
+
+`locals()["field"]` is a read of `field` that is not an :class:`ast.Name` for
+it, so the use detector below cannot see it and the deletion would look safe.
+Anything here is a refusal rather than a puzzle to solve: whether the string
+handed to `eval` names a parameter is not a question a parser answers.
+"""
+
 _SEPARATOR = re.compile(r"^\s*,\s*$")
 """What may sit between two parameters for the first to be removable.
 
@@ -539,6 +548,12 @@ def _names_used(node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
     registers a use that shadowing makes harmless. Reading it as a use costs a
     skip with a reason on it; missing a real one costs a NameError at runtime in
     somebody else's repository.
+
+    What it cannot see is a name reached without being written -- ``locals()``,
+    ``eval`` and the rest of :data:`_DYNAMIC_SCOPE`. Those are not detected here
+    because they are not uses of the parameter; they are evidence that uses may
+    exist which this function is not able to find. :func:`_drop_parameters`
+    treats them as such.
     """
     used: set[str] = set()
     for inner in ast.walk(node):
@@ -569,6 +584,20 @@ def _drop_parameters(
     replacements, or a reason nothing can be written.
     """
     used = _names_used(node)
+    # Asked before the parameter names are, because it is a different question.
+    # The check below finds uses; this one establishes whether finding them is
+    # possible at all. A body holding `locals()["field"]` reads the parameter
+    # without ever naming it in a way the tree records, so a clean answer from
+    # the use check would be an absence of evidence read as evidence of absence.
+    dynamic = sorted(used & _DYNAMIC_SCOPE)
+    if dynamic:
+        names = " and ".join(f"`{name}`" for name in dynamic)
+        return [], (
+            f"{node.name} calls {names}, so what it reads cannot be settled by "
+            f"reading it; a parameter removed here could still be reached by name "
+            f"at runtime"
+        )
+
     reading = sorted({argument.arg for argument in offending} & used)
     if reading:
         names = " and ".join(f"`{name}`" for name in reading)
