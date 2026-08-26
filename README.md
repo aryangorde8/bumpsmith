@@ -107,6 +107,9 @@ python -m bumpsmith ./fixtures/B --package emnify -- ./venv/bin/python -m pytest
 | `--timeout SECONDS` | seconds allowed for each run of the suite (default 600) |
 | `--json PATH` | also write the full report there, as JSON |
 | `--html PATH` | also write it as a **self-contained page** — the same report, rendered for a person. No network, no scripts, opens from `file://` |
+| `--open-pr REMOTE` | after a green migration, offer to push to this remote and open a pull request. The remote is **named, never inferred**, and nothing is pushed without a typed `yes` — see [below](#stopping-before-anything-irreversible) |
+| `--pr-branch NAME` | the branch `--open-pr` pushes (default `bumpsmith/pydantic-v2`) |
+| `--pr-base NAME` | the branch to open against (default: whatever the remote's HEAD points at) |
 | `--sandbox` | parsed and **refused**, with the reason — see [below](#where-the-suite-runs) |
 
 Exit status is `0` if the suite ends green, `1` if it does not, and `2` if the
@@ -340,9 +343,28 @@ the first version of this, and a docstring is not an enforcement.
 
 ### Stopping before anything irreversible
 
-Nothing here opens a pull request yet. When it does, it goes through
+`--open-pr REMOTE` pushes a branch and opens a pull request, and it goes through
 `bumpsmith.gate`, which owns the call rather than warning about it: a denial is
-not an error raised afterwards, it is a call that never happens. There is
+not an error raised afterwards, it is a call that never happens.
+
+**The dangerous part is not opening a pull request. It is opening one somewhere
+nobody chose.** A migration runs against a clone of somebody else's repository,
+so its `origin` is *their* repository — and every convenience the flag could
+offer (default to `origin`, infer the base, push and see) points the
+irreversible action at the one destination it must never reach. So the remote is
+named by you, resolved to a URL before anybody is asked, and it is the **URL**
+that the approval shows and the fingerprint binds. An approval granted for your
+fork cannot be replayed against the upstream it was cloned from.
+
+The prompt requires the whole word `yes`. `y` is a refusal, `n` is a refusal, and
+so is a run with no terminal attached — a CI job has nobody in it to say no. The
+commit stages the migration's own paths one by one, never `git add -A`: the
+repository being migrated is a working directory somebody may have been working
+in, and a pathspec that *can* sweep their uncommitted work eventually will.
+
+[`proofs/pull_request.py`](proofs/pull_request.py) runs all four answers against
+a real bare git repository and checks what reached it each time. It needs no
+harness, no network and no credentials. There is
 deliberately no bypass — no `force=True`, no "approve the safe ones
 automatically", no environment variable that turns it off for a while. Each of
 those is a way for the guarantee to be true in the tests and false in the run
@@ -377,7 +399,7 @@ git -C ./fixtures/B diff              # empty — every edit taken back
 git -C ./fixtures/B status --ignored  # .pytest_cache/, __pycache__/ — pytest's, not bumpsmith's
 ```
 
-[`proofs/`](proofs/README.md) holds three scripts that demonstrate things a test
+[`proofs/`](proofs/README.md) holds the scripts that demonstrate things a test
 suite on a laptop cannot reach, plus the verbatim output of each from 26 August
 2026. [`proofs/validator.py`](proofs/validator.py) is the one that needs no
 harness — only an interpreter with pydantic v2 on it.
@@ -441,8 +463,9 @@ find them yourself.
 
 - **It does not migrate class 2 or class 5.** It classifies class 5 and stops;
   class 2 it does not classify at all, for the reason given above.
-- **It does not open pull requests yet.** The gate that will guard that call
-  exists and its denial is proven; the call itself is not written.
+- **It does not open a pull request you did not approve**, and treats every
+  answer but the word `yes` as no. It also cannot open one for a run that
+  reverted: there is nothing on disk to send.
 - **It does not run the suite in a sandbox while editing locally**, and refuses
   to pretend otherwise. See `--sandbox`.
 - **It does not retry, and it does not guess.** A failure that does not narrow to

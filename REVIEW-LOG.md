@@ -84,6 +84,8 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 75 | [#19](https://github.com/aryangorde8/bumpsmith/pull/19) | `--json out --html out` wrote both in turn, reported two successes and exited 0 with the JSON gone | **Fixed** — refused before the suite runs, paths compared resolved | this PR |
 | 76 | [#19](https://github.com/aryangorde8/bumpsmith/pull/19) | `page()`'s docstring named `__main__.report_payload`, a function that was never written — *self-found* | **Fixed** — described by what it is, not by a name that must keep existing | this PR |
 | 77 | [#19](https://github.com/aryangorde8/bumpsmith/pull/19) | "It stopped at `no-rule`. the failure classified as UNKNOWN" — every `Stop` reason is a lowercase clause — *self-found by reading the rendered page* | **Fixed** — a dash, and the sentence is terminated | this PR |
+| 78 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | The pull request body said "of which 1 were rewritten" — the nouns went through `_count` and the verb between them did not — *self-found by reading a pushed commit* | **Fixed** | this PR |
+| 79 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | The body stated the one-site-against-every-site gap when there was no gap; `report.py` had already decided that question correctly and the markdown did not inherit it — *self-found the same way* | **Fixed** — suppressed on both sides, with a test on each | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -1661,6 +1663,44 @@ terminated — unless the reason already ends in punctuation, which
 every one of them was invisible to a passing suite.** That is not an argument
 against the tests; it is the argument for the page. A report nobody reads is a
 report nobody checks.
+
+---
+
+## 78–79 · Two from reading a pull request this actually opened
+
+Both in the body `bumpsmith.publish` writes. Neither is a crash, neither could
+fail a test that did not already know to look, and both were on a real remote
+before they were found — which is the argument for opening one against a bare
+repository in a temporary directory before opening one against anybody's project.
+
+### 78 · "of which 1 were rewritten"
+
+Verb agreement, in the sentence that carries the number a reviewer is being asked
+to accept. The module has a `_count` helper for exactly this problem and it was
+used for the nouns on either side -- `1 site`, `1 file` -- and not for the verb
+between them. The half of the sentence that was hand-written is the half that was
+wrong, which is the ordinary shape of this.
+
+### 79 · A gap stated where there was no gap
+
+> The failure named one site. The rule matches **1 site across 1 file**, of which
+> 1 was rewritten.
+
+Three numbers, all the same, arranged to look like a comparison. The whole reason
+this project emits a rule rather than a patch is that those figures usually
+differ; saying so when they do not spends a reviewer's attention and returns
+nothing, and it makes the case where the numbers *do* differ harder to notice
+because the sentence is always there.
+
+`bumpsmith.report` already decided this exact question and decided it correctly
+-- the gap bar is suppressed when `found <= reported`, with a comment saying that
+drawing one anyway "would dress up the least interesting case as the point". The
+markdown body was written afterwards and did not inherit the decision.
+
+**Two renderings of one run, and one of them had learned something the other had
+not.** That is finding 71's shape at one remove: not a payload with one consumer,
+but a *judgment* with one consumer. Both now suppress it, and there is a test on
+each side rather than a comment pointing at the other.
 
 ---
 

@@ -1,0 +1,102 @@
+{
+  "python": "/home/aryan/bumpsmith/.venv/bin/python",
+  "conclusion": "The push happens on `yes` and on nothing else. `y`, `n` and an absent terminal are all refusals, and after each of them the remote is byte-identical to what it was. The approved push carries one commit touching only the file the migration wrote.",
+  "cases": [
+    {
+      "case": "no terminal",
+      "answered": null,
+      "approval_expected": false,
+      "branches_before": [
+        "trunk"
+      ],
+      "branches_after": [
+        "trunk"
+      ],
+      "pushed": [],
+      "as_expected": true,
+      "why_it_matters": "A CI job, a pipe or a nohup has nobody in it to say no. Fail-closed is the only safe reading of silence when the action is a push.",
+      "output": [
+        "  files    mypkg/__init__.py",
+        "--------------------------------------------------------------------",
+        "",
+        "not opened: open_pull_request was not approved: stdin is not a terminal, so there is nobody here to approve this"
+      ]
+    },
+    {
+      "case": "answered n",
+      "answered": "n",
+      "approval_expected": false,
+      "branches_before": [
+        "trunk"
+      ],
+      "branches_after": [
+        "trunk"
+      ],
+      "pushed": [],
+      "as_expected": true,
+      "why_it_matters": "The ordinary refusal. It must cost the user nothing and leave no trace.",
+      "output": [
+        "  files    mypkg/__init__.py",
+        "--------------------------------------------------------------------",
+        "type `yes` to approve, anything else to refuse: ",
+        "not opened: open_pull_request was not approved: the answer was 'n'"
+      ]
+    },
+    {
+      "case": "answered y",
+      "answered": "y",
+      "approval_expected": false,
+      "branches_before": [
+        "trunk"
+      ],
+      "branches_after": [
+        "trunk"
+      ],
+      "pushed": [],
+      "as_expected": true,
+      "why_it_matters": "`y` is what a person types when they are not reading. The whole word is the only thing separating 'I read that' from 'I was pressing return'.",
+      "output": [
+        "  files    mypkg/__init__.py",
+        "--------------------------------------------------------------------",
+        "type `yes` to approve, anything else to refuse: ",
+        "not opened: open_pull_request was not approved: the answer was 'y'"
+      ]
+    },
+    {
+      "case": "answered yes",
+      "answered": "yes",
+      "approval_expected": true,
+      "branches_before": [
+        "trunk"
+      ],
+      "branches_after": [
+        "bumpsmith/pydantic-v2",
+        "trunk"
+      ],
+      "pushed": [
+        "bumpsmith/pydantic-v2"
+      ],
+      "as_expected": true,
+      "why_it_matters": "The one path that may push, and it pushes only the migration's own file.",
+      "output": [
+        "--------------------------------------------------------------------",
+        "type `yes` to approve, anything else to refuse: ",
+        "branch bumpsmith/pydantic-v2 pushed to /tmp/bumpsmith-pr-proof-ommj16r_/fork.git",
+        "  the branch is pushed; the pull request was not opened: `gh pr create` exited 1. Open it from /tmp/bumpsmith-pr-proof-ommj16r_/fork.git."
+      ]
+    },
+    {
+      "case": "what landed",
+      "files": [
+        "mypkg/__init__.py"
+      ],
+      "commits": [
+        "pydantic v2: rename the `regex=` argument to `pattern=`"
+      ],
+      "content_matches_the_migration": true,
+      "as_expected": true,
+      "why_it_matters": "One commit, one file, exactly the migration's edit. The repository being migrated is somebody's working directory; a push that swept the tree would put their uncommitted work in a pull request under this tool's name.",
+      "repo": "/tmp/bumpsmith-pr-proof-ommj16r_/repo"
+    }
+  ]
+}

@@ -21,9 +21,17 @@ from pathlib import Path
 from typing import NoReturn
 
 from bumpsmith.apply import RevertError
+from bumpsmith.gate import Allow, Decision, Deny, Gate, NotApprovedError, Request
 from bumpsmith.migrate import DEFAULT_STEP_LIMIT, Migration, Outcome, Step, Stop, migrate
+from bumpsmith.publish import (
+    DEFAULT_BRANCH,
+    NothingToPublishError,
+    PublishError,
+    open_pull_request,
+    propose,
+)
 from bumpsmith.report import page as report_page
-from bumpsmith.run import DEFAULT_TIMEOUT, LocalRunner
+from bumpsmith.run import DEFAULT_TIMEOUT, LocalRunner, Runner
 
 DEFAULT_COMMAND = (sys.executable, "-m", "pytest", "-q")
 """The suite command when none is given.
@@ -146,6 +154,30 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--open-pr",
+        metavar="REMOTE",
+        dest="open_pr",
+        help=(
+            "after a green migration, offer to push to this remote and open a pull "
+            "request. The remote is named, never inferred -- see `--pr-branch`, "
+            "`--pr-base`. Nothing is pushed without a typed `yes`"
+        ),
+    )
+    parser.add_argument(
+        "--pr-branch",
+        default=DEFAULT_BRANCH,
+        metavar="NAME",
+        dest="pr_branch",
+        help=f"the branch `--open-pr` pushes (default: {DEFAULT_BRANCH})",
+    )
+    parser.add_argument(
+        "--pr-base",
+        default="",
+        metavar="NAME",
+        dest="pr_base",
+        help="the branch to open against (default: whatever the remote's HEAD points at)",
+    )
+    parser.add_argument(
         "--sandbox",
         action="store_true",
         help="run the suite in the harness's sandbox (refused; run with it to see why)",
@@ -226,6 +258,81 @@ not two grades of the same thing, and automation that cannot tell them apart
 retries the wrong one -- which is the same distinction :mod:`bumpsmith.run`
 exists to keep, carried out to the process's exit status.
 """
+
+
+class _AskAtTheTerminal:
+    """The human in "human in the loop", when the loop is a command line.
+
+    Prints what is about to happen and waits. Requires the whole word ``yes``:
+    an irreversible action approved by a keystroke is approved by a slip, and
+    the extra two characters are the only thing separating "I read that" from
+    "I was pressing return".
+
+    Everything that is not that word is a denial, including end-of-file. A run
+    with nothing attached to answer -- a CI job, a pipe, a nohup -- must not be
+    able to push to somebody's remote because there was no one there to say no.
+    """
+
+    def decide(self, request: Request) -> Decision:
+        print("\n" + "-" * 68)
+        print("APPROVAL NEEDED")
+        print(f"  {request.summary}")
+        for key, value in request.detail.items():
+            print(f"  {key:<8} {value}" if len(value) < 200 else f"  {key:<8} <{len(value)} chars>")
+        print("-" * 68)
+        if not sys.stdin.isatty():
+            return Deny(reason="stdin is not a terminal, so there is nobody here to approve this")
+        try:
+            answer = input("type `yes` to approve, anything else to refuse: ")
+        except (EOFError, KeyboardInterrupt):
+            return Deny(reason="the question was interrupted")
+        if answer.strip() != "yes":
+            return Deny(reason=f"the answer was {answer.strip()!r}")
+        return Allow(fingerprint=request.fingerprint(), reason="approved at the terminal")
+
+
+def _publish(migration: Migration, root: Path, args: argparse.Namespace, runner: Runner) -> int:
+    """Offer the pull request. Returns the exit status this adds, or 0.
+
+    A denial is not an error. Somebody was asked and said no, which is the
+    system working, so it leaves the exit code the migration earned. Only a
+    failure -- a remote that does not exist, a push that was refused -- is a 2,
+    because then a requested operation could not be carried out at all.
+    """
+    try:
+        proposal = propose(
+            migration,
+            root,
+            remote=args.open_pr,
+            runner=runner,
+            branch=args.pr_branch,
+            base=args.pr_base,
+        )
+    except NothingToPublishError as exc:
+        print(f"\nno pull request: {exc}")
+        return 0
+    except PublishError as exc:
+        print(f"\ncould not describe a pull request: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        opened = open_pull_request(Gate(_AskAtTheTerminal()), proposal, runner)
+    except NotApprovedError as exc:
+        # Printed, not raised. The gate recorded it, nothing was pushed, and the
+        # migration itself still happened -- the tree is green and the report is
+        # written. Treating a refusal as a crash would make saying no expensive.
+        print(f"\nnot opened: {exc}")
+        return 0
+    except PublishError as exc:
+        print(f"\nthe pull request failed: {exc}", file=sys.stderr)
+        return 2
+
+    if opened.url:
+        print(f"\npull request opened: {opened.url}")
+    else:
+        print(f"\nbranch {opened.branch} pushed to {opened.pushed_to}")
+        print(f"  {opened.note}")
+    return 0
 
 
 def _status(stop: Stop) -> int:
@@ -335,7 +442,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         print(f"\nreport written to {path}")
 
-    return _status(migration.stop)
+    status = _status(migration.stop)
+    # After the reports, deliberately. Whatever happens to the pull request, the
+    # evidence for the run is already on disk -- and if the push fails, that
+    # evidence is the thing somebody needs.
+    if args.open_pr:
+        status = _publish(migration, root, args, LocalRunner(timeout=args.timeout)) or status
+    return status
 
 
 if __name__ == "__main__":
