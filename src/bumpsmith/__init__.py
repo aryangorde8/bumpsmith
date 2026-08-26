@@ -1,8 +1,26 @@
 """bumpsmith — turn a failing pydantic v1-to-v2 migration into a reviewed pull request.
 
-The package is deliberately empty at this commit. It exists so that the tooling
-in `pyproject.toml` has a target to lint, type-check and test against before any
-behaviour is written.
+Start at :mod:`bumpsmith.migrate`. It is the loop, and every other module is a
+part it uses:
+
+===========================  ===================================================
+:mod:`bumpsmith.run`         where a suite runs, locally or in the harness's sandbox
+:mod:`bumpsmith.failures`    what pytest's output says the break is
+:mod:`bumpsmith.rules`       which migration rule that break implies, and every site
+:mod:`bumpsmith.rewrite`     the smallest edit that carries the rule out
+:mod:`bumpsmith.apply`       applying it as a transaction that reverts by default
+:mod:`bumpsmith.gate`        stopping before anything irreversible
+:mod:`bumpsmith.harness`     answering TrueForge's approval events with that gate
+:mod:`bumpsmith.trueforge`   the transport, and the only place a socket is opened
+:mod:`bumpsmith.fixtures`    cloning the repositories it is measured against
+===========================  ===================================================
+
+Nothing is re-exported here. ``bumpsmith.migrate`` is both a module and the
+function inside it, and a package that bound one name to both would make
+``from bumpsmith import migrate`` mean different things depending on import
+order.
+
+``python -m bumpsmith`` runs the loop from a command line; see the README.
 """
 
 __all__ = ["__version__"]

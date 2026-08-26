@@ -53,6 +53,8 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 44 | [#15](https://github.com/aryangorde8/bumpsmith/pull/15) | A truncated response claims the command never ran | **Fixed** — `IncompleteRead` is not an `OSError` | this PR |
 | 45 | [#15](https://github.com/aryangorde8/bumpsmith/pull/15) | The poll deadline is not a deadline | **Fixed** — a 300s limit could block for hours | this PR |
 | 46 | [#15](https://github.com/aryangorde8/bumpsmith/pull/15) | Version drift retried ninety times and reported as patience | **Fixed** | this PR |
+| 47 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | The report counted a plan that was refused as a change made — *found by its own exhaustive test* | **Fixed** — `applied` is recorded, not derived | this PR |
+| 48 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | The deny proof checked a file at a path the two processes never agreed on — *self-found* | **Fixed** — it now asks the server the harness names | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -861,6 +863,83 @@ Now only `None` is retried. Anything else is validated and raises
 dropped by a comprehension — and which would be exactly the event explaining why
 a turn did not do what it was asked. An empty `data` list is returned as the
 real answer it is.
+
+## 47 · A plan is not an application, and the report said it was
+
+Self-found, by the test written to look for exactly this class of thing. No
+reviewer saw it; it did not survive to a pull request.
+
+`bumpsmith.migrate` reports how many steps changed the repository. The first
+version derived that from each step's plan:
+
+```python
+@property
+def applied(self) -> bool:
+    return self.plan is not None and bool(_writes(self.plan))
+```
+
+Which is a reasonable thing to believe. A plan holds the edits, the edits change
+files, so a step with edits changed files. It follows from everything except
+what actually happens: `bumpsmith.apply.attempt` verifies a whole edit set
+before writing any of it and can refuse the lot — an edit whose file is a
+symlink, or has changed since the plan was made, or lives outside the tree. When
+it refuses, nothing is written. The plan is unchanged, and it still says two
+files.
+
+So a run that touched nothing reported `reverted -- 1 change, taken back`, and
+`Outcome` is computed from that same count. The report described a repository
+that had been changed and put back, when the repository had never been touched.
+
+The exhaustive test found it. Not one of the tests aimed at `NOT_APPLIED` — the
+table-driven one that runs every way the loop can end and asserts, for each, that
+the tree is either changed-with-a-green-run or byte-identical. The `NOT_APPLIED`
+row asserted `UNTOUCHED` and got `REVERTED`, which is how a property test earns
+its length: nobody had thought to check what the *report* said in the case where
+the *disk* was obviously fine.
+
+`Step.applied` is now recorded, set on the one line in the package after which a
+repository is different from how it was found:
+
+```python
+except ApplyError as exc:
+    steps.append(step)
+    return _Stopped(Stop.NOT_APPLIED, f"the edits were refused: {exc}")
+
+steps.append(replace(step, applied=True))
+```
+
+This is shape 3 again — *an answer good enough for reporting, reused for
+mutating* — running backwards. There the resolution that could correctly count
+sites was used to rewrite them. Here the plan that correctly describes an
+intention was used to report an event. Both are one value asked a question it
+was never the answer to.
+
+Verified by reverting the fix: the `not-applied` case fails and every other case
+still passes, which is the shape of a defect that only one row could see.
+
+---
+
+## 48 · A proof that could check the wrong process
+
+Also self-found, while moving the proof scripts into the repository.
+
+`proofs/deny.py` ends by asserting that the tool it denied never ran, which it
+did by checking that `pr-calls.log` did not exist. The file is written by
+`mcp_stub.py`, a *separate process*, at a path relative to whatever directory
+that process was started in. The two never agreed on it by construction; they
+agreed because the same person launched both from the same directory.
+
+A checker looking in the wrong place finds nothing, and finding nothing is what
+this one reports as success. It would have passed most confidently in exactly the
+situation where it knew least — the same failure mode as finding 46, in a
+different costume.
+
+The stub now answers `GET /calls` with what it actually served, and the proof
+reads the URL to ask **out of the harness's own MCP manifest**. The server being
+questioned is therefore provably the one the harness was configured to call,
+rather than one on a port the script guessed. Being unable to reach it is
+reported as "nothing is proven" and exits non-zero; it is never reported as "the
+tool did not run". The file check is kept as a second, independent signal.
 
 ---
 

@@ -1,0 +1,16 @@
+server  irreversible-things at http://127.0.0.1:8791/mcp
+session 01m0yca0z66fk51516za1qbknf
+turn    01m0yca0zh7vbhczb6nwfvw5zv.local
+waiting for the harness to pause a tool call...
+
+paused: {"type": "tool.approval_required", "id": "01m0yca8yt74fpw359n4ccd98c", "created_at": "2026-08-26T06:32:27.866Z", "thread_id": "main", "tool_calls": [{"id": "call_ec5533bbecfb4f1fabf00b51", "source_event_id": "01m0yca629q451bkevk0wa8kgg"}]}
+
+denied: unattended run: no human was asked about open_pull_request, and an unapproved irreversible action is a denied one
+  action  harness.tool_call:open_pull_request
+  detail  {"tool": "open_pull_request", "origin": "mcp:irreversible-things", "thread": "main", "tool_call_id": "call_ec5533bbecfb4f1fabf00b51", "arguments": "{\"mcp_server\": \"irreversible-things\", \"tool_name\": \"open_pull_request\", \"input\": {\"repository\": \"aryangorde8/bumpsmith\", \"branch\": \"feat/the-loop-and-the-cli\", \"title\": \"the loop that is the agent\"}}", "via": "call_tool"}
+
+http://127.0.0.1:8791/mcp served 0 tool call(s)
+pr-calls.log exists: False
+the tool never ran
+
+evidence written to proofs/recorded/deny.json
