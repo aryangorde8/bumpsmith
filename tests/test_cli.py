@@ -299,6 +299,45 @@ def test_the_json_report_carries_the_run_and_the_repository(
     assert payload["steps"][0]["break_class"] == "REGEX_KEYWORD"
 
 
+def test_json_and_html_may_not_name_the_same_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Both would be written, in turn, and the command would exit 0 saying so.
+
+    The JSON asked for would be gone, replaced by HTML, with two successful
+    writes reported. Refusing is the only answer that does not require the user
+    to notice.
+    """
+    root = _repo(tmp_path / "repo")
+    destination = tmp_path / "report.out"
+
+    code = cli.main(
+        [str(root), "--json", str(destination), "--html", str(destination), *_honest_suite(root)]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "--json and --html both name" in captured.err
+    assert not destination.exists()
+    # Nothing on stdout at all -- not even the `repository` header, which is
+    # printed before the loop starts. A bad invocation should cost nothing, and
+    # this one would otherwise cost a full migration before failing.
+    assert captured.out == ""
+
+
+def test_two_spellings_of_one_path_are_still_one_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`out.html` and `./out.html` collide; comparing what was typed would miss it."""
+    monkeypatch.chdir(tmp_path)
+    root = _repo(tmp_path / "repo")
+
+    code = cli.main([str(root), "--json", "report.out", "--html", "./report.out"])
+
+    assert code == 2
+    assert "--json and --html both name" in capsys.readouterr().err
+
+
 def test_a_report_that_cannot_be_written_is_an_error_not_a_shrug(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -371,6 +410,31 @@ def test_a_run_that_could_not_read_every_file_says_so(
     out = capsys.readouterr().out
     assert "unreadable" in out
     assert "broken.py" in out
+
+
+def test_the_json_report_names_unreadable_files_with_their_reasons(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The review trail has to carry both halves, because a second reader needs them.
+
+    The terminal report reads `Unreadable` straight off the object and has
+    always printed the reason. `as_dict` serialised the path alone, so anything
+    downstream of the JSON -- the HTML page, a reviewer, a later tool -- got
+    "this file could not be read" with no way to find out why. The class has
+    carried both since it was written; only the serialisation dropped one.
+    """
+    root = _repo(tmp_path)
+    (root / "mypkg" / "broken.py").write_text("def (\n", encoding="utf-8")
+    destination = tmp_path / "evidence.json"
+
+    cli.main([str(root), "--json", str(destination), *_always_red(DATA / "field-regex-broken.txt")])
+    capsys.readouterr()
+
+    payload = json.loads(destination.read_text(encoding="utf-8"))
+    unreadable = [entry for step in payload["steps"] for entry in step["unreadable"]]
+    assert unreadable, "the run read a file it could not parse and the report does not say so"
+    assert all(entry["path"] and entry["reason"] for entry in unreadable), unreadable
+    assert any("broken.py" in entry["path"] for entry in unreadable)
 
 
 def test_the_default_command_is_this_interpreter() -> None:

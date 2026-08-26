@@ -25,10 +25,11 @@ _STEP: dict[str, Any] = {
     "culprit": "emnify/modules/api/models.py:397",
     "rule": "Replace a `__root__` field with pydantic.RootModel",
     "sites": 19,
+    "match_files": 2,
     "scan_complete": True,
     "unreadable": [],
     "rewritten": 19,
-    "files": 2,
+    "edit_files": 2,
     "skipped": [],
     "applied": True,
 }
@@ -97,7 +98,7 @@ def test_no_gap_is_drawn_when_there_is_no_gap() -> None:
     Drawing a full bar there would dress up the least interesting case as the
     point of the page.
     """
-    out = page(_run(steps=[{**_STEP, "sites": 1, "rewritten": 1, "files": 1}]))
+    out = page(_run(steps=[{**_STEP, "sites": 1, "rewritten": 1, "match_files": 1}]))
     assert "the rule found" not in out
 
 
@@ -113,6 +114,33 @@ def test_a_kept_run_says_so() -> None:
     out = page(_run(outcome="migrated", kept=True, stop="green", reason=""))
     assert "changes kept" in out
     assert "came back green and the edits were kept" in out
+
+
+def test_a_run_that_applied_nothing_does_not_claim_a_reversion() -> None:
+    """`already-green` and `untouched` had nothing to take back.
+
+    "0 changes taken back" is true only in the sense that nothing is also
+    nothing. A skimmer reads the noun, and the noun asserted there had been
+    something to revert.
+    """
+    for outcome in ("already-green", "untouched"):
+        out = page(_run(outcome=outcome, applied=0, kept=False, steps=[]))
+        assert "changes taken back" not in out, f"{outcome} implies a reversion"
+        assert "changes kept" not in out, f"{outcome} implies edits survived"
+        assert "changes applied" in out
+
+
+def test_sites_never_written_are_not_counted_as_rewritten() -> None:
+    """The tile and the step below it must not contradict each other.
+
+    A refused plan leaves `applied` false, and the step already says "planned
+    but never written". Summing `rewritten` regardless put "19 sites rewritten"
+    directly above it -- the same inversion of `applied` this file shipped once
+    already, in the other direction.
+    """
+    out = page(_run(applied=0, steps=[{**_STEP, "applied": False}]))
+    assert '<div class="n">0</div><div class="k">sites rewritten</div>' in out
+    assert "planned but never written" in out
 
 
 def test_edits_that_never_reached_disk_are_not_described_as_written() -> None:
@@ -131,9 +159,89 @@ def test_a_step_reports_only_as_far_as_it_got() -> None:
     assert "rule matched" not in out
 
 
+def test_the_stop_reason_reads_as_one_sentence() -> None:
+    """Every `Stop` reason is a lowercase clause, so it cannot follow a full stop.
+
+    Found by rendering a real run and reading it: "It stopped at `no-rule`. the
+    failure classified as UNKNOWN" is the sentence a stranger arrives at, on
+    the page whose entire job is to read well to a stranger.
+    """
+    out = page(_RUN)
+    assert "</code>. the failure" not in out
+    assert "&mdash; the failure classified as UNKNOWN" in out
+    assert "classified as UNKNOWN.</p>" in out, "the sentence does not end"
+
+
+def test_a_reason_that_already_ends_in_punctuation_gets_no_second_full_stop() -> None:
+    """`the suite could not be run: {exc}` can arrive already terminated."""
+    out = page(_run(reason="the suite could not be run: no such file."))
+    assert "no such file." in out
+    assert "no such file.." not in out
+
+
 def test_an_incomplete_migration_says_it_is_incomplete() -> None:
     out = page(_run(complete=False))
     assert "not complete" in out
+
+
+def test_the_file_that_made_a_migration_incomplete_is_named_with_its_reason() -> None:
+    """The page promises this evidence in the ending, so it has to be on the page.
+
+    An unreadable file is the most common reason a run reports NOT COMPLETE,
+    and it is the one thing a reviewer has to act on: some v1 code the rule
+    named is still there, in a file nothing could parse. Saying so without
+    naming the file leaves the reader worse off than the terminal report, which
+    has always printed both.
+    """
+    out = page(
+        _run(
+            complete=False,
+            steps=[
+                {
+                    **_STEP,
+                    "scan_complete": False,
+                    "unreadable": [
+                        {"path": "emnify/vendor/legacy.py", "reason": "invalid syntax (line 4)"}
+                    ],
+                }
+            ],
+        )
+    )
+    assert "emnify/vendor/legacy.py" in out
+    assert "invalid syntax (line 4)" in out
+
+
+def test_an_older_payload_listing_unreadable_paths_alone_still_renders() -> None:
+    """`unreadable` used to be a list of strings, and old reports are still reports.
+
+    Raising on the old shape would mean the page cannot open the very evidence
+    it was pointed at, which is a worse failure than rendering it without the
+    reason it never carried.
+    """
+    out = page(_run(steps=[{**_STEP, "unreadable": ["emnify/vendor/legacy.py"]}]))
+    assert out.startswith("<!doctype html>")
+    assert "emnify/vendor/legacy.py" in out
+
+
+def test_a_hostile_unreadable_entry_is_escaped_in_both_halves() -> None:
+    """Both the path and the reason came out of the migrated repository."""
+    attack = "<script>alert(1)</script>"
+    out = page(_run(steps=[{**_STEP, "unreadable": [{"path": attack, "reason": attack}]}]))
+    assert attack not in out
+    assert html.escape(attack) in out
+
+
+def test_the_matched_file_count_comes_from_the_scan_not_the_plan() -> None:
+    """ "Rule matched N sites across M files" must describe one thing, not two.
+
+    A file whose every match is skipped produces no edit, so the plan's file
+    count is smaller than the rule's reach. Joining the scan's site count to
+    the plan's file count produced a sentence describing neither -- and it
+    understated exactly the case a reviewer is being warned about.
+    """
+    out = page(_run(steps=[{**_STEP, "sites": 19, "match_files": 3, "edit_files": 2}]))
+    assert "19 sites across 3 files" in out
+    assert "19 sites across 2 files" not in out
 
 
 def test_skipped_sites_are_listed_with_their_reasons() -> None:
@@ -270,7 +378,9 @@ def test_the_page_shows_only_what_the_json_already_carries() -> None:
     figures = {label: int(number) for number, label in tiles}
 
     assert figures["suite runs"] == len(payload["steps"])
-    assert figures["sites rewritten"] == sum(step["rewritten"] for step in payload["steps"])
+    assert figures["sites rewritten"] == sum(
+        step["rewritten"] for step in payload["steps"] if step["applied"] is True
+    )
     assert figures["changes taken back"] == payload["applied"]
     assert figures["breaks classified"] == len(
         [s for s in payload["steps"] if s["break_class"] != "UNKNOWN"]

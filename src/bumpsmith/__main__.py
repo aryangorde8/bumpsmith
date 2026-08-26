@@ -266,6 +266,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
 
+    # Checked here, before the suite is ever run: the migration takes minutes,
+    # and the failure it would otherwise end in is one that could have been seen
+    # from the command line alone. Compared resolved, because `out.html` and
+    # `./out.html` are the same file and a check on the spellings would miss it.
+    if (
+        args.json_path is not None
+        and args.html_path is not None
+        and args.json_path.resolve() == args.html_path.resolve()
+    ):
+        print(
+            f"--json and --html both name {args.json_path.resolve()}.\n"
+            "  They would be written in turn and only the second would survive, "
+            "so this refuses rather than\n  reporting two reports written and "
+            "leaving one.",
+            file=sys.stderr,
+        )
+        return 2
+
     command = tuple(args.command) if args.command else DEFAULT_COMMAND
     root = args.path.resolve()
 

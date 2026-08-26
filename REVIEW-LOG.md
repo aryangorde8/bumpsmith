@@ -77,6 +77,13 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 68 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | The README said the parser dispatches on the return code *not* the text; it uses both | **Fixed** — and `failures.py`'s own module docstring said it first | this PR |
 | 69 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | The completeness test searched the whole README, so it did not pin the table it advertised | **Fixed** — scoped to the table and the list, plus a stray-row check | this PR |
 | 70 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | The fix for 66 named an artefact the run had not created — leftovers from the previous day, read as output — *self-found by the cold clone* | **Fixed** — the count is from a clean reproduction | this PR |
+| 71 | [#19](https://github.com/aryangorde8/bumpsmith/pull/19) | The page promised unreadable files "listed with their reason" and rendered neither — and `as_dict` had been dropping the reason since #16 | **Fixed** in the payload and the page; the old shape still renders | this PR |
+| 72 | [#19](https://github.com/aryangorde8/bumpsmith/pull/19) | "19 sites across 2 files" joined the *scan*'s site count to the *plan*'s file count, so a skipped-only file vanished from the rule's reach | **Fixed** — `match_files` and `edit_files` cannot be confused | this PR |
+| 73 | [#19](https://github.com/aryangorde8/bumpsmith/pull/19) | The "sites rewritten" tile ignored `applied`, announcing rewrites above a step reading "planned but never written" — the **second** `applied` inversion in this file | **Fixed** — tile and step read it from one place | this PR |
+| 74 | [#19](https://github.com/aryangorde8/bumpsmith/pull/19) | `already-green` and `untouched` runs rendered "0 changes taken back", implying there had been something to revert | **Fixed** — the noun comes from `applied`, the number on the tile | this PR |
+| 75 | [#19](https://github.com/aryangorde8/bumpsmith/pull/19) | `--json out --html out` wrote both in turn, reported two successes and exited 0 with the JSON gone | **Fixed** — refused before the suite runs, paths compared resolved | this PR |
+| 76 | [#19](https://github.com/aryangorde8/bumpsmith/pull/19) | `page()`'s docstring named `__main__.report_payload`, a function that was never written — *self-found* | **Fixed** — described by what it is, not by a name that must keep existing | this PR |
+| 77 | [#19](https://github.com/aryangorde8/bumpsmith/pull/19) | "It stopped at `no-rule`. the failure classified as UNKNOWN" — every `Stop` reason is a lowercase clause — *self-found by reading the rendered page* | **Fixed** — a dash, and the sentence is terminated | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -1513,6 +1520,147 @@ local check, CI, and a Qodo re-review, and this survived all of them.
 
 Corrected to what reproduces, with the reproduction conditions stated in the
 README rather than assumed.
+
+---
+
+## 71–75 · Five from Qodo on the page, all accepted
+
+Every one is a *correctness* finding on `report.py`, and four of the five share
+one cause worth naming before the individual entries.
+
+**The page is the payload's second reader, and the payload was shaped for the
+first one.** `--json` has existed since #16, and until #19 the only thing that
+ever read a run was `__main__`'s terminal report — which holds the `Migration`
+object, so it derives whatever it needs directly from it. It counts the files a
+scan matched with `len({match.path for match in step.scan.matches})`, and it
+prints each unreadable file's path *and* its reason, straight off the object.
+`as_dict` never carried either, because nothing had ever needed them: it
+serialised the plan's file count and the unreadable *paths*, and that was
+sufficient for a review trail nobody was rendering.
+
+The page cannot reach the object. It gets the payload, by deliberate design —
+that is what stops the two renderings drifting into two descriptions of one run.
+So it reached for the keys that were there, and got numbers that meant something
+close to, but not, what it printed. **A payload adequate for its only consumer
+stopped being adequate the moment it had two,** and the failure mode was not a
+missing key raising an error — it was a present key answering a different
+question. Findings 71 and 72 are both that. So the fix is in `as_dict`, not only
+in the renderer: every key that counts something now says where the count came
+from (`match_files` from the scan, `edit_files` from the plan), and `unreadable`
+carries the reason the class has always held.
+
+### 71 · The page promised evidence it did not show
+
+The ending says a migration is **not complete** because "at least one site was
+skipped or could not be read, and is listed with its reason above". `_step_block`
+rendered `skipped` and never rendered `unreadable` at all. An unreadable file is
+the more serious of the two — some v1 code the rule named is still in a file
+nothing could parse — and the page named neither the file nor the reason while
+pointing at a list containing both halves of neither.
+
+The payload half is the older defect and the one that matters more: `as_dict`
+serialised `str(u.path)` and dropped `u.reason`, so **`--json` has been losing it
+since #16**. `Unreadable` has carried `path` and `reason` since it was written;
+only the serialisation ever had one. Anything downstream of the JSON — this page,
+a reviewer, a later tool — got "this file could not be read" with no way to find
+out why.
+
+Fixed in both places, and the page reads the old list-of-strings shape too: a
+report written by an older build is still a report, and refusing to open the
+evidence it was pointed at is a worse failure than showing it without a reason
+it never carried.
+
+### 72 · Two numbers from two sources, joined into one sentence
+
+"Rule matched 19 sites across 2 files" read `sites` from the **scan** and `files`
+from the **plan**. A file whose every match is skipped produces no edit, so it
+disappears from a count offered as the rule's reach — understating exactly the
+case a reviewer is being warned about, in the sentence warning them.
+
+Fixture B never showed this, and could not: nothing is skipped there, so
+`match_files` and `edit_files` are equal at every step. The measurement that
+would have caught it is one the demo repository cannot produce.
+
+The fix is the rename, not the substitution. `files` was a name that invited the
+reading it got; `match_files` and `edit_files` cannot be confused for one another
+because their names no longer let them.
+
+### 73 · The tile contradicted the step directly beneath it
+
+"Sites rewritten" summed every step's `rewritten` regardless of `applied`, so a
+run whose plan was refused announced *19 sites rewritten* above a step correctly
+reading *"planned but never written"*.
+
+`rewritten` is what the plan intended; `applied` is what the disk received, and
+`apply.attempt` can refuse a plan outright. This is the **second** time this file
+has read `applied` wrongly — the first was found before the PR opened, by
+rendering a run and reading it, and it was the same confusion in the other
+direction. Recorded as a repeat because that is the useful part: the summary and
+the detail were deriving one fact from two places, and one of them was wrong.
+They now read it from the same place.
+
+### 74 · A reversion announced for runs with nothing to revert
+
+The fourth tile chose its noun from `kept` alone, so every `already-green` and
+`untouched` run — both of which apply nothing by definition — rendered "0 changes
+taken back". True in the sense that nothing is also nothing, and false in the
+sense a skimmer takes it: that there had been something to take back.
+
+The label is now chosen from `applied`, which is the quantity actually printed on
+the tile. A run with no applications has neither kept nor reverted anything, and
+says so.
+
+### 75 · Two reports, one path, both reported written
+
+`--json out --html out` wrote the JSON, then overwrote it with HTML, then printed
+two successful writes and exited 0. The report the user asked for was gone and
+nothing said so.
+
+Refused, and refused **before the suite runs** — the migration takes minutes and
+edits the repository, and the whole error was visible from the command line
+alone. Paths are compared resolved, because `out.html` and `./out.html` are one
+file and a check on the spellings would miss it. The test asserts stdout is
+completely empty, not merely that the exit code is 2: a bad invocation should
+cost nothing, and "nothing was printed at all" is the only assertion that proves
+the loop was never entered.
+
+## 76–77 · Two more, found the same way the last three were
+
+Neither came from Qodo. Both came from doing the thing that found three defects
+before this PR opened: render a real run, and read it.
+
+### 76 · A docstring naming a function that was never written
+
+`page()` documented its argument as "exactly what `bumpsmith.__main__.report_payload`
+builds". There is no `report_payload`; the payload is assembled inline in
+`main()`. The reference was to a function I had apparently intended and then not
+needed — a docstring describing an earlier draft of the code beneath it.
+
+This is finding 59's shape and 67/68's shape again, in a file written after both
+were logged. It is now described by what it is rather than by a name that has to
+keep existing.
+
+### 77 · The stop reason did not read as a sentence
+
+Rendering fixture B produced:
+
+> It stopped at `no-rule`. the failure classified as UNKNOWN, which does not
+> narrow to one rule…
+
+Every `Stop` reason is written as a lowercase clause meant to *follow* something.
+The terminal report gives each one its own indented line, where that works
+perfectly. The page ended the sentence and then began a new one in lower case.
+
+No test could have caught this and none should have: it is a defect in how the
+page *reads*, on a page whose entire purpose is to read well to somebody who was
+not there. It is now a dash rather than a full stop, and the sentence is
+terminated — unless the reason already ends in punctuation, which
+`the suite could not be run: {exc}` can.
+
+**Reading the rendered output has now found five defects across this one PR and
+every one of them was invisible to a passing suite.** That is not an argument
+against the tests; it is the argument for the page. A report nobody reads is a
+report nobody checks.
 
 ---
 

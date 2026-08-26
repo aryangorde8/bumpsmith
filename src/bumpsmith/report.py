@@ -99,7 +99,10 @@ dd { margin: 0; }
 .end { border-left: 3px solid var(--line); padding: 0.2rem 0 0.2rem 1rem; margin: 1rem 0; }
 .end.reverted { border-color: var(--warn); }
 .end.migrated { border-color: var(--accent); }
-ul.skips { margin: 0.6rem 0 0; padding-left: 1.1rem; color: var(--muted); font-size: 0.9rem; }
+ul.skips { margin: 0.2rem 0 0; padding-left: 1.1rem; color: var(--muted); font-size: 0.9rem; }
+p.lab { margin: 0.7rem 0 0; color: var(--muted); font-size: 0.78rem; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.06em; }
+p.lab.bad { color: var(--stop); }
 footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--line);
          color: var(--muted); font-size: 0.85rem; }
 table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
@@ -149,6 +152,40 @@ def _steps(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return [step for step in raw if isinstance(step, Mapping)]
 
 
+def _count(number: int, noun: str) -> str:
+    """``1 site``, ``3 sites``. The page is read by people."""
+    return f"{number} {noun}" if number == 1 else f"{number} {noun}s"
+
+
+def _unreadable(raw: object) -> list[tuple[str, str]]:
+    """``unreadable`` as ``(path, reason)`` pairs, whatever shape it arrives in.
+
+    :class:`~bumpsmith.rules.Unreadable` has always carried both, but the
+    payload used to serialise the path alone, so a report written by an older
+    build has a list of strings here. Both are read, because failing on the old
+    shape would mean the page cannot open the evidence it was pointed at -- and
+    nothing in this module may raise on a malformed report.
+    """
+    if not isinstance(raw, list):
+        return []
+    pairs: list[tuple[str, str]] = []
+    for entry in raw:
+        if isinstance(entry, Mapping):
+            path = entry.get("path")
+            reason = entry.get("reason")
+            pairs.append(("" if path is None else str(path), "" if reason is None else str(reason)))
+        else:
+            pairs.append((str(entry), ""))
+    return [pair for pair in pairs if pair[0] or pair[1]]
+
+
+def _listing(items: list[str], label: str, bad: bool = False) -> str:
+    if not items:
+        return ""
+    body = "".join(f"<li>{item}</li>" for item in items)
+    return f'<p class="lab{" bad" if bad else ""}">{_e(label)}</p><ul class="skips">{body}</ul>'
+
+
 def _tile(number: object, label: str) -> str:
     return (
         f'<div class="tile"><div class="n">{_e(number)}</div><div class="k">{_e(label)}</div></div>'
@@ -177,6 +214,21 @@ def _gap_bar(reported: int, found: int) -> str:
     )
 
 
+def _changes_label(applied: int, *, kept: bool) -> str:
+    """What the fourth tile is counting.
+
+    Branching on ``kept`` alone read "0 changes taken back" for every
+    ``already-green`` and ``untouched`` run (finding 74) -- true only in the
+    sense that nothing is also nothing, and false in the sense a skimmer takes
+    it: that there was something to take back. ``applied`` is the quantity on
+    the tile, so it is what decides the noun; a run with no applications has
+    neither kept nor reverted anything.
+    """
+    if applied == 0:
+        return "changes applied"
+    return "changes kept" if kept else "changes taken back"
+
+
 def _step_block(step: Mapping[str, Any]) -> str:
     number = _int(step, "step")
     returncode = _int(step, "returncode")
@@ -186,8 +238,11 @@ def _step_block(step: Mapping[str, Any]) -> str:
     culprit = _str(step, "culprit")
     rule = _str(step, "rule")
     sites = _int(step, "sites")
+    # From the scan, both of them. Joining `sites` to the plan's file count was
+    # finding 72: a file whose every match is skipped produces no edit, so a
+    # sentence offered as the rule's reach quietly dropped it.
+    match_files = _int(step, "match_files")
     rewritten = _int(step, "rewritten")
-    files = _int(step, "files")
     applied = step.get("applied") is True
 
     head = [f'<span class="step-n">Step {_e(number)}</span>']
@@ -201,9 +256,9 @@ def _step_block(step: Mapping[str, Any]) -> str:
     if rule:
         rows.append(f"<dt>rule written</dt><dd>{_e(rule)}</dd>")
     if sites:
-        where_text = f"{sites} site{'s' if sites != 1 else ''}"
-        if files:
-            where_text += f" across {files} file{'s' if files != 1 else ''}"
+        where_text = _count(sites, "site")
+        if match_files:
+            where_text += f" across {_count(match_files, 'file')}"
         rows.append(f"<dt>rule matched</dt><dd>{_e(where_text)}</dd>")
     if rewritten:
         # `applied` is whether these edits reached the disk. Whether they were
@@ -213,10 +268,21 @@ def _step_block(step: Mapping[str, Any]) -> str:
         rows.append(f"<dt>edits</dt><dd>{_e(rewritten)} {_e(reached)}</dd>")
 
     skipped = step.get("skipped")
-    skips = ""
-    if isinstance(skipped, list) and skipped:
-        items = "".join(f"<li>{_e(item)}</li>" for item in skipped)
-        skips = f'<ul class="skips">{items}</ul>'
+    skips = _listing(
+        [_e(item) for item in skipped] if isinstance(skipped, list) else [],
+        "matched, left alone",
+    )
+    # The one a reviewer most needs and the one the page used to omit entirely:
+    # an unreadable file is why a migration says NOT COMPLETE, and "some file
+    # somewhere could not be read" is not evidence anybody can act on.
+    unread = _listing(
+        [
+            f"<code>{_e(path)}</code>{f' — {_e(reason)}' if reason else ''}"
+            for path, reason in _unreadable(step.get("unreadable"))
+        ],
+        "could not be read",
+        bad=True,
+    )
 
     parts = [f'<div class="step"><div class="step-head">{"".join(head)}</div>']
     if message:
@@ -225,8 +291,8 @@ def _step_block(step: Mapping[str, Any]) -> str:
         parts.append(f"<dl>{''.join(rows)}</dl>")
     if sites:
         parts.append(_gap_bar(1, sites))
-    if skips:
-        parts.append(skips)
+    parts.append(skips)
+    parts.append(unread)
     parts.append("</div>")
     return "".join(parts)
 
@@ -235,7 +301,9 @@ def page(payload: Mapping[str, Any], *, title: str = "bumpsmith run") -> str:
     """Render the payload :option:`--json` writes as one self-contained page.
 
     Args:
-        payload: exactly what :func:`bumpsmith.__main__.report_payload` builds.
+        payload: the mapping :option:`--json` serialises -- a run's
+            :meth:`~bumpsmith.migrate.Migration.as_dict` plus the repository
+            and the suite command. Nothing else is read.
         title: the document title, for a reader with several of these open.
 
     Returns:
@@ -252,16 +320,21 @@ def page(payload: Mapping[str, Any], *, title: str = "bumpsmith run") -> str:
     steps = _steps(payload)
 
     css_class, label = _OUTCOME_BADGE.get(outcome, ("stop", outcome or "unknown"))
-    sites = sum(_int(step, "rewritten") for step in steps)
+    # Only steps whose edits reached the disk. `rewritten` is what the plan
+    # intended, and `apply.attempt` can refuse a plan outright -- so summing it
+    # unconditionally made a NOT_APPLIED run announce sites rewritten directly
+    # above a step correctly reading "planned but never written" (finding 73).
+    # This is the second time this file has inverted `applied`; the tile and the
+    # step now read it from the same place.
+    sites = sum(_int(step, "rewritten") for step in steps if step.get("applied") is True)
     classes = [_str(step, "break_class") for step in steps]
     named = [item for item in classes if item and item != "UNKNOWN"]
 
-    kept = payload.get("kept") is True
     tiles = [
         _tile(len(steps), "suite runs"),
         _tile(len(named), "breaks classified"),
         _tile(sites, "sites rewritten"),
-        _tile(applied, "changes kept" if kept else "changes taken back"),
+        _tile(applied, _changes_label(applied, kept=payload.get("kept") is True)),
     ]
 
     ending = [
@@ -269,9 +342,17 @@ def page(payload: Mapping[str, Any], *, title: str = "bumpsmith run") -> str:
         f"<p><strong>{_e(_OUTCOME_SENTENCE.get(outcome, 'The run ended.'))}</strong></p>",
     ]
     if stop:
-        ending.append(f"<p>It stopped at <code>{_e(stop)}</code>.")
+        ending.append(f"<p>It stopped at <code>{_e(stop)}</code>")
         if reason:
-            ending.append(f" {_e(reason)}")
+            # A dash, not a full stop. Every `Stop` reason is written as a
+            # lowercase clause meant to follow something -- the terminal report
+            # gives each one its own indented line, which works. Ending the
+            # sentence first and then starting a new one in lower case does not,
+            # and it was visible the moment a real run was rendered and read.
+            ending.append(f" &mdash; {_e(reason)}")
+            ending.append("" if reason.rstrip()[-1:] in ".!?" else ".")
+        else:
+            ending.append(".")
         ending.append("</p>")
     if not complete:
         ending.append(

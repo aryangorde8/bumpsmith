@@ -208,7 +208,22 @@ class Step:
     """
 
     def as_dict(self) -> dict[str, object]:
-        """A form that survives :func:`json.dumps`, for the review trail."""
+        """A form that survives :func:`json.dumps`, for the review trail.
+
+        Every key that counts something names where the count came from, and
+        that is a fix rather than a style. ``files`` used to mean "files the
+        plan edits", and a reader who joined it to ``sites`` -- which comes from
+        the *scan* -- got a sentence describing neither: a file whose every
+        match was skipped produces no edit, so it vanished from a count offered
+        as the rule's reach. The page did exactly that (finding 72). A scan
+        number and a plan number can no longer be confused for one another
+        because their names no longer let them.
+
+        ``unreadable`` carries the reason as well as the path for the same kind
+        of reason. :class:`~bumpsmith.rules.Unreadable` has always held both,
+        this dropped the half that says *why*, and "the report names the file"
+        is a much weaker promise than the one the class makes.
+        """
         return {
             "step": self.number,
             "returncode": self.run.returncode,
@@ -220,10 +235,15 @@ class Step:
             else str(self.failure.culprit),
             "rule": None if self.rule is None else self.rule.summary,
             "sites": None if self.scan is None else self.scan.count,
+            "match_files": None
+            if self.scan is None
+            else len({match.path for match in self.scan.matches}),
             "scan_complete": None if self.scan is None else self.scan.is_complete,
-            "unreadable": [] if self.scan is None else [str(u.path) for u in self.scan.unreadable],
+            "unreadable": []
+            if self.scan is None
+            else [{"path": str(u.path), "reason": u.reason} for u in self.scan.unreadable],
             "rewritten": None if self.plan is None else self.plan.rewritten,
-            "files": None if self.plan is None else len(self.plan.edits),
+            "edit_files": None if self.plan is None else len(self.plan.edits),
             "skipped": [] if self.plan is None else [str(s) for s in self.plan.skipped],
             "applied": self.applied,
         }
