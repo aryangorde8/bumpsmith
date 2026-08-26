@@ -1,0 +1,30 @@
+setting up the project in the sandbox...
+  setup rc=0   what you are doing and want to suppress this warning.
+ready
+running the suite in the sandbox...
+
+ran in the sandbox: rc=2
+
+==================================== ERRORS ====================================
+_________________________ ERROR collecting test_app.py _________________________
+test_app.py:1: in <module>
+    from app import User
+app.py:4: in <module>
+    class User(BaseModel):
+app.py:5: in User
+    name: str = Field(..., regex="^[a-z]+$")
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.13/site-packages/pydantic/fields.py:1322: in Field
+    raise PydanticUserError('`regex` is removed. use `pattern` instead', code='removed-kwargs')
+E   pydantic.errors.PydanticUserError: `regex` is removed. use `pattern` instead
+E   
+E   For further information visit https://errors.pydantic.dev/2.12/u/removed-kwargs
+=========================== short test summary info ============================
+ERROR test_app.py - pydantic.errors.PydanticUserError: `regex` is removed. us...
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.14s
+
+bumpsmith read 1 failure(s) out of it:
+  [REGEX_KEYWORD] `regex` is removed. use `pattern` instead
+
+evidence written to proofs/recorded/sandbox.json

@@ -53,6 +53,17 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 44 | [#15](https://github.com/aryangorde8/bumpsmith/pull/15) | A truncated response claims the command never ran | **Fixed** — `IncompleteRead` is not an `OSError` | this PR |
 | 45 | [#15](https://github.com/aryangorde8/bumpsmith/pull/15) | The poll deadline is not a deadline | **Fixed** — a 300s limit could block for hours | this PR |
 | 46 | [#15](https://github.com/aryangorde8/bumpsmith/pull/15) | Version drift retried ninety times and reported as patience | **Fixed** | this PR |
+| 47 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | The report counted a plan that was refused as a change made — *found by its own exhaustive test* | **Fixed** — `applied` is recorded, not derived | this PR |
+| 48 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | The deny proof checked a file at a path the two processes never agreed on — *self-found* | **Fixed** — it now asks the server the harness names | this PR |
+| 49 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | A missing dependency was reported as an unmigrated one — *found by the clean-clone test* | **Fixed** — the message now says only what it knows | this PR |
+| 50 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | Reverting overwrote a file somebody else had changed | **Fixed** — the revert now checks before it writes | this PR |
+| 51 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | A suite that never ran exited like a failing one | **Fixed** — and a test was pinning the contradiction | this PR |
+| 52 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | An incomplete scan or plan was applied and reported as a migration | **Accepted in part** — still applied, no longer reported as finished | this PR |
+| 53 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | The denial proof checked the effect before the agent had finished reacting | **Fixed** — it waits for the session to settle | this PR |
+| 54 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | A failed sandbox setup could still be recorded as a successful proof | **Fixed** — setup must succeed and the break must be the right one | this PR |
+| 55 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | Cumulative stub state attributed to the current run | **Fixed** — baselined, and nothing is deleted | this PR |
+| 56 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | `migrate()` would keep local edits verified in a sandbox | **Fixed** — the loop checks where each run happened | this PR |
+| 57 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | `inf` and `nan` passed the timeout check | **Fixed** — a bound has to be finite | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -861,6 +872,265 @@ Now only `None` is retried. Anything else is validated and raises
 dropped by a comprehension — and which would be exactly the event explaining why
 a turn did not do what it was asked. An empty `data` list is returned as the
 real answer it is.
+
+## 47 · A plan is not an application, and the report said it was
+
+Self-found, by the test written to look for exactly this class of thing. No
+reviewer saw it; it did not survive to a pull request.
+
+`bumpsmith.migrate` reports how many steps changed the repository. The first
+version derived that from each step's plan:
+
+```python
+@property
+def applied(self) -> bool:
+    return self.plan is not None and bool(_writes(self.plan))
+```
+
+Which is a reasonable thing to believe. A plan holds the edits, the edits change
+files, so a step with edits changed files. It follows from everything except
+what actually happens: `bumpsmith.apply.attempt` verifies a whole edit set
+before writing any of it and can refuse the lot — an edit whose file is a
+symlink, or has changed since the plan was made, or lives outside the tree. When
+it refuses, nothing is written. The plan is unchanged, and it still says two
+files.
+
+So a run that touched nothing reported `reverted -- 1 change, taken back`, and
+`Outcome` is computed from that same count. The report described a repository
+that had been changed and put back, when the repository had never been touched.
+
+The exhaustive test found it. Not one of the tests aimed at `NOT_APPLIED` — the
+table-driven one that runs every way the loop can end and asserts, for each, that
+the tree is either changed-with-a-green-run or byte-identical. The `NOT_APPLIED`
+row asserted `UNTOUCHED` and got `REVERTED`, which is how a property test earns
+its length: nobody had thought to check what the *report* said in the case where
+the *disk* was obviously fine.
+
+`Step.applied` is now recorded, set on the one line in the package after which a
+repository is different from how it was found:
+
+```python
+except ApplyError as exc:
+    steps.append(step)
+    return _Stopped(Stop.NOT_APPLIED, f"the edits were refused: {exc}")
+
+steps.append(replace(step, applied=True))
+```
+
+This is shape 3 again — *an answer good enough for reporting, reused for
+mutating* — running backwards. There the resolution that could correctly count
+sites was used to rewrite them. Here the plan that correctly describes an
+intention was used to report an event. Both are one value asked a question it
+was never the answer to.
+
+Verified by reverting the fix: the `not-applied` case fails and every other case
+still passes, which is the shape of a defect that only one row could see.
+
+---
+
+## 48 · A proof that could check the wrong process
+
+Also self-found, while moving the proof scripts into the repository.
+
+`proofs/deny.py` ends by asserting that the tool it denied never ran, which it
+did by checking that `pr-calls.log` did not exist. The file is written by
+`mcp_stub.py`, a *separate process*, at a path relative to whatever directory
+that process was started in. The two never agreed on it by construction; they
+agreed because the same person launched both from the same directory.
+
+A checker looking in the wrong place finds nothing, and finding nothing is what
+this one reports as success. It would have passed most confidently in exactly the
+situation where it knew least — the same failure mode as finding 46, in a
+different costume.
+
+The stub now answers `GET /calls` with what it actually served, and the proof
+reads the URL to ask **out of the harness's own MCP manifest**. The server being
+questioned is therefore provably the one the harness was configured to call,
+rather than one on a port the script guessed. Being unable to reach it is
+reported as "nothing is proven" and exits non-zero; it is never reported as "the
+tool did not run". The file check is kept as a second, independent signal.
+
+## 49 · "Unmigrated" was a guess wearing a fact's clothes
+
+Found by running the new command from a clean clone, which is the test it was
+written to make possible, on the first try.
+
+Fixture B in a fresh environment has no `requests` installed. pytest reported
+`ModuleNotFoundError: No module named 'requests'`, `bumpsmith.failures`
+classified it `TRANSITIVE_DEPENDENCY` — correctly, since `requests` is not a
+package this repository owns — and `write_rule` produced:
+
+> A dependency of this repository is itself unmigrated.
+
+Which is one of two possible readings and the message picked it without saying
+so. The module was not unmigrated; it was not installed. Both look identical in
+pytest's output, and nothing in the text distinguishes them.
+
+The classification is right and unchanged. What was wrong was the sentence: a
+user reading it would go looking for a pydantic-related pin to bump, when the
+answer was `pip install requests`. The rule now names both possibilities, says
+the message cannot tell them apart, and says the fix is outside this repository
+either way — which is the part that is true regardless.
+
+Pre-existing, from the class-6 work in #8. It sat unnoticed because until this
+pull request there was no way to run the pipeline that would print it. That is
+most of the argument for the pull request.
+
+## 50–57 · Eight on the loop and its proofs
+
+The largest round so far, and the one where the findings are mostly *about the
+composition* rather than about a module. That is what a loop is: eight things
+that were each individually fine and one of them wrong once they ran together.
+
+Seven accepted outright. One accepted in part, with the reasoning below.
+
+### 50 · The revert checked the door on the way in and not on the way out
+
+`_apply` re-reads every file immediately before writing it and refuses if the
+content changed since the plan was made — because the check and the write are
+not the same moment, and anything that moved in between would be silently
+overwritten. `_restore` wrote `edit.before` back unconditionally.
+
+The asymmetry was invisible while `attempt` was only ever used the way its own
+tests use it, inside a `with` block a few milliseconds long. `bumpsmith.migrate`
+holds every transaction open across every later run of the suite, so
+"between apply and revert" became minutes of a test run executing against the
+same checkout. Anything writing to it in that window — a developer, a formatter
+on save, a fixture with a bad path — got its work thrown away by a cleanup that
+believed it knew what was there.
+
+The revert now re-reads first. A file that no longer holds what the transaction
+put there is left alone and named in the `RevertError`. Deleting the file counts
+as a change too, so `before` is not resurrected over it. Every other file in the
+transaction is still restored.
+
+This is worth saying plainly: **reverting is supposed to cost nothing, and
+destroying somebody's work is not nothing.** The module's headline promise was
+true about our own edits and false about everyone else's.
+
+### 51 · A suite that never ran exited like a failing one
+
+`main`'s docstring said `2` means the run never got far enough to say. `Stop.NOT_RUN`
+is exactly that — a missing interpreter, a timeout, a sandbox that could not be
+reached — and it returned `1`, indistinguishable from a red suite.
+
+The whole of `bumpsmith.run` exists to keep those apart, and the process's exit
+status is where that distinction most needs to survive: automation that cannot
+tell a failing test from an absent one retries the wrong thing.
+
+**The fourth time a test has held a defect in place** (34, 38, 43, and now this).
+`test_a_suite_that_cannot_be_started_exits_one_rather_than_pretending` asserted
+`1` and was *named* for it, so the contradiction between the docstring and the
+code had a test defending the wrong side. `Stop.WRONG_PLACE` (finding 56) exits
+`2` for the same reason and is grouped with it.
+
+### 52 · An incomplete migration reported as a finished one — accepted in part
+
+The finding asked the loop to stop before applying whenever `ScanResult.is_complete`
+or `Plan.is_complete` is false.
+
+**The premise is accepted and the remedy is not.** Refusing to apply would make
+the tool useless on the repositories it is for: one vendored file that will not
+parse, or one matched site the rewriter declines, and a migration that would
+have worked is refused entirely. A suite that goes green is real evidence about
+the tests that exist, and the right response to partial knowledge is not to
+throw away the part that worked.
+
+What was genuinely wrong is that the report let "the suite passes" stand in for
+"the migration is finished". Those are different claims and only one of them was
+being made. `Migration.complete` is now a property beside `outcome`, false when
+any candidate file went unread or any matched site went unchanged, and the
+command prints `NOT COMPLETE` above the step detail that says which. The JSON
+carries it too.
+
+Same family as finding 34 and finding 46: not a wrong answer, an answer to a
+question nobody asked, standing where the answer to a different one belonged.
+
+### 53 · "Not yet" reported as "never"
+
+The deny proof delivered the refusal and immediately asked the MCP server
+whether its tool had run. Delivering an event is not the harness having finished
+with it — the denial *starts* asynchronous work rather than concluding it.
+
+Checking there answers "has the tool run yet", and the script reported it as
+"the tool never ran".
+
+The harness's own record shows how much was being missed. The denial creates a
+second turn; in it the refusal comes back as a `tool.response` carrying the
+error, the model reads it, and then — the good part — it abandons the tool
+entirely and calls `ask_user_question` instead:
+
+> The pull request could not be opened automatically due to requiring human
+> approval for irreversible actions. How would you like to proceed?
+
+The proof exited before any of that existed. It now waits for the session to go
+quiet — two consecutive passes that add no turn and leave none in progress,
+bounded, with a message rather than a false clean bill if the bound is hit — and
+records the turns in the evidence. The demonstration got strictly stronger for
+being made honest: it now shows not only that the tool did not run, but that the
+agent stopped trying and went to find a human.
+
+### 54 · A failed setup recorded as a successful proof
+
+`sandbox.py` built its project and ran pytest without checking that the build
+had worked. A `Completed` with a nonzero status is not a `RunError` — that
+distinction is correct and is the whole of `bumpsmith.run` — so a failed
+`pip install` arrived looking like an ordinary result and got carried past.
+
+The exit check was `returncode != 0 and failures`, which any broken sandbox
+satisfies. A missing pytest, an empty workspace, a network failure: all of them
+produce a nonzero status and something the parser will classify, and all of them
+would have been filed as proof of a pydantic `regex=` break.
+
+Setup must now succeed, and the parsed failure must be `REGEX_KEYWORD` — the
+break the script builds and therefore the only one it may end green on.
+
+### 55 · Cumulative state read as this run's
+
+The stub keeps every call it has served, for its whole lifetime, and appends to
+its log forever. The proof read both as though they described the run that had
+just happened, so a long-lived stub or one previous experiment would report a
+failure that did not occur.
+
+This one fails safe — it cries wolf rather than missing one — which is why it is
+Medium and the two above are High. It is still wrong. Both signals are now
+baselined before the session is created and compared afterwards, and the
+baseline is printed when it is nonzero. Nothing is deleted to tidy it up:
+clearing the evidence is how a real call gets lost.
+
+### 56 · The guard was at one entrance and the building had two
+
+`python -m bumpsmith --sandbox` refuses, with a paragraph explaining that the
+sandbox is a different filesystem and a suite run there would not be testing the
+local edits. That paragraph is right and the refusal was in the wrong place.
+
+`migrate()` is public, takes the general `Runner` protocol, and a caller holding
+a `SandboxRunner` reaches it without going anywhere near the command line. The
+module docstring stated the requirement — *the runner has to execute against the
+same tree* — and nothing enforced it. **Prose stating a property is not the
+property**, which this log has already written down once, about a different
+module, in finding 44.
+
+The loop now checks `Completed.where` against `SAME_TREE` on every run. It tests
+the fact each run reports rather than the type of the runner, so a wrapper
+cannot slip past and a runner nobody has written yet is covered — and it is
+checked on *every* run, so a runner that reported honestly while the suite was
+red and conveniently the moment it went green is caught too. That case has its
+own test, because it is the one the check exists for.
+
+`Completed.where` was added in #14 so the review trail could say where a result
+came from. Using it to enforce the invariant rather than to narrate it is what
+it should always have been for.
+
+### 57 · A bound that accepted infinity
+
+`--timeout` rejected anything `<= 0`. `float("inf")` and `float("nan")` both
+parse and neither is `<= 0`. `inf` silently removes the per-run cap the flag
+exists to set; `nan` compares false against everything, so `subprocess`'s own
+timeout never fires either. Both are now refused as invocation errors, which is
+what they are.
+
+---
 
 ---
 

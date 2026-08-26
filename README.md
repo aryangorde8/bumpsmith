@@ -15,6 +15,107 @@ history is the record.
 A full README with setup steps, a demo video, and a write-up lands before the
 deadline.
 
+## Using it
+
+```
+pip install -e .
+python -m bumpsmith PATH -- <the command that runs its tests>
+```
+
+The suite command goes after `--`, because it usually has flags of its own and
+`--` is how they get past this command's own parser.
+
+```
+python -m bumpsmith ./fixtures/B --package emnify -- ./venv/bin/python -m pytest -q
+```
+
+That is the whole agent. It runs the suite, reads the break out of the failure,
+writes the migration rule that break implies, finds every site the rule applies
+to, plans the smallest edit that carries it out, applies that edit as a
+revertible transaction, and runs the suite again — and it keeps the changes only
+once a run has come back green.
+
+Here it is against fixture B, a real third-party SDK, unabridged:
+
+```
+step 1  rc=2  (local)
+  break    [ROOT_MODEL] To define root models, use `pydantic.RootModel` rather than a field called '__root__'
+  at       emnify/modules/api/models.py:397
+  rule     Replace a `__root__` field with pydantic.RootModel
+  scan     19 sites in 2 files
+  plan     19 sites across 2 files
+  applied
+
+step 2  rc=2  (local)
+  break    [REGEX_KEYWORD] constr() got an unexpected keyword argument 'regex'
+  at       emnify/modules/api/models.py:640
+  rule     Rename the `regex=` argument to `pattern=`
+  scan     5 sites in 1 file
+  plan     5 sites across 1 file
+  applied
+
+step 3  rc=2  (local)
+  break    [VALIDATOR_FIELD_CONFIG] The `field` and `config` parameters are not available in Pydantic V2, please use the `info` parameter instead.
+  at       emnify/modules/device/models.py:25
+  rule     Replace a v1 validator's `field` and `config` parameters with v2's `info`
+  scan     1 site in 1 file
+
+reverted -- the edits did not make it pass and were taken back
+  no rewriter is written for VALIDATOR_FIELD_CONFIG; the rule is still the useful output, but it cannot be applied automatically
+  2 changes, taken back
+```
+
+Two things in that are the point of the whole project.
+
+**The second break was invisible until the first was fixed.** `__root__` aborts
+collection, so pytest never imported the module holding the `constr(regex=...)`
+underneath it. Not lower priority — unreachable. That is why this is a loop and
+not a pass.
+
+**It stopped, said exactly what it could not do, and left the repository
+byte-for-byte as it found it.** `git status` afterwards is empty. A migration
+that leaves a checkout changed and no better is worse than one that changes
+nothing, because somebody then has to work out which of the two happened. Every
+way the loop can end is one of ten named reasons, so "bumpsmith could not finish"
+always says *which* thing happened and whether the next move is to write a rule,
+fix the pytest invocation, or upgrade a dependency.
+
+Exit status is `0` if the suite ends green, `1` if it does not, and `2` if the
+run never got far enough to say. `--json PATH` writes the same report as JSON.
+`--steps 0` runs the suite and changes nothing.
+
+### Where the suite runs
+
+`bumpsmith.run` makes that a seam. `LocalRunner` uses a subprocess on this
+machine and is the default, which is the honest default for a tool you have just
+cloned. `SandboxRunner` runs it in the harness's sandbox, and
+[`proofs/sandbox.py`](proofs/sandbox.py) demonstrates a real pytest run in
+Daytona through nothing but package code.
+
+`--sandbox` on the command line is parsed and **refused**, with the reason. The
+sandbox is a different filesystem, so the loop would write its edits here and
+verify them there, against code the edits never reached — and a green result
+would keep a change that nothing had tested. That is the defect `bumpsmith.run`
+exists to prevent, one level up. Carrying the edits across is the missing piece;
+until it is written and reviewed, a flag that quietly did it would be worse than
+no flag at all.
+
+The refusal is not only in the command. `migrate()` is a public function taking
+any `Runner`, so it checks where each run actually happened and stops before
+using a result that came from somewhere the edits are not — including a runner
+that reports honestly while the suite is red and conveniently the moment it goes
+green.
+
+### Stopping before anything irreversible
+
+Nothing here opens a pull request yet. When it does, it goes through
+`bumpsmith.gate`, which owns the call rather than warning about it: a denial is
+not an error raised afterwards, it is a call that never happens. The harness's
+own `tool.approval_required` is answered by that same gate, and
+[`proofs/deny.py`](proofs/deny.py) proves the refusal against a live TrueForge —
+including that the MCP server it would have called reports zero tool calls
+served. See [`proofs/`](proofs/README.md).
+
 ## The fixtures
 
 bumpsmith is measured against four real repositories rather than against test

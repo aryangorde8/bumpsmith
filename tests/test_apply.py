@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from bumpsmith import apply as apply_module
-from bumpsmith.apply import ApplyError, Edit, attempt
+from bumpsmith.apply import ApplyError, Edit, RevertError, attempt
 from bumpsmith.sources import read_source
 
 
@@ -39,6 +39,57 @@ def test_edits_are_taken_back_when_the_caller_says_nothing(tmp_path: Path) -> No
         assert path.read_text() == "changed\n"
 
     assert path.read_text() == "original\n"
+
+
+def test_a_file_changed_after_the_edit_was_applied_is_not_overwritten(tmp_path: Path) -> None:
+    """Reverting is supposed to cost nothing. Destroying somebody's work is not nothing.
+
+    The apply path re-reads immediately before writing so a change made between
+    the check and the write is refused. This is the same care on the way out.
+    The window is not theoretical: `bumpsmith.migrate` holds a transaction open
+    across every later run of the test suite, so "between apply and revert" is
+    minutes of a suite executing against the same checkout.
+    """
+    path = _file(tmp_path, "model.py", "original\n")
+
+    with (
+        pytest.raises(RevertError, match="changed after this edit was applied"),
+        attempt([_edit(path, "changed\n")], tmp_path),
+    ):
+        assert path.read_text() == "changed\n"
+        path.write_text("somebody else's work\n")
+
+    assert path.read_text() == "somebody else's work\n"
+
+
+def test_a_file_that_cannot_be_read_back_is_reported_rather_than_guessed(
+    tmp_path: Path,
+) -> None:
+    """Deleting the file is also a change, and recreating it would also be a guess."""
+    path = _file(tmp_path, "model.py", "original\n")
+
+    with (
+        pytest.raises(RevertError, match="could not be read"),
+        attempt([_edit(path, "changed\n")], tmp_path),
+    ):
+        path.unlink()
+
+    assert not path.exists(), "the edit's `before` was not resurrected over a deletion"
+
+
+def test_the_other_files_are_still_restored(tmp_path: Path) -> None:
+    """One file somebody else touched does not strand the rest of the transaction."""
+    kept = _file(tmp_path, "theirs.py", "original\n")
+    ours = _file(tmp_path, "ours.py", "original\n")
+
+    with (
+        pytest.raises(RevertError, match=r"theirs\.py"),
+        attempt([_edit(kept, "a\n"), _edit(ours, "b\n")], tmp_path),
+    ):
+        kept.write_text("somebody else's work\n")
+
+    assert kept.read_text() == "somebody else's work\n"
+    assert ours.read_text() == "original\n", "the untouched file came back"
 
 
 def test_edits_survive_when_the_caller_keeps_them(tmp_path: Path) -> None:

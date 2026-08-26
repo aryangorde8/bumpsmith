@@ -18,3 +18,13 @@ htmlcov/
 # are inputs to the agent, never part of the project. See rule 7 and the FAQ:
 # "Can I use code I already have? Not as the project itself."
 /fixtures/
+
+# What `proofs/mcp_stub.py` writes if its tool is ever actually invoked. The
+# proof asserts this does NOT exist, so a copy of it must never be committed --
+# a stale one would make a failing run look like a passing one.
+pr-calls.log
+
+# Where the proofs write their evidence by default. The recorded runs under
+# `proofs/recorded/` are committed deliberately; a fresh run's output is not.
+/sandbox.json
+/deny.json

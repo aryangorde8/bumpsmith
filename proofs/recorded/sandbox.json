@@ -1,0 +1,20 @@
+{
+  "transport": "bumpsmith.trueforge.Client + SandboxExec",
+  "runner": "bumpsmith.run.SandboxRunner",
+  "model": "bedrock-mantle/qwen-3-coder-480b",
+  "setup": {
+    "returncode": 0,
+    "output": "WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.\nready\n"
+  },
+  "result": {
+    "returncode": 2,
+    "where": "sandbox",
+    "output": "\n==================================== ERRORS ====================================\n_________________________ ERROR collecting test_app.py _________________________\ntest_app.py:1: in <module>\n    from app import User\napp.py:4: in <module>\n    class User(BaseModel):\napp.py:5: in User\n    name: str = Field(..., regex=\"^[a-z]+$\")\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n/usr/local/lib/python3.13/site-packages/pydantic/fields.py:1322: in Field\n    raise PydanticUserError('`regex` is removed. use `pattern` instead', code='removed-kwargs')\nE   pydantic.errors.PydanticUserError: `regex` is removed. use `pattern` instead\nE   \nE   For further information visit https://errors.pydantic.dev/2.12/u/removed-kwargs\n=========================== short test summary info ============================\nERROR test_app.py - pydantic.errors.PydanticUserError: `regex` is removed. us...\n!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!\n1 error in 0.14s\n"
+  },
+  "parsed": [
+    {
+      "break_class": "REGEX_KEYWORD",
+      "message": "`regex` is removed. use `pattern` instead"
+    }
+  ]
+}
