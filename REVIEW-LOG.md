@@ -41,7 +41,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 32 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | Wrapper named instead of the tool — *raised by the live harness* | **Fixed** — reproduced twice, before and after | this PR |
 | 33 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | `mcp:unknown` reported as an attribution — *raised by the live harness* | **Fixed** | this PR |
 | 34 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | A failed send re-asks, so a refusal can become an approval | **Fixed** — my own test pinned the bug | this PR |
-| 35 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | No production path constructs the bridge | **Accepted, deferred to [#14](https://github.com/aryangorde8/bumpsmith/pull/14) with a reason** | — |
+| 35 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | No production path constructs the bridge | **Accepted, deferred to the transport PR** — [#14](https://github.com/aryangorde8/bumpsmith/pull/14) found the same gap for `exec`; both land together | — |
 | 36 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | Policy keyed to the model-facing alias, not the tool | **Fixed** — and the reason is worse than the finding said | this PR |
 | 37 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | A reused call id suppresses a real call | **Fixed** | this PR |
 | 38 | [#14](https://github.com/aryangorde8/bumpsmith/pull/14) | A test helper substituted a valid answer for the invalid one under test — *found by another test* | **Fixed** | this PR |
@@ -605,10 +605,19 @@ scratch directory, which is exactly the finding's point.
 The remedy is not to relax the separation — keeping decisions free of transport
 is why they can be tested against a recorded event stream, and why the module
 cannot quietly grow a retry loop around an approval. The remedy is the transport
-itself: an HTTP `Channel` and the poll loop, in the package, shipped in
-[#14](https://github.com/aryangorde8/bumpsmith/pull/14) rather than bolted onto
-this diff. Recorded here so that a reader who checks finds a plan and a link
-rather than a gap.
+itself: an HTTP client and the poll loop, in the package, rather than bolted onto
+this diff. Recorded here so that a reader who checks finds a plan rather than a
+gap.
+
+**Amended 26 Aug.** [#14](https://github.com/aryangorde8/bumpsmith/pull/14) was
+expected to carry that transport and does not. Building the sandbox seam first
+turned up the same gap from the other side — `bumpsmith.run` decides what an
+`exec` result *means* and takes the transport as a protocol, exactly as
+`harness.py` does for approvals — and both need the same session, turn and poll
+machinery. Writing it twice would be the wrong shape, so it is written once, in
+the PR after this one, and serves both. The gap now stands against two merged
+modules instead of one, which is worse than the original entry claimed and is
+the reason to say so here.
 
 ---
 
