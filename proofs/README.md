@@ -1,6 +1,9 @@
 # Proofs
 
-Three scripts that demonstrate something the test suite cannot reach on its own.
+Scripts that demonstrate something the test suite cannot reach on its own.
+One per directory entry ending in `.py`; the count is deliberately not written
+down here, because this repository has two review findings about a number
+restated in prose and left behind by the thing it counted.
 
 Two of them run against a live TrueForge and cover the halves of the hackathon's
 control-and-safety criterion — *does the agent run its code somewhere safe, and
@@ -119,6 +122,50 @@ Being unable to ask is never reported as "it did not run". A proof that turned a
 unreachable server into a clean bill of health would pass most reliably when it
 was least entitled to.
 
+### `pull_request.py` — the other half of the gate
+
+```bash
+python proofs/pull_request.py
+```
+
+`deny.py` proves the half that refuses. This proves the half that does not, and
+it is the half that had nothing behind it until `bumpsmith.publish` was written:
+a gate is only interesting if something is on the other side of the door.
+
+It builds a **bare git repository in a temporary directory** — a real remote that
+nobody owns — gives it a repository with a real pydantic v1 break, and runs
+`python -m bumpsmith --open-pr` against it four times, checking what reached the
+remote after each:
+
+| answered | at | must happen |
+|---|---|---|
+| nothing | `/dev/null` | refused; the remote gains nothing |
+| `n` | a pty | refused; the remote gains nothing |
+| `y` | a pty | **refused** — `y` is not the word |
+| `yes` | a pty | pushed, and only the migrated file |
+
+Each row is checked three ways, not one. **Every ref on the remote is compared by
+name *and by object***, because a refusal that rewrote `trunk` changes no name
+and the conclusion being recorded is that nothing happened. **The exit status is
+checked**, because "no new branch appeared" is also satisfied by a crash before
+the prompt was ever printed. And the approved run exits **2**, not 0: the remote
+here is a bare repository, so there is nowhere to open a pull request, and one
+that was asked for and did not happen is not a success.
+
+A pseudo-terminal rather than a pipe, deliberately: the approver asks
+`sys.stdin.isatty()` before it asks anybody anything, so feeding the answer down
+a pipe would exercise the first case four times and prove nothing about the
+other three.
+
+The last check is the narrow one. After the approved push it reads back the
+branch: one commit, touching exactly `mypkg/__init__.py`, containing exactly the
+migration's edit. A tool that pushed the right change *alongside somebody's work
+in progress* would satisfy every other check here and be unusable by anyone with
+a dirty tree — which is everyone.
+
+Needs no harness, no network, no model and no credentials. With `validator.py`
+it is the second proof a reader can run having only cloned the repository.
+
 ### `validator.py` — the fix is not what the error message says
 
 ```
@@ -147,7 +194,7 @@ rewriter is built on these answers, so a change here is a change there.
 
 ## The recorded runs
 
-`recorded/` holds the output of all three scripts, verbatim, from 26 August 2026 —
+`recorded/` holds the output of every script, verbatim, from 26 August 2026 —
 the two harness ones against TrueForge 0.1.4 with `bedrock-mantle/qwen-3-coder-480b`,
 and `validator.py` against pydantic 2.12.5. They are committed because a judge
 without a harness cannot run the first two, and a claim nobody can check is worth

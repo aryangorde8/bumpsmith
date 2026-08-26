@@ -84,6 +84,20 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 75 | [#19](https://github.com/aryangorde8/bumpsmith/pull/19) | `--json out --html out` wrote both in turn, reported two successes and exited 0 with the JSON gone | **Fixed** — refused before the suite runs, paths compared resolved | this PR |
 | 76 | [#19](https://github.com/aryangorde8/bumpsmith/pull/19) | `page()`'s docstring named `__main__.report_payload`, a function that was never written — *self-found* | **Fixed** — described by what it is, not by a name that must keep existing | this PR |
 | 77 | [#19](https://github.com/aryangorde8/bumpsmith/pull/19) | "It stopped at `no-rule`. the failure classified as UNKNOWN" — every `Stop` reason is a lowercase clause — *self-found by reading the rendered page* | **Fixed** — a dash, and the sentence is terminated | this PR |
+| 78 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | The pull request body said "of which 1 were rewritten" — the nouns went through `_count` and the verb between them did not — *self-found by reading a pushed commit* | **Fixed** | this PR |
+| 79 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | The body stated the one-site-against-every-site gap when there was no gap; `report.py` had already decided that question correctly and the markdown did not inherit it — *self-found the same way* | **Fixed** — suppressed on both sides, with a test on each | this PR |
+| 80 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | `git remote get-url` gives the **fetch** URL; `git push` uses `pushurl` and may have several — the approval named a destination the push would not use | **Fixed** — `get-url --push --all`, and more than one push URL is refused | this PR |
+| 81 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | The fingerprint bound the URL and the push used the mutable remote *name* | **Fixed** — the push names the URL; the indirection is gone rather than re-checked | this PR |
+| 82 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | `gh pr create` had no `--repo`, so it picked a repository from the checkout — the one the migration was cloned from | **Fixed** — `--repo` from the approved URL; a non-GitHub URL means `gh` is not run at all | this PR |
+| 83 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | `checkout -B` starts at HEAD, so a checkout ahead of the base publishes its commits — and the suite went green against HEAD, not the base | **Fixed** — HEAD must *be* the base | this PR |
+| 84 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | `git commit` commits the whole index, and `git add -- path` stages that file's uncommitted changes too | **Fixed** — `commit --only`, a dirty index refused, each path checked against what the migration first read | this PR |
+| 85 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | `-B` resets an existing branch, and the default name is reused across runs | **Fixed** — `-b`, and an existing branch is refused | this PR |
+| 86 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | `--open-pr "$REMOTE"` with the variable unset was read as never having asked | **Fixed** — answered, not absorbed; finding 75's principle two commits later | this PR |
+| 87 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | A pushed branch with no pull request exited 0 | **Fixed** — exit 2; a refusal still exits 0, because saying no must stay free | this PR |
+| 88 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | The proof compared branch *names*, so a rewritten `trunk` passed as untouched | **Fixed** — every ref compared with its object; verified by force-updating trunk | this PR |
+| 89 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | The proof ignored the CLI's exit status, so a crash read as a refusal honoured | **Fixed** — each case states its status; verified by making refusals exit 1 | this PR |
+| 90 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | A timed-out proof child survived `communicate` and outlived the `rmtree` | **Fixed** — killed and reaped; reproduced with a sleeping suite | this PR |
+| 91 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | `_git` strips its output and `status --porcelain`'s leading space is significant, so every publish was refused — *self-found fixing 84, by running it* | **Fixed** — two `git diff` reads with no whitespace to lose | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -1661,6 +1675,198 @@ terminated — unless the reason already ends in punctuation, which
 every one of them was invisible to a passing suite.** That is not an argument
 against the tests; it is the argument for the page. A report nobody reads is a
 report nobody checks.
+
+---
+
+## 78–79 · Two from reading a pull request this actually opened
+
+Both in the body `bumpsmith.publish` writes. Neither is a crash, neither could
+fail a test that did not already know to look, and both were on a real remote
+before they were found — which is the argument for opening one against a bare
+repository in a temporary directory before opening one against anybody's project.
+
+### 78 · "of which 1 were rewritten"
+
+Verb agreement, in the sentence that carries the number a reviewer is being asked
+to accept. The module has a `_count` helper for exactly this problem and it was
+used for the nouns on either side -- `1 site`, `1 file` -- and not for the verb
+between them. The half of the sentence that was hand-written is the half that was
+wrong, which is the ordinary shape of this.
+
+### 79 · A gap stated where there was no gap
+
+> The failure named one site. The rule matches **1 site across 1 file**, of which
+> 1 was rewritten.
+
+Three numbers, all the same, arranged to look like a comparison. The whole reason
+this project emits a rule rather than a patch is that those figures usually
+differ; saying so when they do not spends a reviewer's attention and returns
+nothing, and it makes the case where the numbers *do* differ harder to notice
+because the sentence is always there.
+
+`bumpsmith.report` already decided this exact question and decided it correctly
+-- the gap bar is suppressed when `found <= reported`, with a comment saying that
+drawing one anyway "would dress up the least interesting case as the point". The
+markdown body was written afterwards and did not inherit the decision.
+
+**Two renderings of one run, and one of them had learned something the other had
+not.** That is finding 71's shape at one remove: not a payload with one consumer,
+but a *judgment* with one consumer. Both now suppress it, and there is a test on
+each side rather than a comment pointing at the other.
+
+---
+
+## 80–90 · Eleven from Qodo on the pull request, all accepted
+
+The largest review this repository has had, on the one module where being wrong
+is expensive, and **it found things the module's own docstring claimed were
+handled.** That is the entry. `publish.py` opened with three paragraphs arguing
+that the destination must never be inferred and that nothing but the migration
+may go out, and then inferred the destination in three places and let four
+different kinds of other people's work through.
+
+### The destination was still being inferred — 80, 81, 82
+
+**80 · The URL shown was the one that would not be used.** ``git remote get-url``
+answers about *fetching*. ``git push`` uses ``pushurl`` when a remote has one,
+and a remote may have several -- in which case one push goes to all of them, and
+none of them is the URL the approval named. The whole module exists to make the
+destination visible before somebody agrees to it, and it read the destination
+with the one git command that looks like it answers the question and does not.
+
+Now ``get-url --push --all``, and **more than one push URL is refused outright**.
+"Send my code to these three places" is not something to slip past a person
+inside a migration tool's prompt.
+
+**81 · The fingerprint bound the URL and the push used the name.** The gate binds
+an approval to the resolved URL, and then ``_do_open`` pushed to
+``proposal.remote`` -- a name ``git remote set-url`` can re-point in between. The
+approved destination and the actual one were connected by nothing but the
+assumption that nobody had moved it.
+
+The fix is not a re-check, it is removing the indirection: **the push names the
+URL.** A re-check would have left the same class of problem one loop tighter.
+
+**82 · The pull request went wherever ``gh`` felt like.** No ``--repo`` and no
+owner-qualified head, so repository selection fell to the checkout's own remotes
+-- which, for a migration, is *the repository this was cloned from*. The branch
+would go to the approved fork and the pull request would be attempted against
+somebody else's project. Now ``--repo`` comes from the approved URL, and a URL
+that is not GitHub means ``gh`` is not run at all: a bare repository is a fine
+place to push a branch and not a place pull requests exist, and reporting ``gh``'s
+failure there described something going wrong when nothing had.
+
+### Staging the right paths stopped almost nothing — 83, 84, 85
+
+This is the cluster worth remembering. The module said:
+
+> The commit stages the migration's own paths, explicitly, one by one. Never
+> ``git add -A``.
+
+True, verified by a test, and **not the guarantee it was standing in for.** Four
+routes carry somebody else's work into a pull request and the pathspec closes
+one:
+
+**83 · The branch, not the commit.** ``checkout -B`` starts the branch at ``HEAD``.
+A pull request is a diff against the *base*, so a checkout three commits ahead
+publishes all three no matter what the new commit touches. Restricting the
+commit never addressed the branch.
+
+And the deciding argument turned out not to be about other people's commits at
+all: **the suite that went green ran against ``HEAD`` plus these edits.** A pull
+request against a different base is a different change from the one that was
+tested, offered with this project's whole claim attached. So ``HEAD`` must *be*
+the base, and anything else is refused.
+
+**84 · The index, and the file itself.** One finding, two mechanisms, and neither
+is touched by choosing a pathspec:
+
+* ``git commit`` commits what is *staged*. A caller who had run ``git add``
+  before starting the migration got their staged work in bumpsmith's commit,
+  whatever pathspec added ours. Now ``commit --only`` with the pathspec, and a
+  non-empty index is refused before that.
+* ``git add -- path`` stages that file's *current* contents -- the migration's
+  edit **plus** whatever was already uncommitted in it. Staging the right path
+  does not make the right change. Each path is now checked against what the
+  migration first read, which is why the equivalent question inside
+  ``_originals_of`` needed the *first* ``before`` per file rather than the last.
+
+**85 · The branch already existing.** ``-B`` resets it, and `DEFAULT_BRANCH` is
+deliberately reused across runs -- so the *ordinary* case was the dangerous one,
+leaving a previous run's commit unreachable. Now ``-b``, and an existing branch
+is refused with what to do about it.
+
+### The command line — 86, 87
+
+**86 · An empty ``--open-pr`` was absorbed rather than answered.** ``--open-pr
+"$REMOTE"`` with the variable unset asks for a pull request and names nowhere; a
+truthiness test read that as never having asked, and the migration exited 0
+having silently skipped the operation. This is finding 75's principle -- a bad
+invocation is answered, not absorbed -- failing in a flag added two commits after
+75 was fixed.
+
+**87 · A pull request that did not happen exited 0.** The branch is pushed, there
+is no pull request, and the exit status said success. Now 2: 1 means the suite is
+red, and here the suite is green -- what failed is the operation. A *refusal*
+stays 0, because somebody was asked and said no, and making that cost something
+would make it expensive to say no.
+
+### And three on the proof itself — 88, 89, 90
+
+A proof that passes for the wrong reason is worse than no proof, because it gets
+quoted.
+
+**88 · It compared branch names.** A refusal that rewrote ``trunk``, or altered an
+existing branch, changed no *name* -- and the recorded conclusion said the remote
+was untouched after every refusal. Now every ref is compared with its object.
+Verified by making the approved push also force-update ``trunk``: the set of
+names is unchanged and the run fails on ``moved``.
+
+**89 · It ignored the exit status.** Verdicts rested entirely on whether a branch
+appeared, so a crash before the prompt was ever printed would be recorded as a
+refusal correctly honoured. Each case now states the status it expects. Verified
+by making refusals exit 1: every remote check still passes and the run fails.
+
+**90 · A timed-out child survived.** ``communicate`` raising leaves the process
+running -- here, a migration with an approved push in front of it, holding the
+temporary repository the proof is about to ``rmtree`` underneath it. Reproduced
+by making the fixture suite sleep so the timeout lands mid-run: without the kill,
+one ``python -m bumpsmith`` outlives the proof; with it, none.
+
+### What this review is evidence of
+
+Every one of the eleven is in code whose docstring is the argument for it. The
+module reasons carefully about the destination and then reads it with the wrong
+command; it reasons carefully about other people's work and then defends the
+narrowest of the four routes it travels by.
+
+**A guarantee stated well is not a guarantee tested well, and prose is where the
+two diverge without anything failing.** This log already has a name for the
+neighbouring shape -- *"prose stating a property is not the property"*, findings
+60 and 69, where the fix was to stop stating it and start pinning it. These are
+the same failure with the confidence turned up: the property was not merely
+unstated, it was argued for at length, in a file that did not have it.
+
+---
+
+## 91 · `_git` strips its output, and one git format needs the whitespace
+
+Self-found, fixing 84, by running it.
+
+The check for a dirty tree read ``git status --porcelain`` and looked at
+``line[:2]`` for the two status columns. ``_git`` ends with ``.strip()`` -- fine
+for every other git command in the module, and it eats the leading space of the
+*first* porcelain line, whose first column is a space precisely when a change is
+unstaged. So the migration's own modified file arrived as ``M `` instead of
+`` M``, read as staged, and every publish was refused with a message naming the
+one file that was allowed to be there.
+
+Caught in a second by the end-to-end proof and invisible to the unit tests, which
+were feeding the fake git a string that had never been through ``strip``.
+
+Replaced with ``git diff --cached --name-only`` and ``git diff --name-only``:
+two questions asked separately, each answering exactly one of the two things 84
+is about, and neither with any leading whitespace to lose.
 
 ---
 

@@ -1,0 +1,13 @@
+a bare remote at /tmp/bumpsmith-pr-proof-y8gisobo/fork.git
+a repository at /tmp/bumpsmith-pr-proof-y8gisobo/repo
+
+PASS  no terminal: the remote gained nothing, moved nothing, exit 0
+PASS  answered n: the remote gained nothing, moved nothing, exit 0
+PASS  answered y: the remote gained nothing, moved nothing, exit 0
+PASS  answered yes: the remote gained ['bumpsmith/pydantic-v2'], moved nothing, exit 2
+
+PASS  what landed: ['mypkg/__init__.py']
+
+evidence written to /home/aryan/bumpsmith/proofs/recorded/pull_request.json
+
+every case behaved as bumpsmith.publish says it does.

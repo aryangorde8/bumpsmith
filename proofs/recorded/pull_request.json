@@ -1,0 +1,118 @@
+{
+  "python": "/home/aryan/bumpsmith/.venv/bin/python",
+  "conclusion": "The push happens on `yes` and on nothing else. `y`, `n` and an absent terminal are all refusals: after each, every ref on the remote points at the same object it did before -- checked by name AND by object, because comparing names alone would pass a run that rewrote `trunk`. Each case's exit status is checked too, so a crash cannot be recorded as a refusal correctly honoured. The approved push carries one commit touching only the file the migration wrote.",
+  "cases": [
+    {
+      "case": "no terminal",
+      "answered": null,
+      "approval_expected": false,
+      "exit_status": 0,
+      "exit_status_expected": 0,
+      "refs_before": {
+        "trunk": "21e3113444e8ed09682dc2e41a73c945a6d6936f"
+      },
+      "refs_after": {
+        "trunk": "21e3113444e8ed09682dc2e41a73c945a6d6936f"
+      },
+      "added": [],
+      "moved": [],
+      "removed": [],
+      "as_expected": true,
+      "why_it_matters": "A CI job, a pipe or a nohup has nobody in it to say no. Fail-closed is the only safe reading of silence when the action is a push.",
+      "output": [
+        "  files    mypkg/__init__.py",
+        "--------------------------------------------------------------------",
+        "",
+        "not opened: open_pull_request was not approved: stdin is not a terminal, so there is nobody here to approve this"
+      ]
+    },
+    {
+      "case": "answered n",
+      "answered": "n",
+      "approval_expected": false,
+      "exit_status": 0,
+      "exit_status_expected": 0,
+      "refs_before": {
+        "trunk": "21e3113444e8ed09682dc2e41a73c945a6d6936f"
+      },
+      "refs_after": {
+        "trunk": "21e3113444e8ed09682dc2e41a73c945a6d6936f"
+      },
+      "added": [],
+      "moved": [],
+      "removed": [],
+      "as_expected": true,
+      "why_it_matters": "The ordinary refusal. It must cost the user nothing and leave no trace.",
+      "output": [
+        "  files    mypkg/__init__.py",
+        "--------------------------------------------------------------------",
+        "type `yes` to approve, anything else to refuse: ",
+        "not opened: open_pull_request was not approved: the answer was 'n'"
+      ]
+    },
+    {
+      "case": "answered y",
+      "answered": "y",
+      "approval_expected": false,
+      "exit_status": 0,
+      "exit_status_expected": 0,
+      "refs_before": {
+        "trunk": "21e3113444e8ed09682dc2e41a73c945a6d6936f"
+      },
+      "refs_after": {
+        "trunk": "21e3113444e8ed09682dc2e41a73c945a6d6936f"
+      },
+      "added": [],
+      "moved": [],
+      "removed": [],
+      "as_expected": true,
+      "why_it_matters": "`y` is what a person types when they are not reading. The whole word is the only thing separating 'I read that' from 'I was pressing return'.",
+      "output": [
+        "  files    mypkg/__init__.py",
+        "--------------------------------------------------------------------",
+        "type `yes` to approve, anything else to refuse: ",
+        "not opened: open_pull_request was not approved: the answer was 'y'"
+      ]
+    },
+    {
+      "case": "answered yes",
+      "answered": "yes",
+      "approval_expected": true,
+      "exit_status": 2,
+      "exit_status_expected": 2,
+      "refs_before": {
+        "trunk": "21e3113444e8ed09682dc2e41a73c945a6d6936f"
+      },
+      "refs_after": {
+        "bumpsmith/pydantic-v2": "3e8aeb68acdb1032860cab2a18ce14292812d8ed",
+        "trunk": "21e3113444e8ed09682dc2e41a73c945a6d6936f"
+      },
+      "added": [
+        "bumpsmith/pydantic-v2"
+      ],
+      "moved": [],
+      "removed": [],
+      "as_expected": true,
+      "why_it_matters": "The one path that may push, and it pushes only the migration's own file. It exits 2, not 0: the remote here is a bare repository on this machine, so there is nowhere to open a pull request -- and one that was asked for and did not happen is not a success, whatever the reason.",
+      "output": [
+        "--------------------------------------------------------------------",
+        "type `yes` to approve, anything else to refuse: ",
+        "branch bumpsmith/pydantic-v2 pushed to /tmp/bumpsmith-pr-proof-y8gisobo/fork.git",
+        "  the branch is pushed. /tmp/bumpsmith-pr-proof-y8gisobo/fork.git is not a GitHub repository, so there is no pull request to open here -- open one wherever it is hosted."
+      ]
+    },
+    {
+      "case": "what landed",
+      "files": [
+        "mypkg/__init__.py"
+      ],
+      "commits": [
+        "pydantic v2: rename the `regex=` argument to `pattern=`"
+      ],
+      "content_matches_the_migration": true,
+      "as_expected": true,
+      "why_it_matters": "One commit, one file, exactly the migration's edit. The repository being migrated is somebody's working directory; a push that swept the tree would put their uncommitted work in a pull request under this tool's name.",
+      "repo": "/tmp/bumpsmith-pr-proof-y8gisobo/repo"
+    }
+  ]
+}
