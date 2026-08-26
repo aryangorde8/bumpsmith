@@ -44,6 +44,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 35 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | No production path constructs the bridge | **Accepted, deferred to [#14](https://github.com/aryangorde8/bumpsmith/pull/14) with a reason** | — |
 | 36 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | Policy keyed to the model-facing alias, not the tool | **Fixed** — and the reason is worse than the finding said | this PR |
 | 37 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | A reused call id suppresses a real call | **Fixed** | this PR |
+| 38 | [#14](https://github.com/aryangorde8/bumpsmith/pull/14) | A test helper substituted a valid answer for the invalid one under test — *found by another test* | **Fixed** | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -608,6 +609,43 @@ itself: an HTTP `Channel` and the poll loop, in the package, shipped in
 [#14](https://github.com/aryangorde8/bumpsmith/pull/14) rather than bolted onto
 this diff. Recorded here so that a reader who checks finds a plan and a link
 rather than a gap.
+
+---
+
+## 38 · A test that was testing nothing, caught by the test next to it
+
+`bumpsmith.run` exists to keep two things apart: a command that ran and failed,
+and a command that never ran. The first is a test result. The second is a
+sandbox outage, and reading it as the first would report a suite with no
+failures — which would be kept, and recorded as verified.
+
+So the module refuses a long list of malformed answers, and the tests walk that
+list. One entry is `None`: the harness said nothing at all. The helper that
+replays a prepared answer took it as a default:
+
+```python
+def __init__(self, answer: object = None, ...):
+    self.answer = answer if answer is not None else _ok()
+```
+
+`_ok()` is a *valid* result. The one case written to prove that nothing becomes
+a `Completed` was quietly handed something that becomes a `Completed`, and it
+had been passing for exactly as long as it existed.
+
+What found it was not review. It was
+`test_no_bad_answer_ever_becomes_a_result`, which asserts the property over
+every malformed shape at once instead of one `pytest.raises` per case. A
+per-case test would have gone green here: `pytest.raises(NeverRanError)` around
+a helper that returns a valid answer fails loudly, but only because the
+substitution happened to be visible — and the parametrised case that *did*
+fail pointed at the payload, not the helper. The aggregate test is what made
+the pattern obvious across two failures at once.
+
+Recorded because it is the same shape as finding 34, where my own test held a
+real defect in place. Twice now the test has been the thing that was wrong, and
+both times what caught it was a second test asserting the guarantee rather than
+the mechanism. That is worth more than the fix: a suite where every test checks
+one case is a suite that can be wrong in one case, silently.
 
 ---
 
