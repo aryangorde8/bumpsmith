@@ -57,28 +57,40 @@ step 2  rc=2  (local)
 step 3  rc=2  (local)
   break    [VALIDATOR_FIELD_CONFIG] The `field` and `config` parameters are not available in Pydantic V2, please use the `info` parameter instead.
   at       emnify/modules/device/models.py:25
-  rule     Replace a v1 validator's `field` and `config` parameters with v2's `info`
+  rule     Remove a v1 validator's `field` and `config` parameters
   scan     1 site in 1 file
+  plan     1 site across 1 file
+  applied
+
+step 4  rc=1  (local)
+  break    [UNKNOWN] 1 validation error for RetrieveDevice
+  at       emnify/modules/device/manager.py:286
 
 reverted -- the edits did not make it pass and were taken back
-  no rewriter is written for VALIDATOR_FIELD_CONFIG; the rule is still the useful output, but it cannot be applied automatically
-  2 changes, taken back
+  the failure classified as UNKNOWN, which does not narrow to one rule; a rule naming the wrong transformation is worse than none
+  3 changes, taken back
 ```
 
-Two things in that are the point of the whole project.
+Three things in that are the point of the whole project.
 
-**The second break was invisible until the first was fixed.** `__root__` aborts
+**Each break was invisible until the one above it was fixed.** `__root__` aborts
 collection, so pytest never imported the module holding the `constr(regex=...)`
-underneath it. Not lower priority — unreachable. That is why this is a loop and
-not a pass.
+underneath it, and neither of those ever reached the validator below *them*. Not
+lower priority — unreachable. That is why this is a loop and not a pass.
+
+**The run changed shape at step 4.** The first three are `rc=2`: collection
+failed, so no test ran at all. The fourth is `rc=1` — the package now imports,
+24 tests run, and 19 of them pass. The remaining break is a different kind of
+thing, a `ValidationError` from a field V1 made optional by implication, and
+this run says so by declining to name a rule for it rather than by guessing one.
 
 **It stopped, said exactly what it could not do, and left the repository
 byte-for-byte as it found it.** `git status` afterwards is empty. A migration
 that leaves a checkout changed and no better is worse than one that changes
 nothing, because somebody then has to work out which of the two happened. Every
-way the loop can end is one of ten named reasons, so "bumpsmith could not finish"
-always says *which* thing happened and whether the next move is to write a rule,
-fix the pytest invocation, or upgrade a dependency.
+way the loop can end is one of eleven named reasons, so "bumpsmith could not
+finish" always says *which* thing happened and whether the next move is to write
+a rule, fix the pytest invocation, or upgrade a dependency.
 
 Exit status is `0` if the suite ends green, `1` if it does not, and `2` if the
 run never got far enough to say. `--json PATH` writes the same report as JSON.

@@ -64,6 +64,9 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 55 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | Cumulative stub state attributed to the current run | **Fixed** — baselined, and nothing is deleted | this PR |
 | 56 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | `migrate()` would keep local edits verified in a sandbox | **Fixed** — the loop checks where each run happened | this PR |
 | 57 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | `inf` and `nan` passed the timeout check | **Fixed** — a bound has to be finite | this PR |
+| 58 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The class-1 rule told you to write `info`, which pydantic refuses — *found by asking pydantic instead of reading its error* | **Fixed** — the rule says remove, and `proofs/validator.py` is the run behind it | this PR |
+| 59 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | `BreakClass` said class 3 had no recorded sample, three lines above the class 3 that had two — *self-found* | **Fixed** — and class 2 now has a sample named, with why it still has no classifier | this PR |
+| 60 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The README said the loop ends one of ten ways; there were eleven — *self-found* | **Fixed** — stale since `WRONG_PLACE` landed in #16 | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -1129,6 +1132,76 @@ parse and neither is `<= 0`. `inf` silently removes the per-run cap the flag
 exists to set; `nan` compares false against everything, so `subprocess`'s own
 timeout never fires either. Both are now refused as invocation errors, which is
 what they are.
+
+---
+
+## 58 · The error message named a fix that does not work
+
+The class-1 rule has said this since #8:
+
+> Replace a v1 validator's `field` and `config` parameters with v2's `info`
+
+It reads like a summary of what pydantic itself prints, because it is one:
+
+> The `field` and `config` parameters are not available in Pydantic V2, please
+> use the `info` parameter instead.
+
+Both are wrong about the same thing, and the library is wrong first. `info` is
+V2's `@field_validator` parameter. Under the `@validator` shim — which is the
+decorator that raised the message — a parameter called `info` is refused
+outright, as an unsupported V1 signature. Following the advice in the error
+trades one raised error for another.
+
+The migration that works is smaller than the one the message describes: remove
+both parameters and leave `values`, which V2 still accepts and which still
+carries what it did.
+
+This was found before the rewriter was written, by running eight candidate
+signatures against a real pydantic rather than by reading the message and
+believing it. Had it been found after, there would have been a rewriter, a green
+test suite, and a migration that broke every repository it touched — because the
+tests would have been written from the same misreading as the code.
+
+That is now `proofs/validator.py`, and it is a proof rather than a test because
+this package has no pydantic to test against and should not acquire one: it
+works on source text and never imports the library it migrates. The script exits
+non-zero if any of the eight signatures stops behaving as `bumpsmith.rules` says
+it does.
+
+**The rewriter's own tests do not re-derive this.** They are built on the
+recorded answers. A test that decided for itself what pydantic accepts would be
+the same misreading in a second place.
+
+## 59 · A docstring that contradicted the code three lines below it
+
+`BreakClass` opened by saying classes 2 and 3 "exist in that taxonomy but have no
+recorded sample, so no classifier is written for them". `REGEX_KEYWORD = 3` is
+the next member down, it has a classifier, and its own docstring ends "Both are
+recorded samples."
+
+Stale rather than wrong when written — class 3 got its sample in #4 and the
+paragraph above it was not revisited. Harmless to the code and not harmless to a
+reader, who has to decide which of two adjacent statements to believe.
+
+Corrected, and the correction was worth more than the tidy-up. Class 2 — a field
+V1 made optional by implication and V2 requires — turns out to have a recorded
+sample now, discovered while checking what fixture B does once class 1 is fixed:
+peel classes 4, 3 and 1 and the run stops being a collection error and becomes
+five `ValidationError`s. What class 2 still lacks is a *classifier*, for a
+different reason than "nobody has seen one": its signature is a `ValidationError`
+like any other, and no traceback text distinguishes "V1 would have defaulted
+this" from "this input really is missing a field". The docstring now says which
+of the two reasons applies, because they call for different work.
+
+## 60 · Eleven reasons, described as ten
+
+`Stop` gained `WRONG_PLACE` in #16, as the fix for finding 56. The README's count
+of how many ways the loop can end was not updated with it.
+
+Small, and recorded at the same size as the others because the alternative is a
+log that only lists findings flattering to the person keeping it. It is also the
+second time in two pull requests that a number stated in prose has drifted from
+the code it describes, which is the argument for stating fewer of them.
 
 ---
 
