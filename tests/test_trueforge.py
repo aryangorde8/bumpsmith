@@ -17,7 +17,7 @@ import json
 import socket
 import threading
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -40,8 +40,9 @@ Route = Callable[[str, str], tuple[int, str]]
 class _Harness:
     """A stand-in TrueForge. Records what it was asked and replays what it was told."""
 
-    def __init__(self, route: Route) -> None:
+    def __init__(self, route: Route, *, short_body: bool = False) -> None:
         self.route = route
+        self.short_body = short_body
         self.requests: list[tuple[str, str, Any]] = []
         outer = self
 
@@ -55,7 +56,13 @@ class _Harness:
                 payload = text.encode("utf-8")
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(payload)))
+                if outer.short_body:
+                    # Promise more than is sent, so `response.read()` raises
+                    # `http.client.IncompleteRead` -- a real damaged response
+                    # rather than a patched-in exception.
+                    self.send_header("Content-Length", str(len(payload) + 64))
+                else:
+                    self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
 
@@ -417,3 +424,138 @@ def test_nothing_claims_never_ran_unless_it_provably_did_not() -> None:
         raised = run_against(route, **kwargs)
         assert not isinstance(raised, NeverRanError), f"{why} claimed the command never ran"
         assert isinstance(raised, TimedOutError), f"{why} raised {type(raised).__name__}"
+
+
+# --------------------------------------------------------------------------
+# A response that arrives damaged
+# --------------------------------------------------------------------------
+
+
+def test_a_truncated_response_is_a_transport_error_not_an_escape() -> None:
+    """`IncompleteRead` is not an `OSError`, so it escaped the hierarchy."""
+    route = _fixed(*_ok({"data": {"id": "s"}}))
+    with _Harness(route, short_body=True) as harness, pytest.raises(TransportError):
+        _client(harness).create_session({})
+
+
+def test_a_truncated_response_never_claims_the_command_did_not_run() -> None:
+    """The finding: a damaged read while polling means the command may have finished.
+
+    Reported as never-ran, a caller retries something that already happened.
+    """
+    route = _fixed(*_ok({"data": {"id": "s"}}))
+    with _Harness(route, short_body=True) as harness, pytest.raises(TimedOutError):
+        SandboxExec(_client(harness), "model-x")("pytest -q", "/workspace")
+
+
+def test_a_truncated_response_survives_the_runner_as_a_timeout() -> None:
+    # End to end: the classification has to hold all the way through `run.py`,
+    # whose own fallback reads an unknown exception as `NeverRanError`.
+    from pathlib import Path
+
+    from bumpsmith.run import SandboxRunner
+
+    with _Harness(_fixed(*_ok({"data": {"id": "s"}})), short_body=True) as harness:
+        runner = SandboxRunner(SandboxExec(_client(harness), "model-x"))
+        with pytest.raises(TimedOutError):
+            runner.run(["python", "-m", "pytest"], Path("/workspace"))
+
+
+def test_an_unclassifiable_failure_is_read_as_may_have_run() -> None:
+    """The safety net. Guessing "never ran" is the one unsafe direction."""
+
+    class Exploding:
+        """Not a `Client` subclass -- `Client` is final, and this is not one."""
+
+        def create_session(self, spec: Mapping[str, object]) -> str:
+            raise RuntimeError(f"something nobody anticipated ({len(spec)} fields)")
+
+    exploding = cast("Client", Exploding())
+    with pytest.raises(TimedOutError):
+        SandboxExec(exploding, "model-x")("pytest", "/workspace")
+
+
+# --------------------------------------------------------------------------
+# The poll deadline is a deadline
+# --------------------------------------------------------------------------
+
+
+def _clock() -> tuple[Callable[[], float], Callable[[float], None]]:
+    state = {"t": 0.0}
+
+    def now() -> float:
+        return state["t"]
+
+    def sleep(seconds: float) -> None:
+        state["t"] += seconds
+
+    return now, sleep
+
+
+def test_event_polling_stops_at_the_deadline_it_was_given() -> None:
+    """The finding: 90 retries times a 120s timeout is not bounded by a 300s limit."""
+    now, sleep = _clock()
+    with _Harness(_fixed(200, "")) as harness:
+        client = Client(harness.base_url, sleep=sleep, now=now, poll_interval=1.0)
+        events = client.turn_events(Turn("s", "t"), deadline=5.0)
+    assert events == []
+    # Without the deadline this is TURN_EVENTS_EMPTY_RETRIES requests.
+    assert len(harness.requests) <= 6, f"{len(harness.requests)} requests ignored the deadline"
+
+
+def test_polling_passes_its_deadline_down() -> None:
+    now, sleep = _clock()
+    with _Harness(_fixed(200, "")) as harness:
+        client = Client(harness.base_url, sleep=sleep, now=now, poll_interval=1.0, poll_limit=4.0)
+        rounds = list(client.poll(Turn("s", "t")))
+    assert rounds  # it did poll
+    # A deadline consulted only between rounds would allow 90 requests per round.
+    assert len(harness.requests) <= 8, f"{len(harness.requests)} requests outlived poll_limit"
+
+
+def test_a_call_with_no_time_left_is_not_attempted() -> None:
+    with _Harness(_session) as harness, pytest.raises(TransportError, match="no time left"):
+        _client(harness).call("GET", "/anything", timeout=0.0)
+    assert harness.requests == []
+
+
+# --------------------------------------------------------------------------
+# Drift is not patience
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("why", "body"),
+    [
+        ("a list instead of an object", "[]"),
+        ("an object with no data", '{"ok": true}'),
+        ("data is an object", '{"data": {"type": "turn.done"}}'),
+        ("data is a string", '{"data": "turn.done"}'),
+        ("data is null", '{"data": null}'),
+    ],
+)
+def test_an_unreadable_events_response_says_so(why: str, body: str) -> None:
+    """Retrying drift ninety times hid a permanent disagreement inside a slow turn."""
+    assert why
+    with _Harness(_fixed(200, body)) as harness, pytest.raises(ProtocolError):
+        _client(harness).turn_events(Turn("s", "t"))
+
+
+def test_a_non_event_in_the_list_is_not_silently_dropped() -> None:
+    # It would be exactly the event explaining why the turn did nothing.
+    route = _fixed(200, '{"data": [{"type": "model.message"}, "oops"]}')
+    with _Harness(route) as harness, pytest.raises(ProtocolError):
+        _client(harness).turn_events(Turn("s", "t"))
+
+
+def test_an_unreadable_response_is_not_retried() -> None:
+    with _Harness(_fixed(200, '{"data": {}}')) as harness, pytest.raises(ProtocolError):
+        _client(harness).turn_events(Turn("s", "t"))
+    assert len(harness.requests) == 1, "drift does not improve by being asked again"
+
+
+def test_a_turn_with_no_events_yet_answers_with_no_events() -> None:
+    # An empty list is a real answer; only an empty *body* is the transient case.
+    with _Harness(_fixed(200, '{"data": []}')) as harness:
+        assert _client(harness).turn_events(Turn("s", "t")) == []
+    assert len(harness.requests) == 1

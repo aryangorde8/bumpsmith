@@ -50,6 +50,9 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 41 | [#14](https://github.com/aryangorde8/bumpsmith/pull/14) | A timeout leaves what the command started running | **Fixed** — and the reason is worse than the finding said | this PR |
 | 42 | [#14](https://github.com/aryangorde8/bumpsmith/pull/14) | Output that is not UTF-8 escapes the contract | **Fixed** | this PR |
 | 43 | [#15](https://github.com/aryangorde8/bumpsmith/pull/15) | A `thread_id` was used as a session id — *raised by the live harness* | **Fixed** — the test agreed with the bug | this PR |
+| 44 | [#15](https://github.com/aryangorde8/bumpsmith/pull/15) | A truncated response claims the command never ran | **Fixed** — `IncompleteRead` is not an `OSError` | this PR |
+| 45 | [#15](https://github.com/aryangorde8/bumpsmith/pull/15) | The poll deadline is not a deadline | **Fixed** — a 300s limit could block for hours | this PR |
+| 46 | [#15](https://github.com/aryangorde8/bumpsmith/pull/15) | Version drift retried ninety times and reported as patience | **Fixed** | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -783,6 +786,81 @@ The fix is not a corrected URL. `Client` no longer implements `Channel` at all;
 `TurnChannel(client, session_id)` does, and it cannot be constructed without
 being told which session. The mistake is now unavailable rather than documented,
 and the `thread_id` still travels in the payload where the harness reads it.
+
+---
+
+## 44–46 · Three on the transport, all fixed
+
+### 44 · The guarantee, escaping through a gap in the type hierarchy
+
+`Client.call` caught `urllib.error.HTTPError` and `OSError`. `response.read()`
+can also raise `http.client.IncompleteRead`, and:
+
+```
+IncompleteRead -> HTTPException -> Exception          # not an OSError
+```
+
+So it escaped `call`, escaped `SandboxExec` (which catches `TransportError`),
+and reached `run.py`, whose fallback reads an unknown exception as
+`NeverRanError` — the one classification that is unsafe to be wrong about.
+Reproduced before fixing:
+
+```
+-> NeverRanError: the sandbox could not be reached: IncompleteRead(7 bytes read)
+```
+
+A partial read happens most often while reading a *turn* back, which is after
+the command was accepted and possibly after it finished. So the answer was not
+merely wrong, it was wrong in the direction that invites running an irreversible
+command twice.
+
+Two fixes, because one was not enough. `call` now catches
+`http.client.HTTPException`. And `SandboxExec` grew a final `except Exception`
+that reads anything unclassifiable as `TimedOutError`, so the guarantee no
+longer depends on having enumerated every exception `urllib` can raise. The
+asymmetry is the argument: guessing "may have run" costs a retry nobody took,
+guessing "never ran" costs a command run twice.
+
+This is **recurring shape 1** for the fourth time in this project — an exception
+escaping the path meant to handle it. It keeps happening at boundaries where one
+library's hierarchy meets another's.
+
+### 45 · A deadline that was only consulted between the waits
+
+```python
+deadline = self._now() + self._poll_limit
+while self._now() < deadline:
+    yield self.turn_events(turn)      # up to 90 requests, 120s timeout each
+```
+
+`turn_events` retries an empty body up to ninety times, each with the full HTTP
+timeout and a sleep between. Worst case is 90 x (120 + 1) seconds — a little
+over three hours — inside a loop whose stated limit is three hundred seconds.
+The deadline was real and the thing it was supposed to bound never saw it.
+
+The deadline is now passed down, each request is capped at the time remaining,
+and a call with nothing left is refused rather than attempted. Tested with a
+fake clock, asserting the request count rather than elapsed time: the fixed
+version makes at most six requests where the old one makes ninety.
+
+### 46 · Drift retried until it looked like patience
+
+A live turn answers `GET .../events` with an **empty body**. That is the
+documented transient case and the reason the retry exists. But the retry caught
+everything: a payload that was a list, an object with no `data`, a `data` that
+was not a list, a list of things that were not events. All of them were retried
+ninety times and then returned as `[]`.
+
+An empty list is what a caller gets when a turn has not produced an event yet.
+So a permanent disagreement about the wire format — a version drift — was
+indistinguishable from a slow turn, and would surface much later as a generic
+command timeout with nothing pointing at the cause.
+
+Now only `None` is retried. Anything else is validated and raises
+`ProtocolError`, including a non-event inside the list, which was previously
+dropped by a comprehension — and which would be exactly the event explaining why
+a turn did not do what it was asked. An empty `data` list is returned as the
+real answer it is.
 
 ---
 

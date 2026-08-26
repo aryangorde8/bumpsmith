@@ -28,6 +28,7 @@ never-ran would be the more convenient answer and a false one: it invites a
 retry of something that already happened.
 """
 
+import http.client
 import json
 import socket
 import time
@@ -130,6 +131,31 @@ class Turn:
     turn_id: str
 
 
+def _read_events(payload: object, path: str) -> list[dict[str, object]]:
+    """Validate one events response, or say the two ends disagree.
+
+    Every rejection here is a shape a previous version accepted by retrying it
+    into an empty list. An empty list is what a caller gets when a turn has no
+    events yet, so returning one for "I could not read this" made drift look
+    exactly like patience.
+    """
+    if not isinstance(payload, Mapping):
+        raise ProtocolError(f"GET {path} answered with {type(payload).__name__}, not an object")
+    data = payload.get("data")
+    if not isinstance(data, list):
+        raise ProtocolError(f"GET {path} answered without a `data` list")
+    events: list[dict[str, object]] = []
+    for index, event in enumerate(data):
+        if not isinstance(event, dict):
+            # Dropping it silently would lose exactly the event that explains
+            # why a turn did not do what it was asked.
+            raise ProtocolError(
+                f"GET {path} returned {type(event).__name__} at data[{index}], not an event"
+            )
+        events.append(event)
+    return events
+
+
 @final
 class Client:
     """The one place in the package that opens a socket.
@@ -160,8 +186,16 @@ class Client:
 
     # -- the wire ---------------------------------------------------------
 
-    def call(self, method: str, path: str, body: object = None) -> object:
-        """One request. Raises :class:`TransportError`; never returns a failure."""
+    def call(
+        self, method: str, path: str, body: object = None, *, timeout: float | None = None
+    ) -> object:
+        """One request. Raises :class:`TransportError`; never returns a failure.
+
+        ``timeout`` caps this call below the client's own, so a caller working
+        to a deadline can stop a single request from outliving it.
+        """
+        if timeout is not None and timeout <= 0:
+            raise TransportError(f"{method} {path} was not attempted: no time left")
         data = None if body is None else json.dumps(body).encode("utf-8")
         request = urllib.request.Request(  # noqa: S310
             f"{self._base}{path}",
@@ -170,7 +204,8 @@ class Client:
             headers={"Content-Type": "application/json", "Accept": "application/json"},
         )
         try:
-            with urllib.request.urlopen(request, timeout=self._http_timeout) as response:  # noqa: S310
+            limit = self._http_timeout if timeout is None else min(self._http_timeout, timeout)
+            with urllib.request.urlopen(request, timeout=limit) as response:  # noqa: S310
                 raw = response.read()
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
@@ -184,6 +219,14 @@ class Client:
             if _never_left(exc):
                 raise NotSentError(f"{method} {path} was never sent: {exc!r}") from exc
             raise TransportError(f"{method} {path} got no answer: {exc!r}") from exc
+        except http.client.HTTPException as exc:
+            # `IncompleteRead`, `BadStatusLine` and friends are *not* `OSError`,
+            # so without this they escape the hierarchy entirely and are read
+            # further up as "never ran". They mean the opposite: the request was
+            # written and the response came back damaged, which happens most
+            # often while reading a turn back -- after the command was accepted
+            # and possibly after it finished.
+            raise TransportError(f"{method} {path} answered incompletely: {exc!r}") from exc
         if not raw.strip():
             return None
         try:
@@ -238,23 +281,31 @@ class Client:
         """The ordinary case: one user message, one turn."""
         return self.start_turn(session_id, [{"type": USER_MESSAGE, "content": message}])
 
-    def turn_events(self, turn: Turn) -> list[dict[str, object]]:
+    def turn_events(self, turn: Turn, *, deadline: float | None = None) -> list[dict[str, object]]:
         """Every event in a turn so far.
 
-        A live turn answers this with an **empty body**, not with an empty list
-        and not with an error, so an empty answer is retried rather than
-        believed. That cost an afternoon to find and is the reason this method
-        exists instead of a call to :meth:`call`.
+        A live turn answers this with an **empty body** -- not an empty list and
+        not an error -- so *that one case* is retried rather than believed. It
+        cost an afternoon to find and is the reason this method exists instead
+        of a call to :meth:`call`.
+
+        Nothing else is retried. A successful answer whose shape this module
+        does not recognise is version drift, and drift does not improve by being
+        asked ninety more times; retrying it hid a permanent disagreement inside
+        what looked like a slow turn. It raises :class:`ProtocolError` instead.
+
+        An empty *list* is a real answer and is returned as one. A turn that has
+        not produced an event yet has genuinely produced no events, and the
+        caller looking for one is the one that knows whether to wait.
         """
         path = f"/sessions/{turn.session_id}/turns/{turn.turn_id}/events"
         for attempt in range(TURN_EVENTS_EMPTY_RETRIES):
-            payload = self.call("GET", path)
-            if isinstance(payload, Mapping):
-                data = payload.get("data")
-                if isinstance(data, list):
-                    events = [e for e in data if isinstance(e, dict)]
-                    if events:
-                        return events
+            remaining = None if deadline is None else deadline - self._now()
+            if remaining is not None and remaining <= 0:
+                return []
+            payload = self.call("GET", path, timeout=remaining)
+            if payload is not None:
+                return _read_events(payload, path)
             if attempt + 1 < TURN_EVENTS_EMPTY_RETRIES:
                 self._sleep(self._poll_interval)
         return []
@@ -268,7 +319,11 @@ class Client:
         """
         deadline = self._now() + self._poll_limit
         while self._now() < deadline:
-            yield self.turn_events(turn)
+            # Passed down, not merely checked here: `turn_events` can retry an
+            # empty body ninety times, each with the full HTTP timeout, and a
+            # deadline consulted only between calls is not a deadline. Without
+            # this a 300-second limit could block for hours.
+            yield self.turn_events(turn, deadline=deadline)
             self._sleep(self._poll_interval)
 
     def deliver(self, session_id: str, event: Mapping[str, object]) -> None:
@@ -380,6 +435,16 @@ class SandboxExec:
         except TransportError as exc:
             # Ambiguous: the POST may have landed. Treated as "may have run".
             raise TimedOutError(f"the command was sent and not answered for: {exc}") from exc
+        except Exception as exc:
+            # Nothing may reach `run.py` unclassified. Its fallback reads an
+            # unknown exception as `NeverRanError`, which is the one answer that
+            # is unsafe to be wrong about, so anything unexpected is caught here
+            # and read the other way. The asymmetry is the whole point: guessing
+            # "may have run" costs a retry nobody took, guessing "never ran"
+            # costs a command run twice.
+            raise TimedOutError(
+                f"the command failed in a way this module cannot classify: {exc!r}"
+            ) from exc
 
         try:
             for events in self._client.poll(turn):
