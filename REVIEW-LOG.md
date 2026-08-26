@@ -76,6 +76,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 67 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | "a crash" reverts the tree — a `finally` block cannot survive `SIGKILL` | **Fixed** — narrowed to stack unwinding, in `apply.py` and the README | this PR |
 | 68 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | The README said the parser dispatches on the return code *not* the text; it uses both | **Fixed** — and `failures.py`'s own module docstring said it first | this PR |
 | 69 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | The completeness test searched the whole README, so it did not pin the table it advertised | **Fixed** — scoped to the table and the list, plus a stray-row check | this PR |
+| 70 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | The fix for 66 named an artefact the run had not created — leftovers from the previous day, read as output — *self-found by the cold clone* | **Fixed** — the count is from a clean reproduction | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -1483,6 +1484,35 @@ symlinks, permissions, partial-write rollback, and a whole-tree byte snapshot at
 the loop level across ten tests. What nothing covered was the *edge* of it. A
 guarantee with a well-tested middle and an undescribed edge is exactly the shape
 that produces three findings in three pull requests.
+
+---
+
+## 70 · The fix for 66 made the same mistake 66 was about
+
+Caught by the cold clone, running the README's own instructions from a fresh
+checkout with a fresh fixture, which is the only reason it was caught at all.
+
+The corrected paragraph said the run "left `.pytest_cache/` and seven
+`__pycache__/` directories behind". Seven `__pycache__/` is right. `.pytest_cache/`
+was not created by that run at all — the directory I read it from was dated
+**2026-08-25 01:31**, from the previous day's manual pytest runs, and today's loop
+never touched it. In a clean reproduction only the seven appear.
+
+So the fix for finding 66 committed finding 66's error a second time, one
+paragraph later. 66 was "a check that could not see what it was cited for";
+this is "a listing that contained more than the run put there, read as though
+the run put it there". Both are residue mistaken for evidence, and both were
+produced by looking at a working directory that had been used for something else
+first.
+
+The general lesson is not "check harder". It is that **a development directory is
+not an instrument.** It accumulates, and everything measured in one carries
+whatever else has happened there. The cold clone exists precisely because it
+cannot accumulate, and it earned its place here: the whole of #18 passed every
+local check, CI, and a Qodo re-review, and this survived all of them.
+
+Corrected to what reproduces, with the reproduction conditions stated in the
+README rather than assumed.
 
 ---
 

@@ -180,11 +180,17 @@ worse than one that changes nothing, because somebody then has to work out which
 of the two happened.
 
 What an empty `git status` does *not* tell you is that the directory is
-untouched. The suite left `.pytest_cache/` and seven `__pycache__/` directories
-behind, and the fixture gitignores both — so the check that looked like proof of
-"byte-for-byte" was only ever proof of "no tracked file changed". Those artefacts
-are pytest's, not bumpsmith's, and nothing here claims to restore them; `git
-status --ignored` is the command that shows them.
+untouched. This run left seven `__pycache__/` directories behind, and the fixture
+gitignores them — so the check that looked like proof of "byte-for-byte" was only
+ever proof of "no tracked file changed". Those are the interpreter's and pytest's,
+not bumpsmith's; nothing here claims to restore them, and `git status --ignored`
+is the command that shows them.
+
+The count is from a clean reproduction — fresh clone, fresh fixture, nothing
+carried over — because the first version of this paragraph named `.pytest_cache/`
+as well, on the strength of a directory listing that still held residue from the
+previous day's runs. Attributing somebody else's leftovers to the run you are
+describing is the same mistake as the one this paragraph exists to correct.
 
 ## When it stops, it says which thing happened
 
@@ -431,9 +437,10 @@ find them yourself.
   machine, and says so rather than implying otherwise.
 - **It does not restore what the test suite itself writes.** The transaction
   covers the edits bumpsmith planned and nothing else. pytest runs directly in
-  the checkout and leaves `.pytest_cache/` and `__pycache__/` behind; a suite
-  that writes fixtures, migrations or snapshots will leave those too. "Taken back
-  byte for byte" is a claim about bumpsmith's edits, not about the directory.
+  the checkout, so `__pycache__/`, a `.pytest_cache/` at whatever it resolves as
+  rootdir, and anything a suite's own fixtures write all stay where they landed.
+  "Taken back byte for byte" is a claim about bumpsmith's edits, not about the
+  directory.
 - **It does not survive being killed.** Reverting happens as the stack unwinds,
   so a `SIGKILL`, an `os._exit` or a power cut between applying and reverting
   leaves the edits on disk. There is no on-disk journal and no recovery at the
