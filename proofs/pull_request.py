@@ -17,7 +17,9 @@ what is attached to stdin        what must happen
 nothing (``/dev/null``)          refused; the remote gains nothing
 a terminal, answering ``n``      refused; the remote gains nothing
 a terminal, answering ``y``      refused -- ``y`` is not the word; nothing pushed
-a terminal, answering ``yes``    the branch is pushed, and only the migrated file
+a terminal, answering ``yes``    the branch is pushed, and only the migrated file.
+                                 Exit 2, because a bare local repository is not
+                                 somewhere a pull request can be opened
 ===============================  ================================================
 
 The third case is the one worth writing down. Requiring the whole word is the
@@ -81,6 +83,16 @@ class Case:
     """What is typed at the prompt. ``None`` means nothing is attached at all."""
 
     approves: bool
+    status: int
+    """The exit status bumpsmith must return.
+
+    Checked because "no new branch appeared" is satisfied by a crash. Without
+    this, a migration that died before it ever reached the prompt would be
+    recorded as a refusal correctly honoured, and the proof would be asserting
+    something it had not observed. A refusal is a green suite that was not
+    published, so it exits 0.
+    """
+
     why: str
 
 
@@ -89,6 +101,7 @@ CASES = (
         name="no terminal",
         answer=None,
         approves=False,
+        status=0,
         why=(
             "A CI job, a pipe or a nohup has nobody in it to say no. Fail-closed is "
             "the only safe reading of silence when the action is a push."
@@ -98,12 +111,14 @@ CASES = (
         name="answered n",
         answer="n",
         approves=False,
+        status=0,
         why="The ordinary refusal. It must cost the user nothing and leave no trace.",
     ),
     Case(
         name="answered y",
         answer="y",
         approves=False,
+        status=0,
         why=(
             "`y` is what a person types when they are not reading. The whole word is "
             "the only thing separating 'I read that' from 'I was pressing return'."
@@ -113,7 +128,13 @@ CASES = (
         name="answered yes",
         answer="yes",
         approves=True,
-        why="The one path that may push, and it pushes only the migration's own file.",
+        status=2,
+        why=(
+            "The one path that may push, and it pushes only the migration's own file. "
+            "It exits 2, not 0: the remote here is a bare repository on this machine, "
+            "so there is nowhere to open a pull request -- and one that was asked for "
+            "and did not happen is not a success, whatever the reason."
+        ),
     ),
 )
 
@@ -155,12 +176,20 @@ def _build(root: Path) -> tuple[Path, Path, Path]:
     return fork, repo, suite
 
 
-def _branches(fork: Path) -> list[str]:
-    out = _git("for-each-ref", "--format=%(refname:short)", "refs/heads", cwd=fork)
-    return sorted(line for line in out.splitlines() if line)
+def _refs(fork: Path) -> dict[str, str]:
+    """Every ref on the remote, with the object it points at.
+
+    Names alone were the first version and they were not enough: a refusal that
+    moved `trunk`, or rewrote an existing branch, would have left the set of
+    names unchanged and passed -- while the recorded conclusion claimed the
+    remote was untouched. What is being asserted is that nothing happened, so
+    what is compared has to be everything that could have.
+    """
+    out = _git("for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads", cwd=fork)
+    return dict(line.split(" ", 1) for line in out.splitlines() if " " in line)
 
 
-def _run(case: Case, repo: Path, suite: Path, failure: Path, python: str) -> str:
+def _run(case: Case, repo: Path, suite: Path, failure: Path, python: str) -> tuple[str, int]:
     """One migration, with ``case``'s answer typed at the prompt.
 
     A pseudo-terminal, not a pipe. The approver asks ``sys.stdin.isatty()``
@@ -188,9 +217,10 @@ def _run(case: Case, repo: Path, suite: Path, failure: Path, python: str) -> str
             done = subprocess.run(  # noqa: S603 -- argv, no shell, interpreter named by the caller
                 command, stdin=quiet, capture_output=True, text=True, check=False, timeout=300
             )
-        return done.stdout + done.stderr
+        return done.stdout + done.stderr, done.returncode
 
     parent, child = pty.openpty()
+    process = None
     try:
         process = subprocess.Popen(  # noqa: S603 -- as above
             command, stdin=child, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
@@ -198,12 +228,24 @@ def _run(case: Case, repo: Path, suite: Path, failure: Path, python: str) -> str
         os.close(child)
         child = -1
         os.write(parent, f"{case.answer}\n".encode())
-        output, _ = process.communicate(timeout=300)
-        return output
+        try:
+            output, _ = process.communicate(timeout=300)
+        except subprocess.TimeoutExpired:
+            # `communicate` raising leaves the child running. Here that child is
+            # a migration with an approved push in front of it, holding the
+            # temporary repository this proof is about to delete underneath it.
+            # Kill it and reap it before saying anything about what happened.
+            process.kill()
+            output, _ = process.communicate()
+            raise
+        return output, process.returncode
     finally:
         if child != -1:
             os.close(child)
         os.close(parent)
+        if process is not None and process.poll() is None:  # pragma: no cover - belt and braces
+            process.kill()
+            process.wait(timeout=30)
 
 
 def _reset(repo: Path) -> None:
@@ -243,25 +285,37 @@ def main(argv: list[str] | None = None) -> int:
 
         for case in CASES:
             _reset(repo)
-            before = _branches(fork)
-            output = _run(case, repo, suite, failure, args.python)
-            after = _branches(fork)
-            pushed = sorted(set(after) - set(before))
+            before = _refs(fork)
+            output, status = _run(case, repo, suite, failure, args.python)
+            after = _refs(fork)
 
-            ok = (pushed == ["bumpsmith/pydantic-v2"]) if case.approves else (pushed == [])
+            added = sorted(set(after) - set(before))
+            moved = sorted(name for name in set(before) & set(after) if before[name] != after[name])
+            removed = sorted(set(before) - set(after))
+            expected = ["bumpsmith/pydantic-v2"] if case.approves else []
+
+            # Four conditions, not one. "A branch appeared" is satisfied by a
+            # crash that happened to leave the remote alone, and "no new name"
+            # is satisfied by a run that rewrote `trunk` instead of adding to it.
+            ok = added == expected and not moved and not removed and status == case.status
             if not ok:
                 wrong.append(case.name)
             print(
-                f"{'PASS' if ok else 'FAIL'}  {case.name}: the remote gained {pushed or 'nothing'}"
+                f"{'PASS' if ok else 'FAIL'}  {case.name}: the remote gained "
+                f"{added or 'nothing'}, moved {moved or 'nothing'}, exit {status}"
             )
             recorded.append(
                 {
                     "case": case.name,
                     "answered": case.answer,
                     "approval_expected": case.approves,
-                    "branches_before": before,
-                    "branches_after": after,
-                    "pushed": pushed,
+                    "exit_status": status,
+                    "exit_status_expected": case.status,
+                    "refs_before": before,
+                    "refs_after": after,
+                    "added": added,
+                    "moved": moved,
+                    "removed": removed,
                     "as_expected": ok,
                     "why_it_matters": case.why,
                     "output": output.strip().splitlines()[-4:],
@@ -281,9 +335,13 @@ def main(argv: list[str] | None = None) -> int:
                     "python": args.python,
                     "conclusion": (
                         "The push happens on `yes` and on nothing else. `y`, `n` and an "
-                        "absent terminal are all refusals, and after each of them the "
-                        "remote is byte-identical to what it was. The approved push "
-                        "carries one commit touching only the file the migration wrote."
+                        "absent terminal are all refusals: after each, every ref on the "
+                        "remote points at the same object it did before -- checked by "
+                        "name AND by object, because comparing names alone would pass a "
+                        "run that rewrote `trunk`. Each case's exit status is checked "
+                        "too, so a crash cannot be recorded as a refusal correctly "
+                        "honoured. The approved push carries one commit touching only "
+                        "the file the migration wrote."
                     ),
                     "cases": recorded,
                 },

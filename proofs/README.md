@@ -144,6 +144,14 @@ remote after each:
 | `y` | a pty | **refused** — `y` is not the word |
 | `yes` | a pty | pushed, and only the migrated file |
 
+Each row is checked three ways, not one. **Every ref on the remote is compared by
+name *and by object***, because a refusal that rewrote `trunk` changes no name
+and the conclusion being recorded is that nothing happened. **The exit status is
+checked**, because "no new branch appeared" is also satisfied by a crash before
+the prompt was ever printed. And the approved run exits **2**, not 0: the remote
+here is a bare repository, so there is nowhere to open a pull request, and one
+that was asked for and did not happen is not a success.
+
 A pseudo-terminal rather than a pipe, deliberately: the approver asks
 `sys.stdin.isatty()` before it asks anybody anything, so feeding the answer down
 a pipe would exercise the first case four times and prove nothing about the

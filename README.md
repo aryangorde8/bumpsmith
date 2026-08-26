@@ -352,15 +352,26 @@ nobody chose.** A migration runs against a clone of somebody else's repository,
 so its `origin` is *their* repository — and every convenience the flag could
 offer (default to `origin`, infer the base, push and see) points the
 irreversible action at the one destination it must never reach. So the remote is
-named by you, resolved to a URL before anybody is asked, and it is the **URL**
-that the approval shows and the fingerprint binds. An approval granted for your
-fork cannot be replayed against the upstream it was cloned from.
+named by you, resolved to its **push** URL before anybody is asked — `git remote
+get-url` answers about *fetching*, and a remote with a `pushurl` sends the branch
+somewhere the fetch URL never named — and it is that URL the approval shows, the
+fingerprint binds, and `git push` is given. Not the remote's name, which
+`git remote set-url` could re-point in between. An approval granted for your fork
+cannot be replayed against the upstream it was cloned from. A remote that pushes
+to more than one place is refused: one approval cannot mean three destinations.
 
 The prompt requires the whole word `yes`. `y` is a refusal, `n` is a refusal, and
-so is a run with no terminal attached — a CI job has nobody in it to say no. The
-commit stages the migration's own paths one by one, never `git add -A`: the
-repository being migrated is a working directory somebody may have been working
-in, and a pathspec that *can* sweep their uncommitted work eventually will.
+so is a run with no terminal attached — a CI job has nobody in it to say no.
+
+**Nothing but the migration goes out**, and staging the right paths is the
+smallest part of that. A pull request is a diff against the base, so a checkout
+ahead of it would publish whatever else is there — and the suite went green
+against `HEAD`, which makes a pull request against anything else a *different
+change from the one that was tested*. So `HEAD` must be the base. Anything
+already staged is refused, because `git commit` commits the index. Each file is
+checked against what the migration first read, because `git add -- path` stages
+that file's uncommitted changes too. And an existing branch is refused rather
+than reset.
 
 [`proofs/pull_request.py`](proofs/pull_request.py) runs all four answers against
 a real bare git repository and checks what reached it each time. It needs no

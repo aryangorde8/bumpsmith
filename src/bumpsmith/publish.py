@@ -20,13 +20,24 @@ result of writing the obvious code.
 So the destination is never inferred:
 
 * the remote is **named by the caller**, and there is no default;
-* the name is **resolved to a URL** before anybody is asked, and the URL is what
-  the approval request shows -- ``origin`` tells a reviewer nothing, and
-  ``https://github.com/someone-else/their-project`` tells them everything;
+* the name is **resolved to a push URL** before anybody is asked, and that URL is
+  what the approval request shows -- ``origin`` tells a reviewer nothing, and
+  ``https://github.com/someone-else/their-project`` tells them everything. The
+  *push* URL, because ``git remote get-url`` answers about fetching, and a remote
+  with a ``pushurl`` sends the branch somewhere the approval never named;
+* a remote that pushes to more than one place is refused outright. One approval
+  cannot mean three destinations;
 * the URL is part of the request's fingerprint, so an approval granted for one
   destination cannot open a pull request against another. That binding already
   existed in :class:`~bumpsmith.gate.Gate`; this module's job is to put the fact
-  that matters *inside* the thing being bound.
+  that matters *inside* the thing being bound;
+* and the push goes **to the URL, not to the name**. A name is an indirection
+  ``git remote set-url`` can re-point between the approval and the push, which is
+  the same class of problem one layer down.
+
+``gh pr create`` is given ``--repo`` derived from that same URL. Left to itself
+it picks a repository from the checkout's remotes -- which is the repository the
+migration was cloned from, somebody else's, and not the one just approved.
 
 Only a run whose edits survived
 -------------------------------
@@ -37,19 +48,43 @@ already-green run has nothing to offer either. The refusal names which of them
 it was, because "there is nothing to open" is a different message from "the
 suite never went green".
 
-Only the files the migration wrote
-----------------------------------
-The commit stages the migration's own paths, explicitly, one by one. Never
-``git add -A`` and never ``git commit -a``. A development checkout accumulates --
-this repository has a review log with two findings in it about exactly that --
-and a repository being migrated is a working directory somebody else may have
-been working in. Sweeping the tree would put their uncommitted work in a pull
-request under this tool's name, and it would look like the tool's own change.
+Only the migration, and nothing else in the room
+------------------------------------------------
+A repository being migrated is a working directory somebody may have been
+working in, and their work must not go out in a pull request under this tool's
+name. Staging the right paths is the *smallest* part of that, and on its own it
+stops almost none of it:
+
+============================  ===============================================
+what would carry their work   what stops it
+============================  ===============================================
+the branch, not the commit    ``checkout -b`` from a HEAD ahead of the base
+                              publishes everything on it, because a pull
+                              request is a diff against the base. Refused:
+                              ``HEAD`` must *be* the base
+the index                     ``git commit`` commits whatever is staged.
+                              ``--only`` with the pathspec, and a dirty index
+                              is refused before that
+the file itself               ``git add -- path`` stages that file's current
+                              contents, edit *and* whatever was already
+                              uncommitted in it. Each path is checked against
+                              what the migration first read
+the branch already existing   ``-B`` resets it, and the default name is reused
+                              across runs. ``-b``, and an existing branch is
+                              refused
+============================  ===============================================
+
+The deciding argument for the first row is not really about other people's
+commits. **The suite that went green ran against ``HEAD`` plus these edits.** A
+pull request against a different base is a different change from the one that
+was tested, offered with this project's whole claim attached to it.
 
 What runs before the gate, and what runs after
 ----------------------------------------------
-Before: reads only. ``git remote get-url``, ``git rev-parse``, ``git status``.
-Nothing that writes, nothing that leaves the machine.
+Before: reads only. ``git remote get-url --push``, ``git rev-parse``,
+``git status``, ``git show``. Nothing that writes, nothing that leaves the
+machine. Every refusal above is decided here, so a proposal that exists is one
+that could be published.
 
 After: the branch, the commit, the push, the pull request -- in that order, each
 through :class:`~bumpsmith.run.Runner`, which will not turn a command that never
@@ -58,6 +93,7 @@ what the summary leads with, because a pull request can be closed and a branch
 on somebody's remote is already there.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -152,6 +188,21 @@ def _git(runner: Runner, root: Path, *args: str) -> str:
     return result.output.strip()
 
 
+def _git_or_none(runner: Runner, root: Path, *args: str) -> str | None:
+    """For the questions where "no" is an answer rather than a failure.
+
+    ``rev-parse --verify`` on a branch that does not exist, ``show HEAD:path``
+    on a file that is new to this commit. Both are ordinary and both exit
+    non-zero. A command that could not *run* raises through, because that is not
+    an answer either way -- it is the absence of one.
+    """
+    try:
+        result: Completed = runner.run(["git", *args], root)
+    except RunError as exc:
+        raise GitError(f"`git {' '.join(args)}` did not run: {exc}") from exc
+    return result.output.strip() if result.returncode == 0 else None
+
+
 def body_for(migration: Migration) -> str:
     """The pull request body: the rules, their reach, and what was skipped.
 
@@ -237,15 +288,20 @@ def _title_for(migration: Migration) -> str:
     return f"pydantic v2: {_count(len(rules), 'migration rule')} applied, suite green"
 
 
-def _paths_of(migration: Migration, root: Path) -> tuple[str, ...]:
-    """Every file the migration wrote, repository-relative and sorted.
+def _originals_of(migration: Migration, root: Path) -> dict[str, str]:
+    """Every file the migration wrote, and what it held when the migration found it.
 
     Taken from the plans of steps that were *applied*. A planned edit that never
     reached the disk is not a file to stage, and staging it would either do
     nothing or -- worse, if somebody else had since edited it -- commit their
     change as this tool's.
+
+    The *first* ``before`` for each path, not the last. A chain that edits one
+    file at steps 1 and 3 records step 3's ``before`` as step 1's output, and
+    the question being answered later is what the file looked like before
+    bumpsmith touched it at all.
     """
-    paths: set[str] = set()
+    originals: dict[str, str] = {}
     for step in migration.steps:
         if not step.applied or step.plan is None:
             continue
@@ -253,13 +309,14 @@ def _paths_of(migration: Migration, root: Path) -> tuple[str, ...]:
             if not edit.changes_anything:
                 continue
             try:
-                paths.add(edit.path.resolve().relative_to(root.resolve()).as_posix())
+                name = edit.path.resolve().relative_to(root.resolve()).as_posix()
             except ValueError as exc:  # pragma: no cover - a plan outside its own root
                 raise PublishError(
                     f"{edit.path} is outside {root}; refusing to stage a file the "
                     "migration should never have been able to write"
                 ) from exc
-    return tuple(sorted(paths))
+            originals.setdefault(name, edit.before)
+    return originals
 
 
 def propose(
@@ -292,18 +349,18 @@ def propose(
     """
     if migration.outcome is not Outcome.MIGRATED:
         raise NothingToPublishError(_why_nothing(migration.outcome))
-    paths = _paths_of(migration, root)
-    if not paths:
+    originals = _originals_of(migration, root)
+    if not originals:
         raise NothingToPublishError(
             "the run reports edits were kept, but none of them changed a file. "
             "There is nothing to put in a pull request."
         )
+    paths = tuple(sorted(originals))
 
-    url = _git(runner, root, "remote", "get-url", remote)
-    if not url:
-        raise GitError(f"the remote {remote!r} resolved to an empty URL")
+    url = _push_url(runner, root, remote)
     if not base:
         base = _default_base(runner, root, remote)
+    _require_a_publishable_tree(runner, root, remote, base, branch, originals)
 
     return Proposal(
         root=root,
@@ -315,6 +372,131 @@ def propose(
         body=body_for(migration),
         paths=paths,
     )
+
+
+def _push_url(runner: Runner, root: Path, remote: str) -> str:
+    """Where ``git push <remote>`` would actually send this. Not the fetch URL.
+
+    ``git remote get-url`` answers about *fetching*. A remote may carry any
+    number of ``pushurl`` entries, and when it does, ``git push`` sends to all
+    of them and none of them is the URL that was shown. An approval that named
+    the fetch URL would be an approval for a destination the push was never
+    going to use -- the exact failure this module exists to prevent, reached
+    through the one git command that looks like it answers the question.
+
+    More than one push URL is refused rather than listed. "Send my code to these
+    three places" is not a thing to slip past somebody inside a migration tool's
+    prompt, and a person who genuinely wants it can name a remote that means one
+    of them.
+    """
+    urls = [
+        line.strip()
+        for line in _git(runner, root, "remote", "get-url", "--push", "--all", remote).splitlines()
+        if line.strip()
+    ]
+    if not urls:
+        raise GitError(f"the remote {remote!r} resolved to no push URL at all")
+    if len(urls) > 1:
+        listed = "\n  ".join(urls)
+        raise GitError(
+            f"the remote {remote!r} pushes to {len(urls)} places at once:\n  {listed}\n"
+            "Refusing: one approval cannot mean all of them. Name a remote with one push URL."
+        )
+    return urls[0]
+
+
+def _require_a_publishable_tree(
+    runner: Runner,
+    root: Path,
+    remote: str,
+    base: str,
+    branch: str,
+    originals: Mapping[str, str],
+) -> None:
+    """Refuse unless the only thing this would publish is the migration.
+
+    Four separate ways somebody else's work ends up in a pull request under this
+    tool's name, and staging the right paths stops none of them:
+
+    **The branch, not the commit.** ``checkout -B`` starts the branch at ``HEAD``.
+    A checkout three commits ahead of the base publishes all three, because a
+    pull request is a diff against the base and not a commit. Restricting what
+    the *commit* touches never addressed that.
+
+    And the deciding argument is not really about other people's commits: the
+    suite that went green ran against ``HEAD`` plus these edits. A pull request
+    against a different base is a **different change from the one that was
+    tested**, offered with this project's whole claim attached to it.
+
+    **The index.** ``git commit`` commits whatever is staged. A caller who had
+    run ``git add`` before starting the migration has their staged work in the
+    commit, whatever pathspec was used to add ours.
+
+    **The file itself.** ``git add -- path`` stages that file's *current*
+    contents, which is the migration's edit plus any uncommitted change already
+    there. So each path is checked against what the migration first read: if the
+    file at ``HEAD`` differs from that, the difference is somebody's work in
+    progress and it is not ours to publish.
+
+    **The branch already existing.** ``-B`` resets it, and the default name is
+    deliberately reused across runs, so the ordinary case is the dangerous one:
+    a previous run's commit left unreachable by this one.
+    """
+    head = _git(runner, root, "rev-parse", "HEAD")
+    try:
+        base_at = _git(runner, root, "rev-parse", f"{remote}/{base}")
+    except GitError as exc:
+        raise GitError(
+            f"cannot see {remote}/{base}, so there is no way to tell what a pull request "
+            f"against it would contain. Run `git fetch {remote}` first. ({exc})"
+        ) from exc
+    if head != base_at:
+        raise NothingToPublishError(
+            f"this checkout is not at {remote}/{base} ({head[:8]} against {base_at[:8]}), so a "
+            f"pull request against {base} would carry whatever else is on it -- and the suite "
+            f"went green against HEAD, not against {base}. That makes it a different change "
+            "from the one that was tested. Publish from a checkout of the base."
+        )
+
+    if _git_or_none(runner, root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"):
+        raise NothingToPublishError(
+            f"the branch {branch} already exists here. Creating it again would reset it and "
+            "leave the previous run's commit unreachable. Delete it, or pass --pr-branch."
+        )
+
+    # Two questions, asked separately, rather than one `status --porcelain`.
+    # Porcelain's first column is a space when a change is unstaged, `_git`
+    # strips its output, and stripping is exactly what destroys the one git
+    # format whose leading whitespace means something -- so the first line of
+    # every status read as staged. Found by running it (finding 91). These two
+    # answer the same questions and have nothing to mangle.
+    staged = [
+        line for line in _git(runner, root, "diff", "--cached", "--name-only").splitlines() if line
+    ]
+    if staged:
+        listed = "\n  ".join(sorted(staged))
+        raise NothingToPublishError(
+            "there is already something staged here:\n  "
+            f"{listed}\nIt would go out in bumpsmith's commit. Commit or unstage it first."
+        )
+
+    modified = {line for line in _git(runner, root, "diff", "--name-only").splitlines() if line}
+    strays = sorted(modified - set(originals))
+    if strays:
+        listed = "\n  ".join(strays)
+        raise NothingToPublishError(
+            "the working tree holds changes that are not this migration's:\n  "
+            f"{listed}\nA pull request from here would carry them under bumpsmith's name. "
+            "Commit or stash them first."
+        )
+
+    for path, first_read in originals.items():
+        committed = _git_or_none(runner, root, "show", f"HEAD:{path}")
+        if committed is not None and committed.rstrip("\n") != first_read.rstrip("\n"):
+            raise NothingToPublishError(
+                f"{path} already differed from the last commit before the migration touched it. "
+                "Those changes are not ours to publish. Commit or stash them first."
+            )
 
 
 def _why_nothing(outcome: Outcome) -> str:
@@ -394,13 +576,43 @@ def open_pull_request(gate: Gate, proposal: Proposal, runner: Runner) -> Opened:
 
 def _do_open(proposal: Proposal, runner: Runner) -> Opened:
     root = proposal.root
-    _git(runner, root, "checkout", "-B", proposal.branch)
+    _git(runner, root, "checkout", "-b", proposal.branch)
     # `--` and one path at a time. Not `-A`, not `-a`, and not a glob: the tree
     # this runs in may hold work that is not ours, and a pathspec that could
     # match more than the migration wrote is a pathspec that eventually will.
     _git(runner, root, "add", "--", *proposal.paths)
-    _git(runner, root, "commit", "-m", proposal.title, "-m", proposal.body)
-    _git(runner, root, "push", "--set-upstream", proposal.remote, proposal.branch)
+    # `--only` so the commit is these paths and nothing else. Without it, git
+    # commits whatever else was already in the index, and a caller who had run
+    # `git add` before starting the migration would find their staged work in
+    # bumpsmith's commit no matter which pathspec was used to add ours.
+    _git(
+        runner,
+        root,
+        "commit",
+        "--only",
+        "-m",
+        proposal.title,
+        "-m",
+        proposal.body,
+        "--",
+        *proposal.paths,
+    )
+    # To the URL, not the name. `git remote set-url` between the approval and
+    # here would otherwise redirect a push that was approved for somewhere else,
+    # and a name is exactly the kind of indirection this module spent its
+    # docstring arguing against. What was approved is what is pushed to.
+    _git(runner, root, "push", proposal.url, f"HEAD:refs/heads/{proposal.branch}")
+
+    slug = _github_slug(proposal.url)
+    if slug is None:
+        return Opened(
+            branch=proposal.branch,
+            pushed_to=proposal.url,
+            note=(
+                f"the branch is pushed. {proposal.url} is not a GitHub repository, so there "
+                "is no pull request to open here -- open one wherever it is hosted."
+            ),
+        )
 
     try:
         out = _gh(
@@ -408,6 +620,11 @@ def _do_open(proposal: Proposal, runner: Runner) -> Opened:
             root,
             "pr",
             "create",
+            # Named explicitly. Without it `gh` picks a repository from the
+            # checkout's own remotes, which is the repository the migration was
+            # cloned from -- somebody else's -- and not the one just approved.
+            "--repo",
+            slug,
             "--base",
             proposal.base,
             "--head",
@@ -427,6 +644,28 @@ def _do_open(proposal: Proposal, runner: Runner) -> Opened:
             ),
         )
     return Opened(branch=proposal.branch, pushed_to=proposal.url, url=_first_url(out))
+
+
+def _github_slug(url: str) -> str | None:
+    """``owner/name`` if this URL is a GitHub repository, else ``None``.
+
+    Read from the *approved* URL and passed to ``gh`` as ``--repo``, so the pull
+    request lands where the branch went. Returning ``None`` rather than guessing
+    is what keeps the local-remote case honest: a bare repository in a temporary
+    directory is a perfectly good place to push a branch and not a place a pull
+    request exists, and saying so beats running ``gh`` and reporting its failure
+    as though something had gone wrong.
+    """
+    for prefix in (
+        "https://github.com/",
+        "http://github.com/",
+        "git@github.com:",
+        "ssh://git@github.com/",
+    ):
+        if url.startswith(prefix):
+            slug = url[len(prefix) :].removesuffix(".git").strip("/")
+            return slug if slug.count("/") == 1 and all(slug.split("/")) else None
+    return None
 
 
 def _gh(runner: Runner, root: Path, *args: str) -> str:

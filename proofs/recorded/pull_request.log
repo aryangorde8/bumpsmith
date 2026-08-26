@@ -1,10 +1,10 @@
-a bare remote at /tmp/bumpsmith-pr-proof-ommj16r_/fork.git
-a repository at /tmp/bumpsmith-pr-proof-ommj16r_/repo
+a bare remote at /tmp/bumpsmith-pr-proof-y8gisobo/fork.git
+a repository at /tmp/bumpsmith-pr-proof-y8gisobo/repo
 
-PASS  no terminal: the remote gained nothing
-PASS  answered n: the remote gained nothing
-PASS  answered y: the remote gained nothing
-PASS  answered yes: the remote gained ['bumpsmith/pydantic-v2']
+PASS  no terminal: the remote gained nothing, moved nothing, exit 0
+PASS  answered n: the remote gained nothing, moved nothing, exit 0
+PASS  answered y: the remote gained nothing, moved nothing, exit 0
+PASS  answered yes: the remote gained ['bumpsmith/pydantic-v2'], moved nothing, exit 2
 
 PASS  what landed: ['mypkg/__init__.py']
 

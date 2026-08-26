@@ -9,14 +9,18 @@ pytest would. A stand-in that returned a scripted answer regardless of the tree
 would pass just as happily on a version that never applied the edit.
 """
 
+import argparse
 import json
 import sys
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
 from bumpsmith import __main__ as cli
+from bumpsmith import publish
 from bumpsmith.apply import RevertError
+from bumpsmith.gate import NotApprovedError, Request
 from bumpsmith.migrate import Migration, Outcome, Step, Stop
 from bumpsmith.run import Completed
 
@@ -336,6 +340,79 @@ def test_two_spellings_of_one_path_are_still_one_path(
 
     assert code == 2
     assert "--json and --html both name" in capsys.readouterr().err
+
+
+def test_an_empty_open_pr_is_answered_rather_than_absorbed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--open-pr "$REMOTE"` with the variable unset asks, and names nowhere.
+
+    A truthiness test reads the empty string as never having asked, so the
+    migration runs, exits 0, and silently does not do the thing it was told to.
+    Same principle as the colliding report paths: a bad invocation is answered.
+    """
+    root = _repo(tmp_path / "repo")
+
+    code = cli.main([str(root), "--open-pr", "", *_honest_suite(root)])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "--open-pr needs the name of a git remote" in captured.err
+    assert captured.out == "", "the suite ran before the invocation was checked"
+
+
+def test_a_pull_request_that_was_asked_for_and_did_not_happen_exits_nonzero(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The branch is pushed and there is no pull request. That is not a success.
+
+    A caller reading only the exit status would be told it was. 2 rather than 1,
+    because 1 means the suite is red and here the suite is green -- what failed
+    is the operation.
+    """
+    proposal = publish.Proposal(
+        root=tmp_path,
+        remote="fork",
+        url="/srv/git/thing.git",
+        branch="b",
+        base="trunk",
+        title="t",
+        body="b",
+        paths=("a.py",),
+    )
+    opened = publish.Opened(branch="b", pushed_to="/srv/git/thing.git", note="pushed, not opened")
+
+    def _open(gate: object, _proposal: object, _runner: object) -> publish.Opened:  # noqa: ARG001
+        return opened
+
+    args = argparse.Namespace(open_pr="fork", pr_branch="b", pr_base="trunk")
+    with (
+        mock.patch.object(cli, "propose", return_value=proposal),
+        mock.patch.object(cli, "open_pull_request", _open),
+    ):
+        code = cli._publish(mock.Mock(), tmp_path, args, mock.Mock())
+
+    assert code == 2
+    assert "pushed, not opened" in capsys.readouterr().out
+
+
+def test_a_refusal_leaves_the_status_the_suite_earned(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Somebody was asked and said no. Making that cost something makes saying no expensive."""
+    args = argparse.Namespace(open_pr="fork", pr_branch="b", pr_base="trunk")
+
+    def _refuse(*_args: object, **_kwargs: object) -> object:
+        raise NotApprovedError(Request(action="open_pull_request", summary="s"), "said no")
+
+    with (
+        mock.patch.object(cli, "propose", return_value=mock.Mock()),
+        mock.patch.object(cli, "open_pull_request", _refuse),
+    ):
+        code = cli._publish(mock.Mock(), tmp_path, args, mock.Mock())
+
+    assert code == 0
+    assert "not opened" in capsys.readouterr().out
 
 
 def test_a_report_that_cannot_be_written_is_an_error_not_a_shrug(

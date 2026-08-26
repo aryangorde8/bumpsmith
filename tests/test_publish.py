@@ -14,7 +14,7 @@ make the most important assertion in this file impossible to write: that after a
 denial, nothing happened anywhere.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -45,36 +45,107 @@ OTHER = "https://github.com/emnify/emnify-python.git"
 
 
 class _Git:
-    """Scripted git and gh, remembering every argv it was given."""
+    """A scripted git and gh that answers by argv, not by substring.
 
-    def __init__(self, **answers: Completed) -> None:
+    The defaults describe the ordinary case `propose` is willing to publish: a
+    checkout sitting exactly on the base, nothing staged, and only the
+    migration's own file modified. Each keyword moves one of those, so a test
+    for one refusal reads as one changed default.
+
+    Dispatch is on the whole command. An earlier version matched keywords
+    anywhere in the argv, which was fine while there were four commands and
+    would have silently answered `rev-parse HEAD` with the reply meant for
+    `rev-parse fork/trunk`.
+    """
+
+    ORIGINAL = "regex="
+
+    def __init__(
+        self,
+        *,
+        push_urls: Sequence[str] = (URL,),
+        head: str = "aaaa1111",
+        base_at: str = "aaaa1111",
+        branch_exists: bool = False,
+        staged: Sequence[str] = (),
+        modified: Sequence[str] = ("emnify/models.py",),
+        committed: Mapping[str, str] | None = None,
+        pr: Completed | None = None,
+    ) -> None:
         self.calls: list[list[str]] = []
-        self.answers = answers
+        self.push_urls = list(push_urls)
+        self.head = head
+        self.base_at = base_at
+        self.branch_exists = branch_exists
+        self.staged = list(staged)
+        self.modified = list(modified)
+        self.committed = dict(committed or {"emnify/models.py": self.ORIGINAL})
+        self.pr = pr or _ok("https://github.com/aryangorde8/emnify-fork/pull/7\n")
 
     def run(self, command: Sequence[str], cwd: Path) -> Completed:  # noqa: ARG002
-        self.calls.append(list(command))
-        for key, answer in self.answers.items():
-            if key.replace("_", "-") in command or key in command:
-                return answer
-        return Completed(returncode=0, output="", where="local")
+        argv = list(command)
+        self.calls.append(argv)
+        if argv[0] == "gh":
+            return self.pr
+        rest = argv[1:]
+        if rest[:3] == ["remote", "get-url", "--push"]:
+            return _ok("\n".join(self.push_urls))
+        if rest == ["rev-parse", "HEAD"]:
+            return _ok(self.head)
+        if rest[:1] == ["symbolic-ref"]:
+            return _ok("refs/remotes/fork/trunk")
+        if rest[:3] == ["rev-parse", "--verify", "--quiet"]:
+            return _ok("bbbb2222") if self.branch_exists else _fail()
+        if rest[:1] == ["rev-parse"]:
+            return _ok(self.base_at)
+        if rest == ["diff", "--cached", "--name-only"]:
+            return _ok("\n".join(self.staged))
+        if rest == ["diff", "--name-only"]:
+            return _ok("\n".join(self.modified))
+        if rest[:1] == ["show"]:
+            name = rest[1].removeprefix("HEAD:")
+            return _ok(self.committed[name]) if name in self.committed else _fail(128)
+        return _ok()
 
     @property
     def written(self) -> list[list[str]]:
         """Only the calls that could change something."""
-        reads = {"get-url", "symbolic-ref", "rev-parse", "status"}
-        return [call for call in self.calls if not reads & set(call)]
+        reads = {"remote", "symbolic-ref", "rev-parse", "status", "diff", "show"}
+        return [call for call in self.calls if not reads & set(call[1:2])]
 
 
 def _ok(output: str = "") -> Completed:
     return Completed(returncode=0, output=output, where="local")
 
 
+def _fail(code: int = 1, output: str = "") -> Completed:
+    return Completed(returncode=code, output=output, where="local")
+
+
+class _Answering:
+    """`git`, but with one command answered differently.
+
+    For the two cases that are about a command *failing* rather than about the
+    repository being in some state. A wrapper rather than another keyword on
+    `_Git`, so that `_Git`'s constructor stays a description of a repository and
+    not a list of things that can go wrong.
+    """
+
+    def __init__(self, git: "_Git", prefix: Sequence[str], answer: Completed) -> None:
+        self.git = git
+        self.prefix = list(prefix)
+        self.answer = answer
+
+    def run(self, command: Sequence[str], cwd: Path) -> Completed:
+        argv = list(command)
+        if argv[1 : 1 + len(self.prefix)] == self.prefix:
+            self.git.calls.append(argv)
+            return self.answer
+        return self.git.run(command, cwd)
+
+
 def _git_that_resolves() -> _Git:
-    return _Git(
-        get_url=_ok(URL),
-        symbolic_ref=_ok("refs/remotes/upstream-fork/trunk"),
-        pr=_ok("https://github.com/aryangorde8/emnify-fork/pull/7\n"),
-    )
+    return _Git()
 
 
 def _step(root: Path, *, applied: bool = True, skipped: bool = False) -> Step:
@@ -198,13 +269,13 @@ def test_the_base_branch_is_asked_for_rather_than_assumed(tmp_path: Path) -> Non
 
 
 def test_an_unresolvable_base_is_an_error_not_a_guess(tmp_path: Path) -> None:
-    git = _Git(get_url=_ok(URL), symbolic_ref=_ok(""))
+    git = _Answering(_Git(), ["symbolic-ref"], _ok(""))
     with pytest.raises(GitError, match="could not tell which branch"):
         propose(_migrated(tmp_path), tmp_path, remote="fork", runner=git)
 
 
 def test_a_remote_that_does_not_exist_is_an_error(tmp_path: Path) -> None:
-    git = _Git(get_url=Completed(returncode=2, output="No such remote", where="local"))
+    git = _Answering(_Git(), ["remote", "get-url"], _fail(2, "No such remote"))
     with pytest.raises(GitError, match="No such remote"):
         propose(_migrated(tmp_path), tmp_path, remote="typo", runner=git)
 
@@ -343,11 +414,7 @@ def test_the_pull_requests_url_is_reported(tmp_path: Path) -> None:
 def test_a_warning_printed_by_gh_is_not_reported_as_the_pull_request(tmp_path: Path) -> None:
     """`gh` prints warnings too, and the last line is not always the address."""
     proposal = _proposal(tmp_path)
-    git = _Git(
-        get_url=_ok(URL),
-        symbolic_ref=_ok("refs/remotes/fork/trunk"),
-        pr=_ok("https://github.com/x/y/pull/3\nWarning: 1 uncommitted change\n"),
-    )
+    git = _Git(pr=_ok("https://github.com/x/y/pull/3\nWarning: 1 uncommitted change\n"))
     opened = open_pull_request(_allowed(proposal), proposal, git)
     assert opened.url == "https://github.com/x/y/pull/3"
 
@@ -360,18 +427,14 @@ def test_a_push_that_worked_and_a_pull_request_that_did_not_says_both(tmp_path: 
     that -- or where to go and finish the job by hand.
     """
     proposal = _proposal(tmp_path)
-    git = _Git(
-        get_url=_ok(URL),
-        symbolic_ref=_ok("refs/remotes/fork/trunk"),
-        pr=Completed(returncode=4, output="gh: not authenticated", where="local"),
-    )
+    git = _Git(pr=_fail(4, "gh: not authenticated"))
     opened = open_pull_request(_allowed(proposal), proposal, git)
 
     assert opened.url == ""
     assert opened.pushed_to == URL
     assert "the branch is pushed" in opened.note
     assert URL in opened.note
-    assert ["git", "push", "--set-upstream", "fork", DEFAULT_BRANCH] in git.calls
+    assert ["git", "push", URL, f"HEAD:refs/heads/{DEFAULT_BRANCH}"] in git.calls
 
 
 def test_the_gate_records_what_it_allowed(tmp_path: Path) -> None:
@@ -453,3 +516,143 @@ def test_the_body_counts_in_sentences_a_person_would_write() -> None:
     body = body_for(_migrated(Path("/repo")))
     assert "1 was rewritten" in body
     assert "1 were rewritten" not in body
+
+
+# --------------------------------------------------------------------------
+# Where the push actually goes
+# --------------------------------------------------------------------------
+
+
+def test_the_destination_is_the_push_url_not_the_fetch_url(tmp_path: Path) -> None:
+    """`git remote get-url` answers about fetching, and the push may go elsewhere.
+
+    A remote carrying a `pushurl` sends the branch somewhere the fetch URL never
+    named. Showing the fetch URL in the approval would be showing a destination
+    the push was never going to use -- reached through the one git command that
+    looks like it answers the question.
+    """
+    git = _git_that_resolves()
+    propose(_migrated(tmp_path), tmp_path, remote="fork", runner=git)
+    assert ["git", "remote", "get-url", "--push", "--all", "fork"] in git.calls
+    assert ["git", "remote", "get-url", "fork"] not in git.calls
+
+
+def test_a_remote_that_pushes_to_several_places_is_refused(tmp_path: Path) -> None:
+    """One approval cannot mean three destinations."""
+    git = _Git(push_urls=(URL, OTHER))
+    with pytest.raises(GitError, match="pushes to 2 places"):
+        propose(_migrated(tmp_path), tmp_path, remote="fork", runner=git)
+
+
+def test_the_push_names_the_url_and_not_the_remote(tmp_path: Path) -> None:
+    """A name is an indirection `git remote set-url` can re-point after approval.
+
+    The fingerprint binds the URL, so pushing by name would leave the approved
+    destination and the actual one connected by nothing but the assumption that
+    the remote had not moved.
+    """
+    proposal = _proposal(tmp_path)
+    git = _git_that_resolves()
+    open_pull_request(_allowed(proposal), proposal, git)
+
+    push = next(call for call in git.calls if call[:2] == ["git", "push"])
+    assert push == ["git", "push", URL, f"HEAD:refs/heads/{DEFAULT_BRANCH}"]
+    assert "fork" not in push
+
+
+def test_the_pull_request_names_the_repository_the_branch_went_to(tmp_path: Path) -> None:
+    """Left to itself, `gh` picks a repository from the checkout's own remotes.
+
+    Which, for a migration, is the repository this was cloned from -- somebody
+    else's -- and not the fork that was just approved.
+    """
+    proposal = _proposal(tmp_path)
+    git = _git_that_resolves()
+    open_pull_request(_allowed(proposal), proposal, git)
+
+    gh = next(call for call in git.calls if call[0] == "gh")
+    assert gh[:5] == ["gh", "pr", "create", "--repo", "aryangorde8/emnify-fork"]
+
+
+def test_a_remote_that_is_not_github_gets_a_push_and_no_gh_at_all(tmp_path: Path) -> None:
+    """A bare repository is a fine place to push and not a place pull requests exist.
+
+    Running `gh` and reporting its failure would describe something going wrong.
+    Nothing went wrong; there is simply nowhere to open one.
+    """
+    git = _Git(push_urls=("/srv/git/emnify.git",))
+    proposal = propose(_migrated(tmp_path), tmp_path, remote="fork", runner=git)
+    opened = open_pull_request(_allowed(proposal), proposal, git)
+
+    assert not [call for call in git.calls if call[0] == "gh"]
+    assert opened.url == ""
+    assert "not a GitHub repository" in opened.note
+    assert ["git", "push", "/srv/git/emnify.git", f"HEAD:refs/heads/{DEFAULT_BRANCH}"] in git.calls
+
+
+# --------------------------------------------------------------------------
+# Nothing but the migration goes out
+# --------------------------------------------------------------------------
+
+
+def test_a_checkout_ahead_of_the_base_is_refused(tmp_path: Path) -> None:
+    """A pull request is a diff against the base, not a commit.
+
+    Restricting what the commit touches never addressed this -- and the
+    deciding argument is not about the other commits at all: the suite went
+    green against HEAD, so a pull request against a different base is a
+    different change from the one that was tested.
+    """
+    git = _Git(head="cccc3333", base_at="aaaa1111")
+    with pytest.raises(NothingToPublishError, match=r"not at fork/trunk"):
+        propose(_migrated(tmp_path), tmp_path, remote="fork", runner=git)
+
+
+def test_a_branch_that_already_exists_is_refused(tmp_path: Path) -> None:
+    """`-B` would reset it, and the default name is reused across runs by design."""
+    git = _Git(branch_exists=True)
+    with pytest.raises(NothingToPublishError, match="already exists"):
+        propose(_migrated(tmp_path), tmp_path, remote="fork", runner=git)
+
+
+def test_the_branch_is_created_not_reset(tmp_path: Path) -> None:
+    proposal = _proposal(tmp_path)
+    git = _git_that_resolves()
+    open_pull_request(_allowed(proposal), proposal, git)
+    assert ["git", "checkout", "-b", DEFAULT_BRANCH] in git.calls
+    assert not [call for call in git.calls if "-B" in call]
+
+
+def test_anything_already_staged_is_refused(tmp_path: Path) -> None:
+    """`git commit` commits the index, whatever pathspec added ours to it."""
+    git = _Git(staged=("docs/notes.md",))
+    with pytest.raises(NothingToPublishError, match="already something staged"):
+        propose(_migrated(tmp_path), tmp_path, remote="fork", runner=git)
+
+
+def test_an_unrelated_modified_file_is_refused(tmp_path: Path) -> None:
+    git = _Git(modified=("emnify/models.py", "emnify/unrelated.py"))
+    with pytest.raises(NothingToPublishError, match=r"emnify/unrelated\.py"):
+        propose(_migrated(tmp_path), tmp_path, remote="fork", runner=git)
+
+
+def test_a_file_that_was_already_edited_before_the_migration_is_refused(tmp_path: Path) -> None:
+    """`git add -- path` stages that file's whole current contents.
+
+    Which is the migration's edit *plus* whatever was uncommitted in it
+    already. Staging the right path does not make the right change.
+    """
+    git = _Git(committed={"emnify/models.py": "somebody was halfway through this"})
+    with pytest.raises(NothingToPublishError, match="already differed from the last commit"):
+        propose(_migrated(tmp_path), tmp_path, remote="fork", runner=git)
+
+
+def test_the_commit_is_only_the_migrations_paths(tmp_path: Path) -> None:
+    """`--only`, so what is committed is the pathspec rather than the index."""
+    proposal = _proposal(tmp_path)
+    git = _git_that_resolves()
+    open_pull_request(_allowed(proposal), proposal, git)
+
+    commit = next(call for call in git.calls if call[:2] == ["git", "commit"])
+    assert commit[2] == "--only"
+    assert commit[-2:] == ["--", "emnify/models.py"]

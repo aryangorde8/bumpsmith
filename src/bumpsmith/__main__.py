@@ -329,10 +329,15 @@ def _publish(migration: Migration, root: Path, args: argparse.Namespace, runner:
 
     if opened.url:
         print(f"\npull request opened: {opened.url}")
-    else:
-        print(f"\nbranch {opened.branch} pushed to {opened.pushed_to}")
-        print(f"  {opened.note}")
-    return 0
+        return 0
+    # The branch is pushed and there is no pull request. That is not a success,
+    # and a caller reading only the exit status would be told it was: `--open-pr`
+    # was asked for and did not happen. 2 rather than 1, because 1 means the
+    # suite is red and here the suite is green -- what failed is the operation,
+    # which is the same thing 2 has always meant.
+    print(f"\nbranch {opened.branch} pushed to {opened.pushed_to}")
+    print(f"  {opened.note}")
+    return 2
 
 
 def _status(stop: Stop) -> int:
@@ -350,6 +355,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     run never got far enough to say -- a bad invocation, a suite that could not
     be started, or one that ran somewhere it could not have been testing these
     edits. A red suite is a result; a missing interpreter is not.
+
+    ``--open-pr`` extends ``2`` to cover the operation it adds: a pull request
+    that was asked for and did not happen. A *refusal* is not that. Somebody was
+    asked and said no, the gate recorded it, nothing was pushed and the
+    migration still stands -- so a denial leaves the status the suite earned.
+    Making it cost something would be making it expensive to say no.
     """
     args = _build_parser().parse_args(argv)
 
@@ -388,6 +399,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             "so this refuses rather than\n  reporting two reports written and "
             "leaving one.",
             file=sys.stderr,
+        )
+        return 2
+
+    # An empty string is not "no". `--open-pr "$REMOTE"` with the variable unset
+    # asks for a pull request and names nowhere, and a truthiness test reads that
+    # as never having asked -- the migration then exits 0 having quietly skipped
+    # the operation. Same principle as the colliding report paths above: a bad
+    # invocation is answered, not absorbed.
+    if args.open_pr is not None and not args.open_pr.strip():
+        print(
+            "--open-pr needs the name of a git remote; it was given an empty one.", file=sys.stderr
         )
         return 2
 
@@ -446,7 +468,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # After the reports, deliberately. Whatever happens to the pull request, the
     # evidence for the run is already on disk -- and if the push fails, that
     # evidence is the thing somebody needs.
-    if args.open_pr:
+    if args.open_pr is not None:
         status = _publish(migration, root, args, LocalRunner(timeout=args.timeout)) or status
     return status
 
