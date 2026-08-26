@@ -1,23 +1,31 @@
 # Proofs
 
-Two scripts that run against a live TrueForge and demonstrate the halves of the
-hackathon's control-and-safety criterion — *does the agent run its code somewhere
-safe, and does it stop for a human before anything irreversible.* They are here
-rather than in `tests/` because they need a harness, a model and a network, and a
-test suite that cannot run on a laptop is not a test suite.
+Three scripts that demonstrate something the test suite cannot reach on its own.
+
+Two of them run against a live TrueForge and cover the halves of the hackathon's
+control-and-safety criterion — *does the agent run its code somewhere safe, and
+does it stop for a human before anything irreversible.* The third asks a real
+pydantic v2 which validator signatures it accepts, which needs no harness at all
+but does need a dependency this package deliberately does not have.
+
+They are here rather than in `tests/` because each needs something a laptop
+running `pytest` does not have, and a test suite that cannot run on a laptop is
+not a test suite.
 
 What each one actually proved, on the run recorded in `recorded/`, is at the
 bottom of this file.
 
 ## What they are not
 
-They do not test the package. `tests/` does that, 409 times, offline. These
+They do not test the package. `tests/` does that, 448 times, offline. These
 scripts exist for the opposite reason: to catch the things a test cannot, because
 the test and the code were written by the same person from the same
 understanding. Three of this project's review findings came from live runs and
 could not have come from anywhere else — the harness pauses a wrapper rather than
 the tool it wraps, `thread_id` is not a session id, and a session id of `"main"`
-is a 404.
+is a 404. `validator.py` was written after a fourth: the error message pydantic
+prints for a class-1 break names a fix that does not work, and a rewriter built
+from the message would have been wrong with a full green suite behind it.
 
 The measure of a proof here is how little of it there is. Every one of these
 started as a scratch file with its own session handling, turn polling and event
@@ -27,8 +35,10 @@ could do it. Findings 35 and 39 both said so. What is left is four lines of
 
 ## Running them
 
-Both need a TrueForge on `http://localhost:8790`; pass `--base-url` for anywhere
-else. Install the package first (`pip install -e .`) so the imports resolve.
+Install the package first (`pip install -e .`) so the imports resolve.
+`sandbox.py` and `deny.py` need a TrueForge on `http://localhost:8790`; pass
+`--base-url` for anywhere else. `validator.py` needs neither, and is the one a
+reader with no harness can run.
 
 ### `sandbox.py` — the suite runs somewhere safe
 
@@ -109,16 +119,44 @@ Being unable to ask is never reported as "it did not run". A proof that turned a
 unreachable server into a clean bill of health would pass most reliably when it
 was least entitled to.
 
+### `validator.py` — the fix is not what the error message says
+
+```
+python proofs/validator.py --python /path/to/a/venv/bin/python
+```
+
+Needs an interpreter with pydantic v2 installed, and nothing else. It builds
+eight one-model modules, each with a differently shaped validator, runs each in
+its own subprocess, and records how far it got.
+
+It exists because of one sentence pydantic prints:
+
+> The `field` and `config` parameters are not available in Pydantic V2, please
+> use the `info` parameter instead.
+
+Read as instructions that says to rewrite the signature to take `info`. Under
+the `@validator` shim it is wrong — `info` belongs to V2's `@field_validator`,
+and the shim refuses a parameter by that name as an unsupported V1 signature.
+The migration that works is to *remove* both parameters; `values` is still
+accepted and still carries what it did.
+
+That is a fact about somebody else's library, so it is checked against somebody
+else's library rather than asserted in a docstring. The script exits non-zero if
+any of the eight stops behaving the way `bumpsmith.rules` says it does — the
+rewriter is built on these answers, so a change here is a change there.
+
 ## The recorded runs
 
-`recorded/` holds the output of both scripts, verbatim, from 26 August 2026
-against TrueForge 0.1.4 with `bedrock-mantle/qwen-3-coder-480b`. They are
-committed because a judge without a harness cannot run these, and a claim nobody
-can check is worth what it costs to make.
+`recorded/` holds the output of all three scripts, verbatim, from 26 August 2026 —
+the two harness ones against TrueForge 0.1.4 with `bedrock-mantle/qwen-3-coder-480b`,
+and `validator.py` against pydantic 2.12.5. They are committed because a judge
+without a harness cannot run the first two, and a claim nobody can check is worth
+what it costs to make.
 
 | file | what it shows |
 |---|---|
 | `sandbox.log` / `sandbox.json` | pytest ran in Daytona and came back `rc=2`; `bumpsmith.failures` read it as `[REGEX_KEYWORD] \`regex\` is removed. use \`pattern\` instead` |
+| `validator.log` / `validator.json` | pydantic 2.12.5, eight signatures, all eight as documented — `field`/`config` raise, `values` survives, and `info` is refused under `@validator` |
 | `deny.log` / `deny.json` | a real `tool.approval_required` on thread `main`, denied through `TurnChannel`; the session then run to rest — 2 turns, both `done` — and the harness's own MCP server reports **0 tool calls served during the run** |
 
 Neither file was edited. They contain no credentials. The repository and branch

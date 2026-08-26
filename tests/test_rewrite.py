@@ -26,7 +26,14 @@ _VALIDATOR_RULE = Rule(
     break_class=BreakClass.VALIDATOR_FIELD_CONFIG,
     kind=RuleKind.SOURCE,
     summary="A validator taking field or config",
-    rationale="v2 replaced both with info.",
+    rationale="v2 accepts neither parameter.",
+)
+
+_NO_REWRITER_RULE = Rule(
+    break_class=BreakClass.REMOVED_INTERNAL,
+    kind=RuleKind.SOURCE,
+    summary="An import of a pydantic internal that v2 deleted",
+    rationale="Nobody has written a rewriter for this one.",
 )
 
 
@@ -310,7 +317,7 @@ def test_a_rule_with_no_rewriter_says_so_out_loud() -> None:
     needed no changes, which is the one wrong answer.
     """
     with pytest.raises(UnsupportedRuleError, match="no rewriter is written"):
-        plan(_VALIDATOR_RULE, ScanResult(matches=(), unreadable=()))
+        plan(_NO_REWRITER_RULE, ScanResult(matches=(), unreadable=()))
 
 
 # ---------------------------------------------------------------------------

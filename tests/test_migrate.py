@@ -120,6 +120,15 @@ VALIDATOR_BROKEN = _collection_error(
     "please use the `info` parameter instead.",
 )
 
+NO_REWRITER_BROKEN = (DATA / "F4-broken.txt").read_text(encoding="utf-8")
+"""A real run whose break has a rule and no rewriter.
+
+Class 1 used to stand here, and stopped being able to the moment it got one.
+This is fixture F4's recorded output: `pydantic.utils:DUNDER_ATTRIBUTES` names a
+symbol V2 deleted, which narrows to a rule a person can act on and to no edit
+this package will write unasked.
+"""
+
 DEPENDENCY_BROKEN = _collection_error(
     "ModuleNotFoundError",
     "No module named 'someoldsdk'",
@@ -405,13 +414,14 @@ def test_a_break_no_edit_here_can_fix_stops_and_says_why(tmp_path: Path) -> None
 def test_a_rule_with_no_rewriter_stops_with_the_rule_as_the_output(tmp_path: Path) -> None:
     """Naming the break is useful even when carrying it out automatically is not."""
     root = _repo(tmp_path)
-    result = migrate(root, _Scripted(_red(VALIDATOR_BROKEN)), SUITE)
+    result = migrate(root, _Scripted(_red(NO_REWRITER_BROKEN)), SUITE)
 
     assert result.stop is Stop.NO_REWRITER
     assert result.outcome is Outcome.UNTOUCHED
     step = result.steps[0]
     assert step.rule is not None
-    assert step.rule.break_class is BreakClass.VALIDATOR_FIELD_CONFIG
+    assert step.rule.break_class is BreakClass.REMOVED_INTERNAL
+    assert "DUNDER_ATTRIBUTES" in step.rule.summary
 
 
 def test_a_rule_that_matches_nothing_stops_rather_than_looping(tmp_path: Path) -> None:
@@ -671,7 +681,7 @@ CASES = (
     _Case(Stop.NOTHING_PARSED, (_red(REGEX_BROKEN),), nothing_parses=True),
     _Case(Stop.NO_RULE, (_red(UNCLASSIFIABLE),)),
     _Case(Stop.DEPENDENCY, (_red(DEPENDENCY_BROKEN),), packages=frozenset({"mypkg"})),
-    _Case(Stop.NO_REWRITER, (_red(VALIDATOR_BROKEN),)),
+    _Case(Stop.NO_REWRITER, (_red(NO_REWRITER_BROKEN),)),
     _Case(Stop.NOTHING_TO_APPLY, (_red(ROOT_MODEL_BROKEN),)),
     _Case(Stop.NOT_APPLIED, (_red(REGEX_BROKEN),), symlinked=True),
     _Case(

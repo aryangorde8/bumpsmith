@@ -1,0 +1,111 @@
+{
+  "python": "/home/aryan/bumpsmith-work/venv-b2/bin/python",
+  "pydantic": "2.12.5",
+  "conclusion": "Removing `field` and `config` is the whole fix. `values` survives; `info` is refused under @validator, so the error message's advice does not apply to the decorator that raised it.",
+  "cases": [
+    {
+      "case": "validator with field and config",
+      "decorator": "validator",
+      "signature": "cls, v, values, field, config",
+      "expected": "PydanticUserError",
+      "outcome": {
+        "stage": "build",
+        "error": "PydanticUserError",
+        "message": "The `field` and `config` parameters are not available in Pydantic V2, please use the `info` parameter instead."
+      },
+      "as_expected": true,
+      "why_it_matters": "the break itself; if this passed there would be nothing to migrate"
+    },
+    {
+      "case": "validator with values only",
+      "decorator": "validator",
+      "signature": "cls, v, values",
+      "expected": "ok",
+      "outcome": {
+        "stage": "ok",
+        "error": null,
+        "message": "M(x=1, y=2)"
+      },
+      "as_expected": true,
+      "why_it_matters": "the shape the rewriter produces, and the whole reason the deletion is enough"
+    },
+    {
+      "case": "validator with neither",
+      "decorator": "validator",
+      "signature": "cls, v",
+      "expected": "ok",
+      "outcome": {
+        "stage": "ok",
+        "error": null,
+        "message": "M(x=1, y=2)"
+      },
+      "as_expected": true,
+      "why_it_matters": "the shape produced when the site declared no `values` either"
+    },
+    {
+      "case": "validator with info",
+      "decorator": "validator",
+      "signature": "cls, v, info",
+      "expected": "PydanticUserError",
+      "outcome": {
+        "stage": "build",
+        "error": "PydanticUserError",
+        "message": "Unsupported signature for V1 style validator <bound method M.check of <class '__main__.M'>>: (v, info) is not supported."
+      },
+      "as_expected": true,
+      "why_it_matters": "what the error message tells you to write, and it does not work here"
+    },
+    {
+      "case": "validator with field alone",
+      "decorator": "validator",
+      "signature": "cls, v, field",
+      "expected": "PydanticUserError",
+      "outcome": {
+        "stage": "build",
+        "error": "PydanticUserError",
+        "message": "The `field` and `config` parameters are not available in Pydantic V2, please use the `info` parameter instead."
+      },
+      "as_expected": true,
+      "why_it_matters": "either parameter alone is the break, so the scan is right to match on either"
+    },
+    {
+      "case": "validator with config alone",
+      "decorator": "validator",
+      "signature": "cls, v, config",
+      "expected": "PydanticUserError",
+      "outcome": {
+        "stage": "build",
+        "error": "PydanticUserError",
+        "message": "The `field` and `config` parameters are not available in Pydantic V2, please use the `info` parameter instead."
+      },
+      "as_expected": true,
+      "why_it_matters": "the same, for the other name"
+    },
+    {
+      "case": "root_validator with field and config",
+      "decorator": "root_validator",
+      "signature": "cls, values, field, config",
+      "expected": "TypeError",
+      "outcome": {
+        "stage": "call",
+        "error": "TypeError",
+        "message": "M.check() missing 2 required positional arguments: 'field' and 'config'"
+      },
+      "as_expected": true,
+      "why_it_matters": "the rule matches `root_validator` too, and it fails differently -- not at class construction but at call time, with a plain builtin TypeError"
+    },
+    {
+      "case": "root_validator with values only",
+      "decorator": "root_validator",
+      "signature": "cls, values",
+      "expected": "ok",
+      "outcome": {
+        "stage": "ok",
+        "error": null,
+        "message": "M(x=1, y=2)"
+      },
+      "as_expected": true,
+      "why_it_matters": "the same deletion fixes it, which is why one rewriter covers both decorators"
+    }
+  ]
+}

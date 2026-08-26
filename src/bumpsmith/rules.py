@@ -132,12 +132,16 @@ def write_rule(failure: Failure) -> Rule | None:
         return Rule(
             break_class=failure.break_class,
             kind=RuleKind.SOURCE,
-            summary="Replace a v1 validator's `field` and `config` parameters with v2's `info`",
+            summary="Remove a v1 validator's `field` and `config` parameters",
             rationale=(
-                "pydantic v2 merged the per-validator `field` and `config` arguments into a "
-                "single `info` argument carrying ValidationInfo. A validator still declaring "
-                "either name raises at class-construction time, so the module fails to import "
-                "and every test in it fails to collect."
+                "pydantic v2 dropped the per-validator `field` and `config` arguments. A "
+                "validator still declaring either name raises at class-construction time, so "
+                "the module fails to import and every test in it fails to collect. The error "
+                "text points at `info`, and under the `@validator` shim that is not what to "
+                "write: `info` belongs to v2's `@field_validator`, and the shim refuses a "
+                "parameter by that name as an unsupported V1 signature. `values` is still "
+                "accepted and still carries what it did, so removing the two parameters is "
+                "the whole change."
             ),
         )
 
@@ -315,8 +319,20 @@ def pydantic_name(node: ast.expr, names: PydanticNames) -> str | None:
     return None
 
 
-def _validator_sites(tree: ast.Module) -> Iterator[int]:
-    """Yield the line of every pydantic validator still taking `field` or `config`."""
+def validator_parameter_sites(
+    tree: ast.Module,
+) -> Iterator[tuple[int, ast.FunctionDef | ast.AsyncFunctionDef, tuple[ast.arg, ...]]]:
+    """Yield every pydantic validator still declaring `field` or `config`.
+
+    The function node and the offending arguments come back with the line
+    because the rewrite needs their columns, and recomputing those from the line
+    would mean finding the word `field` in text that may legitimately hold it
+    several times -- as an annotation, a default, or another parameter's name.
+
+    The arguments are yielded in the order they are declared, which is the order
+    the deletion has to be reasoned about: what separates one from the next is
+    what gets removed with it.
+    """
     names = pydantic_names(tree)
     if not names.direct and not names.modules:
         return
@@ -330,16 +346,28 @@ def _validator_sites(tree: ast.Module) -> Iterator[int]:
         if not decorated:
             continue
         arguments = node.args
-        declared = {
-            argument.arg
+        offending = tuple(
+            argument
             for argument in (
                 *arguments.posonlyargs,
                 *arguments.args,
                 *arguments.kwonlyargs,
             )
-        }
-        if declared & _V1_INFO_PARAMETERS:
-            yield node.lineno
+            if argument.arg in _V1_INFO_PARAMETERS
+        )
+        if offending:
+            yield node.lineno, node, offending
+
+
+def _validator_sites(tree: ast.Module) -> Iterator[int]:
+    """Yield the line of every pydantic validator still taking `field` or `config`.
+
+    Defined in terms of the site walk rather than beside it. A scan and a rewrite
+    that each decide for themselves what counts as a site drift, and when they do
+    the edit lands somewhere the scan never reported.
+    """
+    for line, _node, _offending in validator_parameter_sites(tree):
+        yield line
 
 
 def _root_model_sites(tree: ast.Module) -> Iterator[int]:

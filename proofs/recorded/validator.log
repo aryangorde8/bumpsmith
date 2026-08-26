@@ -1,0 +1,14 @@
+asking pydantic 2.12.5 at /home/aryan/bumpsmith-work/venv-b2/bin/python
+
+  OK  validator with field and config        expected PydanticUserError  got PydanticUserError
+  OK  validator with values only             expected ok                 got ok
+  OK  validator with neither                 expected ok                 got ok
+  OK  validator with info                    expected PydanticUserError  got PydanticUserError
+  OK  validator with field alone             expected PydanticUserError  got PydanticUserError
+  OK  validator with config alone            expected PydanticUserError  got PydanticUserError
+  OK  root_validator with field and config   expected TypeError          got TypeError
+  OK  root_validator with values only        expected ok                 got ok
+
+evidence written to proofs/recorded/validator.json
+
+every case behaved as bumpsmith.rules says it does.
