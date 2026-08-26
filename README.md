@@ -9,9 +9,14 @@ that carries it out, applies that edit as a revertible transaction, and runs the
 suite again — repeating until the suite passes or until it hits something it
 cannot do, which it then names.
 
-Afterwards a repository is in one of exactly two states: **changed, with a green
-run behind the change — or byte-for-byte what it was.** There is no third state,
-and most of the design is in service of that.
+Afterwards, every edit it made is either **kept, with a green run behind it — or
+taken back byte for byte.** Never half of each, and never kept on the strength of
+a run that did not test them. Most of the design is in service of that.
+
+Two things that guarantee does *not* cover are stated where they happen rather
+than buried: the suite it runs is not isolated and leaves its own artefacts, and
+if something else edits a file mid-run the revert **refuses** rather than
+destroying that work. See [what it does not do](#what-it-does-not-do).
 
 ---
 
@@ -168,10 +173,18 @@ tests run, and 19 of them pass. The remaining break is a different kind of thing
 a `ValidationError` from a field V1 made optional by implication, and this run
 says so by declining to name a rule for it rather than by guessing one.
 
-**It stopped, said exactly what it could not do, and left the repository
-byte-for-byte as it found it.** `git status` afterwards is empty. A migration
-that leaves a checkout changed and no better is worse than one that changes
-nothing, because somebody then has to work out which of the two happened.
+**It stopped, said exactly what it could not do, and took every edit back.** All
+25 rewritten sites are byte-for-byte what they were: `git diff` is empty and so
+is `git status`. A migration that leaves a checkout changed and no better is
+worse than one that changes nothing, because somebody then has to work out which
+of the two happened.
+
+What an empty `git status` does *not* tell you is that the directory is
+untouched. The suite left `.pytest_cache/` and seven `__pycache__/` directories
+behind, and the fixture gitignores both — so the check that looked like proof of
+"byte-for-byte" was only ever proof of "no tracked file changed". Those artefacts
+are pytest's, not bumpsmith's, and nothing here claims to restore them; `git
+status --ignored` is the command that shows them.
 
 ## When it stops, it says which thing happened
 
@@ -248,7 +261,7 @@ implementation.
 | module | what it guarantees |
 |---|---|
 | [`migrate.py`](src/bumpsmith/migrate.py) | **the loop — this is the agent.** Edits from every step are held open together and kept only at the end, only once a run has come back green |
-| [`failures.py`](src/bumpsmith/failures.py) | pytest output → a structured `Failure`. Dispatches on the return code, not the text, because pytest emits three materially different layouts and the return code names which one you have before parsing begins |
+| [`failures.py`](src/bumpsmith/failures.py) | pytest output → a structured `Failure`. The return code is asked first — it is available before any parsing and cannot be confused by message content — but it is not sufficient alone: a collection failure and a Ctrl-C both exit 2, a broken conftest and a misinvoked pytest both exit 4. It narrows each to two candidates and one marker in the text picks between them, so no pattern is ever right about the layout *and* the content at once. Unrecognised is `UNKNOWN`, never a guess |
 | [`rules.py`](src/bumpsmith/rules.py) | `Failure` → `Rule`, and `Rule` + root → every site. Matched over the AST, never over text: `@validator` appears in strings, comments and docs, and a library may define a decorator of its own by that name. Resolves pydantic's names through imports and `as` aliases |
 | [`rewrite.py`](src/bumpsmith/rewrite.py) | `Rule` + sites → `Edit`s. **Text replacement at AST positions, never `ast.unparse`** — a file comes back byte-identical apart from the matched sites. Refuses rather than guesses; every match ends as an edit or a `Skipped` carrying a reason |
 | [`apply.py`](src/bumpsmith/apply.py) | `attempt(edits, root)` — all of them land or none do, the originals come back byte for byte, and nothing outside the root is touched. **Reverting is the default**; a caller earns a change by saying `keep()` |
@@ -263,8 +276,12 @@ Two design choices carry more weight than the rest.
 
 **Reverting is the default, not the error path.** A tool that edits a repository
 and decides afterwards whether that was a good idea has already done the
-irreversible part. In `apply.py` an exception, a crash, or simply forgetting all
-land in the same place — the tree exactly as it was.
+irreversible part. In `apply.py` an exception, an early return, or simply
+forgetting all land in the same place — the tree exactly as it was. That covers
+anything which unwinds the stack, which is what a `finally` block covers and the
+limit of what it covers: a `SIGKILL` or a power cut leaves the edits on disk,
+because nothing runs afterwards to take them back and there is no journal to
+recover from.
 
 **Edits are text replacements at positions the tree reported.** The obvious way
 to rewrite Python with the standard library is to modify the tree and hand it to
@@ -330,7 +347,8 @@ Then run it against a real repository end to end:
 ```bash
 python -m bumpsmith.fixtures B
 python -m bumpsmith ./fixtures/B --package emnify -- /path/to/a/pydantic2/python -m pytest -q
-git -C ./fixtures/B status    # empty
+git -C ./fixtures/B diff              # empty — every edit taken back
+git -C ./fixtures/B status --ignored  # .pytest_cache/, __pycache__/ — pytest's, not bumpsmith's
 ```
 
 [`proofs/`](proofs/README.md) holds three scripts that demonstrate things a test
@@ -411,6 +429,21 @@ find them yourself.
 - **It has no isolation guarantees when run locally.** `LocalRunner` executes a
   test suite from a repository you pointed it at, in a subprocess on your
   machine, and says so rather than implying otherwise.
+- **It does not restore what the test suite itself writes.** The transaction
+  covers the edits bumpsmith planned and nothing else. pytest runs directly in
+  the checkout and leaves `.pytest_cache/` and `__pycache__/` behind; a suite
+  that writes fixtures, migrations or snapshots will leave those too. "Taken back
+  byte for byte" is a claim about bumpsmith's edits, not about the directory.
+- **It does not survive being killed.** Reverting happens as the stack unwinds,
+  so a `SIGKILL`, an `os._exit` or a power cut between applying and reverting
+  leaves the edits on disk. There is no on-disk journal and no recovery at the
+  next start.
+- **It will refuse to revert rather than destroy your work.** If something else
+  modifies a file after bumpsmith edited it, that file is left alone and the run
+  ends with `RevertError`, a `STOP:` on stderr naming the file, and exit code 2.
+  The tree is then in a state nobody chose — which is the one case the two-state
+  guarantee above does not hold, and it is loud precisely because it cannot be
+  made quiet safely.
 
 ## Review
 

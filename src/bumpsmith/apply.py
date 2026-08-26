@@ -1,15 +1,29 @@
 """Apply edits as a transaction that can always be taken back.
 
 Reverting is the **default**. A caller earns a change by saying :meth:`keep`
-after checking that it helped; an exception, a crash, or simply forgetting all
-land in the same place -- the tree exactly as it was. That ordering is the whole
-design. A tool that edits a repository and decides afterwards whether that was a
-good idea has already done the irreversible part.
+after checking that it helped; an exception, an early return, or simply
+forgetting all land in the same place -- the tree exactly as it was. That
+ordering is the whole design. A tool that edits a repository and decides
+afterwards whether that was a good idea has already done the irreversible part.
+
+What the default covers, exactly
+--------------------------------
+Anything that unwinds the stack, because a ``finally`` block is the mechanism
+and that is the limit of what one covers. A ``SIGKILL``, an ``os._exit``, a
+segfault in an extension module, or the power going out leave the edits on disk:
+nothing runs afterwards to take them back, and there is no journal to recover
+from at the next start. This paragraph exists because the word "a crash" used to
+stand here, and it covered the case this module handles and the case it does not
+with the same word.
 
 Nothing here decides *what* to change. It takes edits somebody else produced and
-guarantees the same three things about any of them: all of them land or none
-do, the originals come back byte for byte, and nothing outside the root is
-touched.
+guarantees the same three things about any of them: all of them land or none do,
+nothing outside the root is touched, and the originals come back byte for byte
+-- unless something outside this transaction changed a file after it was
+written, in which case that file is **left alone** and :class:`RevertError` says
+which and why. Reverting is supposed to cost nothing, and overwriting somebody
+else's work is not nothing. It is the one outcome where the tree is left in a
+state nobody chose, so it is raised rather than returned.
 """
 
 import codecs
