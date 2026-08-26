@@ -106,6 +106,7 @@ python -m bumpsmith ./fixtures/B --package emnify -- ./venv/bin/python -m pytest
 | `--steps N` | how many times the repository may be changed (default 6). The cap is on *applications*, not on runs, so every edit is still verified by a suite run |
 | `--timeout SECONDS` | seconds allowed for each run of the suite (default 600) |
 | `--json PATH` | also write the full report there, as JSON |
+| `--html PATH` | also write it as a **self-contained page** — the same report, rendered for a person. No network, no scripts, opens from `file://` |
 | `--sandbox` | parsed and **refused**, with the reason — see [below](#where-the-suite-runs) |
 
 Exit status is `0` if the suite ends green, `1` if it does not, and `2` if the
@@ -191,6 +192,25 @@ carried over — because the first version of this paragraph named `.pytest_cach
 as well, on the strength of a directory listing that still held residue from the
 previous day's runs. Attributing somebody else's leftovers to the run you are
 describing is the same mistake as the one this paragraph exists to correct.
+
+## The report a person reads
+
+`--html PATH` writes the run as one page: the chain being peeled a break at a
+time, what pytest blamed against what the rule actually matched, and what became
+of the tree. It is the same report `--json` writes — **built from the same
+mapping**, so the two cannot become two descriptions of one run that drift apart.
+
+The page exists because a rule is reviewed before it is agreed to, and the thing
+worth reviewing is a ratio. pytest named `models.py:397`; the rule matched
+nineteen sites across two files. That is the argument for emitting a rule rather
+than a patch, and it is easier to see than to read.
+
+Everything on it — repository paths, pytest's output, exception messages, file
+names — originates in a repository this process did not write, so every value is
+escaped and placed in a text node, never in an attribute, a script, a style block
+or a URL. There is no network access and no JavaScript: one file that opens from
+`file://`, which is the only form that can be attached to a review or committed
+as evidence.
 
 ## When it stops, it says which thing happened
 
