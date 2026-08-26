@@ -78,3 +78,12 @@ It is here because `bumpsmith.run` is a module about reading one wire format
 correctly, and a hand-written example of that format only proves the module
 agrees with its author. The `exitCode: 2` is pytest's collection-error layout,
 so the same file exercises the join to `bumpsmith.failures` as well.
+
+# Recorded transport runs
+
+The transport (`bumpsmith.trueforge`) is tested against a real HTTP server on a
+real socket rather than a recorded fixture — see `tests/test_trueforge.py`. The
+module is almost entirely about what happens when a network misbehaves (an empty
+body mid-turn, a refused connection, a status nobody expected), and those are
+behaviours of a socket rather than shapes of a payload. A recorded body cannot
+refuse a connection.
