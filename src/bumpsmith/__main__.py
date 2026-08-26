@@ -22,6 +22,7 @@ from typing import NoReturn
 
 from bumpsmith.apply import RevertError
 from bumpsmith.migrate import DEFAULT_STEP_LIMIT, Migration, Outcome, Step, Stop, migrate
+from bumpsmith.report import page as report_page
 from bumpsmith.run import DEFAULT_TIMEOUT, LocalRunner
 
 DEFAULT_COMMAND = (sys.executable, "-m", "pytest", "-q")
@@ -133,6 +134,16 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         dest="json_path",
         help="also write the full report here, as JSON",
+    )
+    parser.add_argument(
+        "--html",
+        type=Path,
+        metavar="PATH",
+        dest="html_path",
+        help=(
+            "also write the report here as a self-contained HTML page -- the same "
+            "report `--json` writes, rendered for a person to read"
+        ),
     )
     parser.add_argument(
         "--sandbox",
@@ -255,6 +266,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
 
+    # Checked here, before the suite is ever run: the migration takes minutes,
+    # and the failure it would otherwise end in is one that could have been seen
+    # from the command line alone. Compared resolved, because `out.html` and
+    # `./out.html` are the same file and a check on the spellings would miss it.
+    if (
+        args.json_path is not None
+        and args.html_path is not None
+        and args.json_path.resolve() == args.html_path.resolve()
+    ):
+        print(
+            f"--json and --html both name {args.json_path.resolve()}.\n"
+            "  They would be written in turn and only the second would survive, "
+            "so this refuses rather than\n  reporting two reports written and "
+            "leaving one.",
+            file=sys.stderr,
+        )
+        return 2
+
     command = tuple(args.command) if args.command else DEFAULT_COMMAND
     root = args.path.resolve()
 
@@ -282,19 +311,29 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     print(report(migration))
 
+    # One payload, however many renderings. `--json` and `--html` are two ways of
+    # reading the same run, and building them from one mapping is what stops them
+    # becoming two descriptions of it that drift.
+    payload: dict[str, object] = {
+        "repository": str(root),
+        "command": list(command),
+        **migration.as_dict(),
+    }
+
+    written: list[tuple[Path, str]] = []
     if args.json_path is not None:
-        payload: dict[str, object] = {
-            "repository": str(root),
-            "command": list(command),
-            **migration.as_dict(),
-        }
+        written.append((args.json_path, json.dumps(payload, indent=2) + "\n"))
+    if args.html_path is not None:
+        written.append((args.html_path, report_page(payload, title=f"bumpsmith — {root.name}")))
+
+    for path, text in written:
         try:
-            args.json_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            path.write_text(text, encoding="utf-8")
         except OSError as exc:
             sys.stdout.flush()
-            print(f"could not write {args.json_path}: {exc}", file=sys.stderr)
+            print(f"could not write {path}: {exc}", file=sys.stderr)
             return 2
-        print(f"\nreport written to {args.json_path}")
+        print(f"\nreport written to {path}")
 
     return _status(migration.stop)
 
