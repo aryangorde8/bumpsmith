@@ -24,9 +24,11 @@ What it will not do
 Nothing here retries, and nothing here guesses. A failure that does not narrow
 to exactly one rule stops the loop with a sentence saying so, and every stop is
 a member of :class:`Stop` rather than a message. The point is that "bumpsmith
-could not finish" is never a shrug: it names which of nine specific things
-happened, and a person reading the report knows whether to write a rule, fix
-their pytest invocation, or upgrade a dependency.
+could not finish" is never a shrug: the report names which of them happened,
+and a person reading it knows whether to write a rule, fix their pytest
+invocation, or upgrade a dependency. How many of them there are is not written
+down here -- the enum below is the count, and a number repeated in prose beside
+it is one that goes stale the next time a member is added.
 
 The runner and the tree
 -----------------------

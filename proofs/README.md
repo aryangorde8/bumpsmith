@@ -17,7 +17,7 @@ bottom of this file.
 
 ## What they are not
 
-They do not test the package. `tests/` does that, 448 times, offline. These
+They do not test the package. `tests/` does that, in full and offline. These
 scripts exist for the opposite reason: to catch the things a test cannot, because
 the test and the code were written by the same person from the same
 understanding. Three of this project's review findings came from live runs and

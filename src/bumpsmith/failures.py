@@ -7,10 +7,16 @@ output at all.
 
 Two things drive the design, both measured rather than assumed.
 
-**Dispatch on the return code, not on the text.** pytest emits three materially
-different layouts depending on how far it got, and the return code names which
-one you have before any parsing begins. Guessing from the text instead means
-writing patterns that have to be right about the layout *and* the content.
+**Let the return code narrow it before the text does.** pytest emits several
+materially different layouts depending on how far it got. The return code is
+available before any parsing and cannot be confused by message content, which
+makes it the right *first* question -- but it is not sufficient on its own, and
+saying otherwise here would contradict :class:`RunShape` sixty lines below. A
+collection failure and a Ctrl-C both exit 2; a conftest that will not import and
+a misinvoked pytest both exit 4. So the code narrows each to two candidates and
+one marker in the text picks between them, which means no pattern ever has to be
+right about the layout *and* the content at once. Anything unrecognised is
+``UNKNOWN`` rather than guessed.
 
 **Never key on the summary line.** A conftest import failure prints no
 ``short test summary info`` block, no ``=== ERRORS ===`` banner and no

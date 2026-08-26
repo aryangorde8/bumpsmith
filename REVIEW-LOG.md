@@ -70,6 +70,13 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 61 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The use check could not see `locals()["field"]`, so the deletion looked safe | **Fixed** — a body that can reach its locals by name is refused | this PR |
 | 62 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The proof accepted an exception type without the reason it was claiming | **Fixed** — stage, type and message, all three | this PR |
 | 63 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | `globals` sat in the dynamic-scope guard, which refused safe sites with a false reason — *self-found re-reading the fix for 61* | **Fixed** — a parameter is a local and the module namespace does not hold one | this PR |
+| 64 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | `migrate.py` said the loop names one of *nine* things; there were ten — *self-found, a sibling of 60 that 60 did not look for* | **Fixed** — the number is gone; the enum is the count | this PR |
+| 65 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | `proofs/README.md` gave the suite as 448 tests; it was 453 — *self-found* | **Fixed** — the number is gone, and it was never the point of the sentence | this PR |
+| 66 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | "byte-for-byte what it was" excluded everything the *test suite* writes, and `git status` was the wrong check for it | **Fixed** — the guarantee is scoped to bumpsmith's own edits, and the artefacts are named | this PR |
+| 67 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | "a crash" reverts the tree — a `finally` block cannot survive `SIGKILL` | **Fixed** — narrowed to stack unwinding, in `apply.py` and the README | this PR |
+| 68 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | The README said the parser dispatches on the return code *not* the text; it uses both | **Fixed** — and `failures.py`'s own module docstring said it first | this PR |
+| 69 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | The completeness test searched the whole README, so it did not pin the table it advertised | **Fixed** — scoped to the table and the list, plus a stray-row check | this PR |
+| 70 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | The fix for 66 named an artefact the run had not created — leftovers from the previous day, read as output — *self-found by the cold clone* | **Fixed** — the count is from a clean reproduction | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -1300,6 +1307,212 @@ contains a sentence that will not survive being checked.
 
 The boundary is now pinned from both sides: a test that `globals()` alone does
 not stop the rewrite, and one that `exec` still does.
+
+---
+
+## 64–65 · The same stale count, in the two places finding 60 did not look
+
+Finding 60 was "the README says ten ways for the loop to end and there are
+eleven". It was fixed by correcting the README. Writing the README's first full
+draft turned up the same drift twice more, both older than 60 and neither found
+by it:
+
+- `migrate.py`'s own module docstring: *"it names which of nine specific things
+  happened"*. `Stop` has eleven members, ten of which are not `GREEN`, so the
+  sentence was right when it was written and stale from the moment `WRONG_PLACE`
+  landed in #16 — the same commit that made 60 stale, the same day.
+- `proofs/README.md`: *"`tests/` does that, 448 times"*. It was 448 when the file
+  was written in #17 and 453 by the time #17 merged, because the fixes Qodo
+  caused brought five tests with them. **The number went stale inside the pull
+  request that introduced it.**
+
+The interesting part is not either defect, which is trivial. It is that fixing 60
+did not find them. A finding was closed by correcting the one instance in front
+of it, and two siblings a `grep` away stayed. **Fixing an instance is not fixing
+a class**, and the log now says so in the one place a reader would check whether
+it had been.
+
+### The fix is to state fewer numbers, not to state them more carefully
+
+Both are gone rather than corrected. `migrate.py` sat three lines above the enum
+that *is* the count, and `proofs/README.md`'s sentence — "they do not test the
+package, `tests/` does that, offline" — carries its whole meaning without a
+figure in the middle of it. A number repeated beside its own source is a second
+copy of a fact, and the second copy is the one that rots.
+
+Where the number does earn its place, it is now pinned instead of trusted. The
+README's count of `Stop` reasons is reader-facing and worth being concrete about,
+so `tests/test_docs.py` asserts that the spelled-out number equals `len(Stop)`,
+that every `Stop` member appears in the README's table, and that every `Outcome`
+member appears in the list beside it. Adding a member without documenting it now
+fails the suite, which is the moment the drift costs nothing to fix.
+
+That is this log's recurring shape 6 — *prose stating a property is not the
+property* — applied to the prose that had just demonstrated it three times.
+
+**The test caught something on its first run: itself.** The pattern matched a
+literal space, the README is hard-wrapped, and the sentence it was looking for
+straddles a line ending. It reported the claim as missing rather than as wrong.
+Fixed with `\s+`, and noted in the test, because a doc test that silently stops
+matching would be worse than no doc test at all — it would pass forever.
+
+---
+
+## 66–69 · Four from Qodo on the README, all accepted
+
+A documentation pull request, and the review found four real defects in it. Three
+are claims about the *system* that the README got wrong; the fourth is in the
+test written to stop exactly that.
+
+### 66 · The guarantee stopped at bumpsmith's edits; the sentence did not
+
+The README opened with "afterwards a repository is in one of exactly two states:
+changed with a green run behind it, or byte-for-byte what it was. **There is no
+third state.**" `LocalRunner` has no isolation and runs pytest directly in the
+checkout, and `attempt()` tracks and restores only the `Edit` objects it planned.
+Everything the suite writes is outside the transaction.
+
+Checked rather than conceded, on the fixture the README quotes:
+
+```
+git diff:      []          <- every one of the 25 rewritten sites is back
+git status:    []          <- which is what the README offered as proof
+git status --ignored:  8 entries — .pytest_cache/ and 7 __pycache__/
+```
+
+**The verification was the defect.** `git status` answers "did any *tracked*
+file change". It was published as proof of "byte-for-byte what it was", and the
+fixture gitignores both artefact directories, so the check was structurally
+incapable of seeing the thing it was cited for. Recurring shape 3 — an answer
+good enough for one question reused to settle a stronger one — and shape 9, in
+that "I did not look there" was reported as "there is nothing there".
+
+Qodo also names the second exit from the two-state claim, and this one is by
+design: if something modifies a file after bumpsmith edited it, `_restore` leaves
+that file alone and raises `RevertError`, because overwriting somebody's work to
+tidy up is worse than the mess. The tree is then in a state nobody chose. The
+design is right and the README's description of it was wrong — so the limits
+section now names it, along with its `STOP:` on stderr and exit code 2.
+
+Fixed by scoping the claim to what is actually guaranteed, and by replacing the
+proof command with `git diff` plus `git status --ignored`, which shows the
+artefacts instead of hiding them.
+
+### 67 and 68 · The top of the file drifted from the middle of it, and the top is what got quoted
+
+These two arrived separately and share one root cause, which is the useful part.
+
+**67:** `apply.py`'s module docstring said "an exception, **a crash**, or simply
+forgetting all land in the same place". Reverting is a `finally` block, which
+covers anything that unwinds the stack and nothing else. `SIGKILL`, `os._exit`, a
+segfault in an extension module or a power cut all leave the edits on disk, and
+there is no journal to recover from. Sixty lines below, `attempt`'s own docstring
+had it right: "an early return, an exception, a forgotten call."
+
+**68:** `failures.py`'s module docstring said "**Dispatch on the return code, not
+on the text.** pytest emits three materially different layouts and the return
+code names which one you have before any parsing begins." `RunShape.detect()`
+tests `_COLLECT_BANNER.search(output)` for rc 2 and `_CONFTEST_HEADER in output`
+for rc 4, and there are six layouts plus `UNKNOWN`. Sixty lines below, `RunShape`
+had it right: "It is not, however, sufficient on its own."
+
+So in both files the **summary at the top overstates, the precise statement lower
+down corrects it, and nothing reconciles them.** Writing the README I quoted the
+summaries, because a summary is what a summary is for. The result was a landing
+page describing the opposite of the fail-closed behaviour actually implemented,
+in a repository whose entire pitch is that its claims are checked.
+
+That is a shape this log had not named, and it is worth naming: **a file's
+opening paragraph is documentation of intent, and it decays differently from the
+docstring next to the code.** The code keeps the docstring beside it honest.
+Nothing keeps the overview honest, and the overview is the part that gets copied.
+
+Both module docstrings are corrected, and both now say why the imprecise version
+was wrong rather than quietly reading better.
+
+### 69 · The test that was supposed to stop this did not pin what it claimed
+
+`test_readme_documents_every_stop_reason` searched the entire README for
+`` `NAME` ``. A member deleted from the table but mentioned in any other
+paragraph would pass. The invariant advertised in its own docstring — and in
+findings 64–65 above — is *table* completeness, and that is not what it measured.
+
+**It did not reproduce today**, and saying so precisely matters: all fifteen
+members occur exactly once, so every removal is currently caught. That is an
+accident of the present text, not a property. Writing `` `MIGRATED` `` in one
+example would silently unpin it.
+
+Settled by construction rather than by argument. A README was doctored to delete
+the `GREEN` row while mentioning `` `GREEN` `` in unrelated prose:
+
+```
+old condition (`GREEN` appears in README.md)  ->  PASSES — missed it
+new scoped check (first cell of a table row)  ->  FAILS  — caught it
+```
+
+Then all fifteen members were removed from their row or list entry one at a time,
+and all fifteen were caught. A stray-row check was added for the other direction:
+a renamed member leaves its old row behind, and a reader looking up the name the
+code returns finds nothing while the table still looks full.
+
+**The verification had the same defect as the code.** Finding 69 exists because
+the test generalised from a substring search; it survived my own review because
+*I* generalised from breaking one member and one outcome. Two samples, fifteen
+members, and a conclusion stated about all of them. The sweep above is what
+establishes the property, and it is the reason the fix is trustworthy where the
+original was only plausible.
+
+### The boundary is now a test, because the prose has failed three times
+
+Finding 66 is the third time the byte-for-byte claim has been wrong: **#9** for
+CRLF, symlinks and partial rollback; **#16** for a revert that overwrote
+somebody else's work; **#18** for the artefacts a test suite writes. Qodo cited
+the first two itself, as precedent, which is a fairer summary of this repository
+than anything in this log: *the guarantee keeps being right and the sentence
+describing it keeps being wrong.*
+
+Correcting the sentence a third time would leave the fourth available. So the
+boundary is pinned: `test_what_the_suite_writes_is_outside_the_transaction`
+drives the loop with a runner that writes `.pytest_cache/` and a `__pycache__/`
+the way pytest does, then asserts both halves at once — every edit taken back
+byte for byte, **and** every artefact still there, because it was never ours to
+take. Verified by breaking it three ways: stop the runner littering, delete the
+artefacts after the run, and leave the edit applied. All three fail.
+
+`apply.py`'s own guarantee was already covered well — CRLF, BOM, codec aliases,
+symlinks, permissions, partial-write rollback, and a whole-tree byte snapshot at
+the loop level across ten tests. What nothing covered was the *edge* of it. A
+guarantee with a well-tested middle and an undescribed edge is exactly the shape
+that produces three findings in three pull requests.
+
+---
+
+## 70 · The fix for 66 made the same mistake 66 was about
+
+Caught by the cold clone, running the README's own instructions from a fresh
+checkout with a fresh fixture, which is the only reason it was caught at all.
+
+The corrected paragraph said the run "left `.pytest_cache/` and seven
+`__pycache__/` directories behind". Seven `__pycache__/` is right. `.pytest_cache/`
+was not created by that run at all — the directory I read it from was dated
+**2026-08-25 01:31**, from the previous day's manual pytest runs, and today's loop
+never touched it. In a clean reproduction only the seven appear.
+
+So the fix for finding 66 committed finding 66's error a second time, one
+paragraph later. 66 was "a check that could not see what it was cited for";
+this is "a listing that contained more than the run put there, read as though
+the run put it there". Both are residue mistaken for evidence, and both were
+produced by looking at a working directory that had been used for something else
+first.
+
+The general lesson is not "check harder". It is that **a development directory is
+not an instrument.** It accumulates, and everything measured in one carries
+whatever else has happened there. The cold clone exists precisely because it
+cannot accumulate, and it earned its place here: the whole of #18 passed every
+local check, CI, and a Qodo re-review, and this survived all of them.
+
+Corrected to what reproduces, with the reproduction conditions stated in the
+README rather than assumed.
 
 ---
 
