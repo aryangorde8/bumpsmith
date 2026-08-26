@@ -597,6 +597,65 @@ def test_a_suite_that_edits_the_tree_does_not_get_its_work_thrown_away(
     assert source.read_text(encoding="utf-8") == theirs
 
 
+class _Littering:
+    """A runner that writes files of its own, the way a real test suite does.
+
+    Not a contrivance either: pytest creates ``.pytest_cache/`` at the rootdir
+    and a ``__pycache__/`` beside every module it imports, and a suite with
+    fixtures may write a great deal more. ``LocalRunner`` executes in the
+    checkout with no isolation, so all of it lands in the tree being migrated.
+    """
+
+    def __init__(self, root: Path, *answers: Completed) -> None:
+        self.root = root
+        self.answers = list(answers)
+
+    def run(self, command: Sequence[str], cwd: Path) -> Completed:  # noqa: ARG002
+        cache = self.root / ".pytest_cache"
+        cache.mkdir(exist_ok=True)
+        (cache / "CACHEDIR.TAG").write_text("Signature: pytest\n", encoding="utf-8")
+        pycache = self.root / "mypkg" / "__pycache__"
+        pycache.mkdir(exist_ok=True)
+        (pycache / "__init__.cpython-313.pyc").write_bytes(b"\xcb\r\r\n")
+        return self.answers.pop(0)
+
+
+def test_what_the_suite_writes_is_outside_the_transaction(tmp_path: Path) -> None:
+    """The guarantee is about bumpsmith's edits. It is not about the directory.
+
+    ``attempt`` restores the paths it planned and nothing else, so a reverted
+    run leaves the suite's own artefacts exactly where the suite put them. That
+    is the intended boundary rather than a leak -- restoring files this process
+    never wrote would be a tool deleting somebody's test output -- but it is a
+    boundary, and it is the one the README is obliged to describe accurately.
+
+    Pinned here because describing it in prose is what kept going wrong. The
+    byte-for-byte claim has been false three times now: in #9 for CRLF,
+    symlinks and partial rollback, in #16 for a revert that overwrote somebody
+    else's work, and in #18 for exactly this -- the artefacts were invisible to
+    `git status` because the fixture gitignores them, so the check cited as
+    proof could not see what it was cited for.
+
+    If tree-wide snapshotting is ever added, this test fails, and whoever adds
+    it has to change the claim in the same commit.
+    """
+    root = _repo(tmp_path)
+    source = root / "mypkg" / "__init__.py"
+    before = source.read_bytes()
+    runner = _Littering(root, _red(REGEX_BROKEN), _red(UNCLASSIFIABLE))
+
+    migration = migrate(root, runner, SUITE)
+
+    assert migration.outcome is Outcome.REVERTED
+    # Every edit bumpsmith made: taken back, byte for byte.
+    assert source.read_bytes() == before
+    # Everything the suite wrote: still there, because it was never ours to take.
+    assert (root / ".pytest_cache" / "CACHEDIR.TAG").read_text(encoding="utf-8") == (
+        "Signature: pytest\n"
+    )
+    assert (root / "mypkg" / "__pycache__" / "__init__.cpython-313.pyc").is_file()
+
+
 # --------------------------------------------------------------------------
 # Complete is not the same question as green
 # --------------------------------------------------------------------------

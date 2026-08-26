@@ -1461,6 +1461,29 @@ members, and a conclusion stated about all of them. The sweep above is what
 establishes the property, and it is the reason the fix is trustworthy where the
 original was only plausible.
 
+### The boundary is now a test, because the prose has failed three times
+
+Finding 66 is the third time the byte-for-byte claim has been wrong: **#9** for
+CRLF, symlinks and partial rollback; **#16** for a revert that overwrote
+somebody else's work; **#18** for the artefacts a test suite writes. Qodo cited
+the first two itself, as precedent, which is a fairer summary of this repository
+than anything in this log: *the guarantee keeps being right and the sentence
+describing it keeps being wrong.*
+
+Correcting the sentence a third time would leave the fourth available. So the
+boundary is pinned: `test_what_the_suite_writes_is_outside_the_transaction`
+drives the loop with a runner that writes `.pytest_cache/` and a `__pycache__/`
+the way pytest does, then asserts both halves at once — every edit taken back
+byte for byte, **and** every artefact still there, because it was never ours to
+take. Verified by breaking it three ways: stop the runner littering, delete the
+artefacts after the run, and leave the edit applied. All three fail.
+
+`apply.py`'s own guarantee was already covered well — CRLF, BOM, codec aliases,
+symlinks, permissions, partial-write rollback, and a whole-tree byte snapshot at
+the loop level across ten tests. What nothing covered was the *edge* of it. A
+guarantee with a well-tested middle and an undescribed edge is exactly the shape
+that produces three findings in three pull requests.
+
 ---
 
 ---
