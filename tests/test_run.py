@@ -14,7 +14,10 @@ that the argument was passed, not that a hung command is survivable.
 
 import dataclasses
 import json
+import os
+import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -401,3 +404,171 @@ def test_the_recorded_result_survives_the_json_round_trip() -> None:
     # The transport hands back text, not an object; both doors reach the same place.
     as_text = json.dumps(_recorded()["result"])
     assert read_exec_json(as_text).returncode == 2
+
+
+# --------------------------------------------------------------------------
+# What a timeout leaves behind
+# --------------------------------------------------------------------------
+
+
+def _still_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:  # pragma: no cover - exists, not ours
+        return True
+    return True
+
+
+def _wait_until_gone(pid: int, timeout: float = 10.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _still_alive(pid):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX")
+def test_a_timeout_kills_what_the_command_started(tmp_path: Path) -> None:
+    """The finding: a suite is not one process.
+
+    pytest-xdist workers, a fixture that starts a server, anything using
+    `subprocess`. Killing only the parent leaves those running against the same
+    checkout `bumpsmith.apply` is about to revert.
+    """
+    pidfile = tmp_path / "child.pid"
+    script = (
+        "import os, subprocess, sys, time\n"
+        f"child = subprocess.Popen([{PY!r}, '-c', 'import time; time.sleep(60)'])\n"
+        f"open({str(pidfile)!r}, 'w').write(str(child.pid))\n"
+        "time.sleep(60)\n"
+    )
+    with pytest.raises(TimedOutError):
+        LocalRunner(timeout=3.0).run([PY, "-c", script], tmp_path)
+
+    assert pidfile.exists(), "the grandchild never started; the test proves nothing"
+    child_pid = int(pidfile.read_text())
+    assert _wait_until_gone(child_pid), f"pid {child_pid} outlived the timeout"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX")
+def test_the_command_runs_in_its_own_process_group(tmp_path: Path) -> None:
+    # The mechanism the test above depends on, asserted directly so a
+    # regression names itself instead of showing up as a flaky orphan.
+    result = LocalRunner().run([PY, "-c", "import os; print(os.getpgrp())"], tmp_path)
+    assert result.output.strip() != str(os.getpgrp())
+
+
+# --------------------------------------------------------------------------
+# Output that is not text
+# --------------------------------------------------------------------------
+
+
+def test_output_that_is_not_utf8_is_still_a_result(tmp_path: Path) -> None:
+    """A project whose output is not valid UTF-8 is an ordinary thing to migrate.
+
+    It must not raise past a contract promising a `Completed` or a `RunError`.
+    """
+    script = "import sys; sys.stdout.buffer.write(b'before \\xff\\xfe after'); sys.exit(1)"
+    result = LocalRunner().run([PY, "-c", script], tmp_path)
+    assert result.returncode == 1
+    assert "before" in result.output
+    assert "after" in result.output
+
+
+def test_undecodable_bytes_do_not_cost_the_surrounding_output(tmp_path: Path) -> None:
+    # `replace` rather than `strict`: losing a byte to U+FFFD costs a character
+    # in a diagnostic, and raising costs the run.
+    script = (
+        "import sys\n"
+        "sys.stdout.buffer.write(b'E   assert \\xff failed\\n')\n"
+        "sys.stdout.buffer.write(b'1 failed\\n')\n"
+    )
+    output = LocalRunner().run([PY, "-c", script], tmp_path).output
+    assert "assert" in output
+    assert "1 failed" in output
+
+
+def test_output_is_decoded_the_same_way_regardless_of_locale(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The encoding is pinned, not taken from the environment, so the same suite
+    # reads the same way here and in the sandbox.
+    monkeypatch.setenv("LC_ALL", "C")
+    monkeypatch.setenv("LANG", "C")
+    script = "import sys; sys.stdout.buffer.write('café ✓'.encode('utf-8'))"
+    assert "café ✓" in LocalRunner().run([PY, "-c", script], tmp_path).output
+
+
+# --------------------------------------------------------------------------
+# Who gets to say whether the command started
+# --------------------------------------------------------------------------
+
+
+def test_a_transport_timeout_stays_a_timeout(tmp_path: Path) -> None:
+    """The finding: only the transport knows whether the command started.
+
+    Rewriting its `TimedOutError` as `NeverRanError` would state the opposite of
+    what happened -- and `NeverRanError` promises the working tree is untouched,
+    which after a sandbox exec that ran for a minute is simply false.
+    """
+    exec_ = _Exec(raises=TimedOutError("exec_timeout_ms elapsed"))
+    with pytest.raises(TimedOutError):
+        SandboxRunner(exec_).run([PY, "-m", "pytest"], tmp_path)
+
+
+def test_a_transport_that_says_it_never_ran_is_believed(tmp_path: Path) -> None:
+    exec_ = _Exec(raises=NeverRanError("no session"))
+    with pytest.raises(NeverRanError, match="no session"):
+        SandboxRunner(exec_).run([PY, "-m", "pytest"], tmp_path)
+
+
+def test_an_unclassified_transport_failure_is_read_as_never_ran(tmp_path: Path) -> None:
+    # The safe reading of "I do not know" is that it did not start.
+    exec_ = _Exec(raises=RuntimeError("socket closed"))
+    with pytest.raises(NeverRanError, match="could not be reached"):
+        SandboxRunner(exec_).run([PY, "-m", "pytest"], tmp_path)
+
+
+def test_a_transport_timeout_is_not_reported_as_never_ran(tmp_path: Path) -> None:
+    exec_ = _Exec(raises=TimedOutError("gave up mid-flight"))
+    with pytest.raises(RunError) as caught:
+        SandboxRunner(exec_).run([PY, "-m", "pytest"], tmp_path)
+    assert not isinstance(caught.value, NeverRanError)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX")
+def test_cleanup_never_signals_the_callers_own_group(tmp_path: Path) -> None:
+    """Measured, not theorised.
+
+    With `start_new_session` off the child stays in the runner's group, and
+    signalling that group kills the caller -- pytest included. The run ends with
+    no output at all, which is why this is asserted directly rather than left to
+    the timeout test to notice.
+    """
+    from bumpsmith.run import _end_process_tree
+
+    process = subprocess.Popen(  # noqa: S603
+        [PY, "-c", "import time; time.sleep(30)"],
+        cwd=tmp_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=False,  # deliberately: the unsafe arrangement
+    )
+    assert os.getpgid(process.pid) == os.getpgrp(), "setup is wrong; no risk to detect"
+    try:
+        _end_process_tree(process)
+        # Reaching this line at all is half the assertion: the caller is alive.
+        # The other half is that the child still died -- degrading to killing one
+        # process is the point, refusing to kill anything would not be.
+        #
+        # `wait` rather than a liveness poll: a killed child is a zombie until
+        # someone reaps it, and a zombie answers `kill(pid, 0)` exactly as a
+        # running process does.
+        assert process.wait(timeout=10) < 0, "the child was not killed by a signal"
+    finally:
+        if process.poll() is None:  # pragma: no cover - cleanup safety
+            process.kill()
+            process.wait(timeout=10)
