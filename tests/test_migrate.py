@@ -24,15 +24,18 @@ from pathlib import Path
 import pytest
 
 from bumpsmith import migrate as migrate_module
+from bumpsmith.apply import RevertError
 from bumpsmith.failures import BreakClass, Failure, RunShape, parse_failures
 from bumpsmith.migrate import (
     DEFAULT_STEP_LIMIT,
+    SAME_TREE,
     Migration,
     Outcome,
     Step,
     Stop,
     migrate,
 )
+from bumpsmith.rewrite import Plan, Skipped
 from bumpsmith.run import Completed, NeverRanError, TimedOutError
 
 DATA = Path(__file__).parent / "data"
@@ -139,6 +142,11 @@ GREEN = Completed(returncode=0, output="2 passed in 0.10s\n", where="local")
 
 def _red(output: str, returncode: int = 2) -> Completed:
     return Completed(returncode=returncode, output=output, where="local")
+
+
+def _elsewhere(output: str, returncode: int = 2) -> Completed:
+    """A run that happened somewhere other than the tree being edited."""
+    return Completed(returncode=returncode, output=output, where="sandbox")
 
 
 def _parses_nothing(*_args: object, **_kwargs: object) -> list[Failure]:
@@ -487,6 +495,147 @@ def test_an_empty_parse_stops_instead_of_raising(
     assert _snapshot(root) == before
 
 
+def test_a_suite_that_ran_somewhere_else_cannot_verify_anything(tmp_path: Path) -> None:
+    """`migrate` is public and takes any `Runner`; the CLI's refusal is not a guard.
+
+    A `SandboxRunner` executes in the harness's sandbox, which is a different
+    filesystem. A caller holding one reaches this function without going near
+    the command line, and a zero from it would keep edits the suite never saw.
+    """
+    root = _repo(tmp_path)
+    before = _snapshot(root)
+
+    result = migrate(root, _Scripted(_elsewhere(REGEX_BROKEN)), SUITE)
+
+    assert result.stop is Stop.WRONG_PLACE
+    assert result.outcome is Outcome.UNTOUCHED
+    assert "not where the edits are written" in result.reason
+    assert _snapshot(root) == before
+
+
+def test_a_green_run_from_somewhere_else_never_keeps_the_edits(tmp_path: Path) -> None:
+    """The dangerous shape: local while it is red, elsewhere the moment it is green.
+
+    This is the one the check exists for. A runner that reported honestly until
+    the answer became convenient would, without it, get two edits kept on the
+    strength of a suite in another filesystem.
+    """
+    root = _repo(tmp_path)
+    before = _snapshot(root)
+    runner = _Scripted(
+        _red(REGEX_BROKEN),
+        Completed(returncode=0, output="1 passed\n", where="sandbox"),
+    )
+
+    result = migrate(root, runner, SUITE)
+
+    assert result.stop is Stop.WRONG_PLACE
+    assert result.outcome is Outcome.REVERTED
+    assert not result.kept
+    assert _snapshot(root) == before
+
+
+def test_the_check_is_on_what_the_run_reports_not_on_the_runner() -> None:
+    """A wrapper cannot get past it, because it is not looking at types.
+
+    `SAME_TREE` holds values of `Completed.where`, not runner classes. When
+    edits can be carried into a sandbox, this set is the line that changes.
+    """
+    assert frozenset({"local"}) == SAME_TREE
+
+
+class _Meddling:
+    """A runner that changes a file while the suite is supposedly running.
+
+    Not contrived. The loop holds every transaction open across every later run
+    of the suite, so "between apply and revert" is minutes of a test run against
+    the same checkout -- and anything writing to it in that window (a developer,
+    a formatter on save, a fixture with a bad path) lands exactly here.
+    """
+
+    def __init__(self, path: Path, text: str, *answers: Completed, meddle_on: int = 2) -> None:
+        self.path = path
+        self.text = text
+        self.answers = list(answers)
+        self.meddle_on = meddle_on
+        self.calls = 0
+
+    def run(self, command: Sequence[str], cwd: Path) -> Completed:  # noqa: ARG002
+        self.calls += 1
+        if self.calls == self.meddle_on:
+            self.path.write_text(self.text, encoding="utf-8")
+        return self.answers.pop(0)
+
+
+def test_a_suite_that_edits_the_tree_does_not_get_its_work_thrown_away(
+    tmp_path: Path,
+) -> None:
+    """The revert refuses rather than overwriting, and the loop lets that out.
+
+    `RevertError` is the one failure `migrate` does not turn into a stop reason.
+    A caller told "reverted" would carry on against a checkout it no longer
+    understands; this has to reach them as an exception.
+    """
+    root = _repo(tmp_path)
+    source = root / "mypkg" / "__init__.py"
+    theirs = "# somebody else was editing this\n"
+    runner = _Meddling(source, theirs, _red(REGEX_BROKEN), _red(UNCLASSIFIABLE))
+
+    with pytest.raises(RevertError, match="changed after this edit was applied"):
+        migrate(root, runner, SUITE)
+
+    assert source.read_text(encoding="utf-8") == theirs
+
+
+# --------------------------------------------------------------------------
+# Complete is not the same question as green
+# --------------------------------------------------------------------------
+
+
+def test_a_migration_that_could_not_read_a_file_says_so(tmp_path: Path) -> None:
+    """A green suite is evidence about the tests that exist, not about the tree."""
+    root = _repo(tmp_path)
+    (root / "mypkg" / "unparseable.py").write_text("def (\n", encoding="utf-8")
+
+    result = migrate(root, _Scripted(_red(REGEX_BROKEN), GREEN), SUITE)
+
+    assert result.outcome is Outcome.MIGRATED
+    assert result.kept
+    assert not result.complete, "one candidate file was never read"
+    assert result.as_dict()["complete"] is False
+
+
+def test_a_migration_that_read_everything_is_complete(tmp_path: Path) -> None:
+    result = migrate(_repo(tmp_path), _Scripted(_red(REGEX_BROKEN), GREEN), SUITE)
+
+    assert result.complete
+    assert result.as_dict()["complete"] is True
+
+
+def test_a_skipped_site_makes_a_migration_incomplete() -> None:
+    """The rewriter matching a site and then declining it is the other half.
+
+    Constructed rather than provoked: which sites the rewriter declines is
+    `bumpsmith.rewrite`'s business and is pinned there. What is under test here
+    is that `Migration` does not report a plan with a hole in it as finished.
+    """
+    step = Step(
+        number=1,
+        run=GREEN,
+        plan=Plan(
+            edits=(),
+            skipped=(Skipped(path=Path("a.py"), line=3, reason="shadowed by a parameter"),),
+            rewritten=0,
+        ),
+    )
+    assert not Migration(steps=(step,), stop=Stop.GREEN, reason="green").complete
+
+
+def test_a_migration_with_nothing_to_say_is_complete() -> None:
+    """No scans and no plans is not an incomplete migration; it is no migration."""
+    assert Migration(steps=(), stop=Stop.NOT_RUN, reason="nothing ran").complete
+
+
 # --------------------------------------------------------------------------
 # The property all of it exists for
 # --------------------------------------------------------------------------
@@ -531,6 +680,7 @@ CASES = (
         step_limit=1,
         expect=Outcome.REVERTED,
     ),
+    _Case(Stop.WRONG_PLACE, (_elsewhere(REGEX_BROKEN),)),
 )
 
 

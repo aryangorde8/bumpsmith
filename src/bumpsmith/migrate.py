@@ -37,8 +37,14 @@ execute against the same tree the edits are written to.** ``LocalRunner``
 satisfies it by construction. ``SandboxRunner`` does not -- the harness's
 sandbox is a different filesystem -- and a loop that edited here and verified
 there would keep a change on the strength of a suite that never saw it. That is
-the same defect :mod:`bumpsmith.run` exists to prevent, one level up, so the
-command-line entry point refuses the combination instead of offering it.
+the same defect :mod:`bumpsmith.run` exists to prevent, one level up.
+
+So it is checked rather than asked for. Every run reports where it happened, and
+a run from anywhere but this machine stops the loop at :attr:`Stop.WRONG_PLACE`
+before its result is used for anything. Saying the requirement in this paragraph
+was the first version, and a paragraph is not an enforcement: :func:`migrate` is
+public and takes the general protocol, so a caller holding a ``SandboxRunner``
+never passes the command line's refusal on the way in.
 """
 
 from collections.abc import Sequence
@@ -52,6 +58,24 @@ from bumpsmith.failures import Failure, parse_failures
 from bumpsmith.rewrite import Plan, UnsupportedRuleError, plan
 from bumpsmith.rules import Rule, RuleKind, ScanResult, find_matches, write_rule
 from bumpsmith.run import Completed, RunError, Runner, Where
+
+SAME_TREE: frozenset[Where] = frozenset({"local"})
+"""Where a run can happen and still be a run against the edited tree.
+
+Today that is one place. :class:`~bumpsmith.run.SandboxRunner` executes in the
+harness's sandbox, which does not share a filesystem with this process, and the
+harness offers no way to put a file into it -- so the edits cannot be carried
+across and a suite there would not be testing them.
+
+This is the enforcement, and it is here rather than in the command line because
+:func:`migrate` is public and takes the general ``Runner`` protocol. A caller
+holding a ``SandboxRunner`` reaches this function without going near the CLI's
+refusal. It tests the fact each run reports rather than the type of the runner,
+so a wrapper cannot slip past it and a runner nobody has written yet is covered.
+
+When edits *can* be carried into a sandbox, this is the line that has to change,
+deliberately, as part of that work.
+"""
 
 _WHERE: dict[Where, str] = {"local": "on this machine", "sandbox": "in the sandbox"}
 """How each place a suite can run reads in a sentence.
@@ -120,6 +144,16 @@ class Stop(Enum):
 
     STEP_LIMIT = "step-limit"
     """The cap was reached and the suite was still red."""
+
+    WRONG_PLACE = "wrong-place"
+    """The suite ran somewhere other than the tree being edited.
+
+    The loop writes its edits to ``root`` on this machine, so a run that
+    happened anywhere else did not observe them, and a zero from it says
+    nothing about the edits. Refused rather than trusted, because the failure it
+    would otherwise produce is the worst one available: edits kept on the
+    strength of a suite that never saw them.
+    """
 
 
 class Outcome(Enum):
@@ -221,6 +255,29 @@ class Migration:
         return Outcome.REVERTED if self.applied else Outcome.UNTOUCHED
 
     @property
+    def complete(self) -> bool:
+        """Whether every site the rules matched was accounted for.
+
+        False when a candidate file could not be read or parsed, or when the
+        rewriter matched a site and then declined to change it. Either way some
+        v1 code the rule named is still there.
+
+        Kept separate from :attr:`outcome` rather than folded into it, and the
+        loop does *not* refuse to apply an incomplete plan. A suite that goes
+        green is real evidence about the tests that exist, and refusing to help
+        a repository because one vendored file will not parse would be worse
+        than helping it and saying so. But "the suite passes" and "the migration
+        is finished" are different claims, and a report that ran them together
+        would let the first quietly stand in for the second.
+        """
+        for step in self.steps:
+            if step.scan is not None and not step.scan.is_complete:
+                return False
+            if step.plan is not None and not step.plan.is_complete:
+                return False
+        return True
+
+    @property
     def kept(self) -> bool:
         """Whether the edits are still on disk.
 
@@ -238,6 +295,7 @@ class Migration:
             "reason": self.reason,
             "applied": self.applied,
             "kept": self.kept,
+            "complete": self.complete,
             "steps": [step.as_dict() for step in self.steps],
         }
 
@@ -359,6 +417,14 @@ def _peel(
             return _Stopped(Stop.NOT_RUN, f"the suite could not be run: {exc}")
 
         number = len(steps) + 1
+        if result.where not in SAME_TREE:
+            steps.append(Step(number=number, run=result))
+            return _Stopped(
+                Stop.WRONG_PLACE,
+                f"the suite ran {_WHERE.get(result.where, result.where)}, which is not "
+                f"where the edits are written; a result from there cannot verify them",
+            )
+
         if result.returncode == 0:
             steps.append(Step(number=number, run=result))
             return _Stopped(Stop.GREEN, f"the suite passed {_WHERE[result.where]}")

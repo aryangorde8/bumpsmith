@@ -188,7 +188,20 @@ def _verify(edits: Sequence[Edit], root: Path) -> None:
 
 
 def _restore(applied: Sequence[Edit]) -> None:
-    """Put every applied edit's original contents back.
+    """Put every applied edit's original contents back, unless something else got there first.
+
+    Every file is checked before it is written. :func:`_apply` re-reads
+    immediately before writing so that a change made between the check and the
+    write is refused rather than overwritten, and this is the same care applied
+    on the way out: a file that no longer holds what this transaction put there
+    has been changed by something else, and that change is not ours to discard.
+    Reverting is supposed to cost nothing, and destroying somebody's work is not
+    nothing.
+
+    The window is not theoretical. :mod:`bumpsmith.migrate` holds a
+    transaction open across every later run of the test suite, so "between apply
+    and revert" is minutes of a suite executing against the same checkout, not
+    the few milliseconds a ``with`` block suggests.
 
     Every file is attempted even after one fails, because stopping at the first
     failure would leave more of the tree changed than continuing does.
@@ -196,13 +209,26 @@ def _restore(applied: Sequence[Edit]) -> None:
     unrestored: list[str] = []
     for edit in applied:
         try:
+            current = read_source(edit.path)
+        except (OSError, UnicodeDecodeError, SyntaxError, ValueError) as exc:
+            unrestored.append(f"{edit.path}: could not be read to check it before restoring: {exc}")
+            continue
+
+        if current.text != edit.after or _canonical(current.encoding) != _canonical(edit.encoding):
+            unrestored.append(
+                f"{edit.path}: changed after this edit was applied, so it was left alone. "
+                f"It holds somebody else's work and this edit is still in it."
+            )
+            continue
+
+        try:
             _write(edit.path, edit.before, edit.encoding)
         except _WRITE_FAILED as exc:
-            unrestored.append(f"{edit.path}: {exc}")
+            unrestored.append(f"{edit.path}: could not be written: {exc}")
     if unrestored:
         raise RevertError(
             "Applied edits could not be taken back, and the working tree is in a "
-            "state nobody chose. Restore these by hand or from version control:\n"
+            "state nobody chose. Deal with these by hand or from version control:\n"
             + "\n".join(f"  {item}" for item in unrestored)
         )
 

@@ -23,11 +23,14 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from bumpsmith.failures import parse_failures
+from bumpsmith.failures import BreakClass, parse_failures
 from bumpsmith.run import RunError, SandboxRunner
 from bumpsmith.trueforge import Client, SandboxExec, TransportError
 
 DEFAULT_MODEL = "bedrock-mantle/qwen-3-coder-480b"
+
+EXPECTED = BreakClass.REGEX_KEYWORD
+"""The break this proof builds and therefore the only one it may end green on."""
 
 WORKSPACE = "/tmp/bumpsmith-proof"  # noqa: S108 -- a path in the sandbox, not on this machine
 
@@ -91,6 +94,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         setup = runner.run(["sh", "-c", SETUP], Path("/tmp"))  # noqa: S108
         print(f"  setup rc={setup.returncode}  {setup.output.strip()[-60:]}", flush=True)
 
+        # A command that ran and failed is a `Completed`, not a `RunError` --
+        # that distinction is the whole of `bumpsmith.run` and it is correct.
+        # It does mean a failed `pip install` arrives here looking like an
+        # ordinary result, and carrying on from one would run pytest against a
+        # project that was never built. The nonzero pytest that followed would
+        # then be recorded as proof of a pydantic break it had nothing to do
+        # with.
+        if setup.returncode != 0:
+            print(
+                f"\nsetup exited {setup.returncode}, so the project was never built and "
+                f"anything pytest says next is about something else:\n{setup.output[-800:]}",
+                file=sys.stderr,
+            )
+            return 1
+
         print("running the suite in the sandbox...", flush=True)
         result = runner.run(["python", "-m", "pytest", "-q"], Path(WORKSPACE))
     except (RunError, TransportError) as exc:
@@ -130,9 +148,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         encoding="utf-8",
     )
     print(f"\nevidence written to {args.out}", flush=True)
-    # The suite is meant to fail: a green run would mean the break never
-    # happened and the proof proved nothing.
-    return 0 if result.returncode != 0 and failures else 1
+
+    # The suite is meant to fail, and to fail of *this*. A green run would mean
+    # the break never happened; a red run of some other colour would mean
+    # something else went wrong and got recorded as a pydantic migration
+    # failure. "Nonzero and something parsed" was the first version of this
+    # check and it accepted both.
+    if result.returncode == 0:
+        print("\nthe suite passed, so the break never happened.", file=sys.stderr)
+        return 1
+    if not any(failure.break_class is EXPECTED for failure in failures):
+        got = ", ".join(f.break_class.name for f in failures) or "nothing"
+        print(
+            f"\nthe suite failed, but of {got} rather than {EXPECTED.name}. "
+            f"That is not the break this proof is about.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

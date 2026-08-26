@@ -22,7 +22,7 @@ E   For further information visit https://errors.pydantic.dev/2.12/u/removed-kwa
 =========================== short test summary info ============================
 ERROR test_app.py - pydantic.errors.PydanticUserError: `regex` is removed. us...
 !!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
-1 error in 0.13s
+1 error in 0.14s
 
 bumpsmith read 1 failure(s) out of it:
   [REGEX_KEYWORD] `regex` is removed. use `pattern` instead

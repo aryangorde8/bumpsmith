@@ -14,6 +14,7 @@ is parsed and refused, with the reason, because the refusal is the useful part
 
 import argparse
 import json
+import math
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -194,18 +195,43 @@ def report(migration: Migration) -> str:
         lines.append("")
     lines.append(_HEADLINE[migration.outcome])
     lines.append(f"  {migration.reason}")
+    if not migration.complete:
+        lines.append(
+            "  NOT COMPLETE -- a file could not be read, or a matched site was left "
+            "alone. Some of the v1 code these rules named is still there; the steps "
+            "above say which."
+        )
     if migration.applied:
         verb = "kept" if migration.kept else "taken back"
         lines.append(f"  {_count(migration.applied, 'change')}, {verb}")
     return "\n".join(lines)
 
 
+NO_RESULT = frozenset({Stop.NOT_RUN, Stop.WRONG_PLACE})
+"""The stops that produced no usable answer about the suite.
+
+Both exit ``2`` rather than ``1``. A missing interpreter and a failing test are
+not two grades of the same thing, and automation that cannot tell them apart
+retries the wrong one -- which is the same distinction :mod:`bumpsmith.run`
+exists to keep, carried out to the process's exit status.
+"""
+
+
+def _status(stop: Stop) -> int:
+    if stop is Stop.GREEN:
+        return 0
+    if stop in NO_RESULT:
+        return 2
+    return 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Command-line entry point. Returns the process exit code.
 
     ``0`` means the suite ends green, ``1`` that it does not, and ``2`` that the
-    run never got far enough to say. A red suite is a result; a repository that
-    does not exist is not.
+    run never got far enough to say -- a bad invocation, a suite that could not
+    be started, or one that ran somewhere it could not have been testing these
+    edits. A red suite is a result; a missing interpreter is not.
     """
     args = _build_parser().parse_args(argv)
 
@@ -218,8 +244,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.steps < 0:
         print(f"--steps cannot be negative; got {args.steps}.", file=sys.stderr)
         return 2
-    if args.timeout <= 0:
-        print(f"--timeout must be positive; got {args.timeout:g}.", file=sys.stderr)
+    # `float("inf")` and `float("nan")` both parse, and neither is <= 0. `inf`
+    # would silently remove the per-run cap this flag exists to set, and `nan`
+    # compares false against everything, so the timeout check inside
+    # `subprocess` never fires either. Both are invocation errors, not settings.
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        print(
+            f"--timeout must be a positive, finite number of seconds; got {args.timeout}.",
+            file=sys.stderr,
+        )
         return 2
 
     command = tuple(args.command) if args.command else DEFAULT_COMMAND
@@ -263,7 +296,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         print(f"\nreport written to {args.json_path}")
 
-    return 0 if migration.stop is Stop.GREEN else 1
+    return _status(migration.stop)
 
 
 if __name__ == "__main__":

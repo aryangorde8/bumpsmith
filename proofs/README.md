@@ -40,8 +40,11 @@ Needs a sandbox provider configured in the harness (this project uses Daytona).
 It builds a four-line project with a pydantic v1 `regex=` in it, runs pytest
 against it **inside the sandbox**, and hands the result to `bumpsmith.failures`.
 
-The suite is *meant* to fail: a green run would mean the break never happened and
-the proof proved nothing, so the script exits non-zero if that is what it sees.
+The suite is *meant* to fail, and to fail of the right thing. A green run would
+mean the break never happened; a red run of some other colour would mean
+something else went wrong and got filed as a pydantic migration failure. So the
+setup step has to succeed before pytest is run at all, and the parsed break has
+to be `REGEX_KEYWORD` — the one this script builds — or it exits non-zero.
 
 The setup step writes the project with `printf` because the harness offers a way
 to download a file from a sandbox and no way to put one in. That limitation is
@@ -81,6 +84,14 @@ harness pauses, `bumpsmith.gate` denies — unconditionally, because nobody is
 sitting there, and an unattended agent that treats silence as consent has no gate
 at all.
 
+Delivering the denial does not end the conversation — it starts the harness
+working again. So the script waits for the session to go quiet before it checks
+anything: two consecutive passes that add no turn and leave none in progress,
+bounded by `--settle`, with a message rather than a false clean bill if the bound
+is hit. On the recorded run the agent read the refusal, abandoned the tool, and
+called `ask_user_question` instead. Checking before that had happened would have
+been asking whether the tool had run *yet*.
+
 **The claim is about the effect, not the paperwork.** A refusal recorded next to
 an action that happened anyway is worse than no refusal, so the script finishes
 by asking whether the tool ran, twice and in two ways:
@@ -89,6 +100,10 @@ by asking whether the tool ran, twice and in two ways:
   so the server being questioned is provably the one the harness would have
   called, not another copy on a port the script guessed.
 - `pr-calls.log`, which the stub appends to on every invocation.
+
+Both signals are cumulative — the stub keeps every call it has ever served — so
+both are baselined before the session is created and compared afterwards. Nothing
+is deleted to tidy that up: clearing the evidence is how a real call gets lost.
 
 Being unable to ask is never reported as "it did not run". A proof that turned an
 unreachable server into a clean bill of health would pass most reliably when it
@@ -104,7 +119,7 @@ can check is worth what it costs to make.
 | file | what it shows |
 |---|---|
 | `sandbox.log` / `sandbox.json` | pytest ran in Daytona and came back `rc=2`; `bumpsmith.failures` read it as `[REGEX_KEYWORD] \`regex\` is removed. use \`pattern\` instead` |
-| `deny.log` / `deny.json` | a real `tool.approval_required` on thread `main`, denied through `TurnChannel`; the harness's own MCP server reports **0 tool calls served**, and `pr-calls.log` does not exist |
+| `deny.log` / `deny.json` | a real `tool.approval_required` on thread `main`, denied through `TurnChannel`; the session then run to rest — 2 turns, both `done` — and the harness's own MCP server reports **0 tool calls served during the run** |
 
 Neither file was edited. They contain no credentials. The repository and branch
 names in them are this project's own and are public — the same policy applied to

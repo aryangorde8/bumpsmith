@@ -100,6 +100,12 @@ exists to prevent, one level up. Carrying the edits across is the missing piece;
 until it is written and reviewed, a flag that quietly did it would be worse than
 no flag at all.
 
+The refusal is not only in the command. `migrate()` is a public function taking
+any `Runner`, so it checks where each run actually happened and stops before
+using a result that came from somewhere the edits are not — including a runner
+that reports honestly while the suite is red and conveniently the moment it goes
+green.
+
 ### Stopping before anything irreversible
 
 Nothing here opens a pull request yet. When it does, it goes through

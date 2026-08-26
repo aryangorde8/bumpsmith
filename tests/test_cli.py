@@ -118,9 +118,20 @@ def test_a_negative_step_count_is_refused(
     assert "cannot be negative" in capsys.readouterr().err
 
 
-def test_a_timeout_of_zero_is_refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert cli.main([str(tmp_path), "--timeout", "0"]) == 2
-    assert "must be positive" in capsys.readouterr().err
+@pytest.mark.parametrize("value", ["0", "-1", "inf", "-inf", "nan"])
+def test_a_timeout_that_is_not_a_number_of_seconds_is_refused(
+    value: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`inf` and `nan` both parse as floats and neither is <= 0.
+
+    `inf` would silently remove the per-run cap this flag exists to set, and
+    `nan` compares false against everything, so `subprocess`'s own timeout check
+    never fires either. A flag whose whole purpose is a bound has to refuse the
+    values that are not one.
+    """
+    # Written as one token: argparse reads a bare `-inf` as a flag, not a value.
+    assert cli.main([str(tmp_path), f"--timeout={value}"]) == 2
+    assert "positive, finite" in capsys.readouterr().err
 
 
 def test_the_sandbox_flag_is_refused_with_the_reason(
@@ -198,16 +209,47 @@ def test_a_green_repository_exits_zero_without_touching_it(
     assert "already green" in capsys.readouterr().out
 
 
-def test_a_suite_that_cannot_be_started_exits_one_rather_than_pretending(
+def test_a_suite_that_cannot_be_started_exits_two_rather_than_one(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Not a red suite. The report has to say which."""
+    """A missing interpreter is not a failing test, and the exit status has to agree.
+
+    This test previously asserted `1` and was named for it. The docstring on
+    `main` had said all along that `2` means the run never got far enough to
+    say, and `Stop.NOT_RUN` is exactly that -- so the test was pinning the
+    contradiction rather than the contract. Automation that cannot tell a red
+    suite from an absent one retries the wrong thing.
+    """
     code = cli.main([str(_repo(tmp_path)), "definitely-not-a-real-binary"])
 
-    assert code == 1
+    assert code == 2
     out = capsys.readouterr().out
     assert "untouched" in out
     assert "could not be run" in out
+
+
+def test_every_stop_maps_to_an_exit_status_and_only_three_exist() -> None:
+    """Green is 0, no-usable-result is 2, and everything else is a red suite at 1."""
+    assert {cli._status(stop) for stop in Stop} == {0, 1, 2}
+    assert cli._status(Stop.GREEN) == 0
+    assert {stop for stop in Stop if cli._status(stop) == 2} == cli.NO_RESULT
+    assert frozenset({Stop.NOT_RUN, Stop.WRONG_PLACE}) == cli.NO_RESULT
+
+
+def test_a_report_says_when_a_kept_migration_is_not_a_finished_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ "The suite passes" and "the migration is done" are different claims."""
+    root = _repo(tmp_path)
+    (root / "mypkg" / "unparseable.py").write_text("def (\n", encoding="utf-8")
+
+    code = cli.main([str(root), *_honest_suite(root)])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "migrated" in out
+    assert "NOT COMPLETE" in out
+    assert "unparseable.py" in out
 
 
 def test_the_command_is_taken_after_a_double_dash(
