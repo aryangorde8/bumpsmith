@@ -55,6 +55,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 46 | [#15](https://github.com/aryangorde8/bumpsmith/pull/15) | Version drift retried ninety times and reported as patience | **Fixed** | this PR |
 | 47 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | The report counted a plan that was refused as a change made — *found by its own exhaustive test* | **Fixed** — `applied` is recorded, not derived | this PR |
 | 48 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | The deny proof checked a file at a path the two processes never agreed on — *self-found* | **Fixed** — it now asks the server the harness names | this PR |
+| 49 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | A missing dependency was reported as an unmigrated one — *found by the clean-clone test* | **Fixed** — the message now says only what it knows | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -940,6 +941,32 @@ questioned is therefore provably the one the harness was configured to call,
 rather than one on a port the script guessed. Being unable to reach it is
 reported as "nothing is proven" and exits non-zero; it is never reported as "the
 tool did not run". The file check is kept as a second, independent signal.
+
+## 49 · "Unmigrated" was a guess wearing a fact's clothes
+
+Found by running the new command from a clean clone, which is the test it was
+written to make possible, on the first try.
+
+Fixture B in a fresh environment has no `requests` installed. pytest reported
+`ModuleNotFoundError: No module named 'requests'`, `bumpsmith.failures`
+classified it `TRANSITIVE_DEPENDENCY` — correctly, since `requests` is not a
+package this repository owns — and `write_rule` produced:
+
+> A dependency of this repository is itself unmigrated.
+
+Which is one of two possible readings and the message picked it without saying
+so. The module was not unmigrated; it was not installed. Both look identical in
+pytest's output, and nothing in the text distinguishes them.
+
+The classification is right and unchanged. What was wrong was the sentence: a
+user reading it would go looking for a pydantic-related pin to bump, when the
+answer was `pip install requests`. The rule now names both possibilities, says
+the message cannot tell them apart, and says the fix is outside this repository
+either way — which is the part that is true regardless.
+
+Pre-existing, from the class-6 work in #8. It sat unnoticed because until this
+pull request there was no way to run the pipeline that would print it. That is
+most of the argument for the pull request.
 
 ---
 

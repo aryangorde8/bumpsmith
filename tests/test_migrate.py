@@ -385,7 +385,13 @@ def test_a_break_no_edit_here_can_fix_stops_and_says_why(tmp_path: Path) -> None
 
     assert result.stop is Stop.DEPENDENCY
     assert result.outcome is Outcome.UNTOUCHED
-    assert "dependency has to move first" in result.reason
+    assert "not in this repository's source" in result.reason
+    assert "outside this repository" in result.reason
+    # The message says which module, and says only what the message can support:
+    # a missing import is either uninstalled or unmigrated, and pytest's text
+    # does not distinguish them.
+    assert "someoldsdk" in result.reason
+    assert "installed" in result.reason
 
 
 def test_a_rule_with_no_rewriter_stops_with_the_rule_as_the_output(tmp_path: Path) -> None:

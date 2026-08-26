@@ -189,10 +189,13 @@ def write_rule(failure: Failure) -> Rule | None:
         return Rule(
             break_class=failure.break_class,
             kind=RuleKind.DEPENDENCY,
-            summary="A dependency of this repository is itself unmigrated",
+            summary="A package this repository depends on is missing or unmigrated",
             rationale=(
                 "The break is not in this repository's source, so no edit here removes it. "
-                "The dependency has to move first. "
+                "A module it imports could not be found: either the environment does not "
+                "have it installed, or the version that is installed is itself unmigrated. "
+                "Which of those it is cannot be told from the message, and both are fixed "
+                "outside this repository. "
                 f"pytest reported: {failure.message or 'no message captured'}"
             ),
         )
