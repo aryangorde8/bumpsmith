@@ -49,6 +49,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 40 | [#14](https://github.com/aryangorde8/bumpsmith/pull/14) | A sandbox timeout is reported as never having run | **Fixed** — the module breaking its own stated guarantee | this PR |
 | 41 | [#14](https://github.com/aryangorde8/bumpsmith/pull/14) | A timeout leaves what the command started running | **Fixed** — and the reason is worse than the finding said | this PR |
 | 42 | [#14](https://github.com/aryangorde8/bumpsmith/pull/14) | Output that is not UTF-8 escapes the contract | **Fixed** | this PR |
+| 43 | [#15](https://github.com/aryangorde8/bumpsmith/pull/15) | A `thread_id` was used as a session id — *raised by the live harness* | **Fixed** — the test agreed with the bug | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -743,6 +744,45 @@ encoding and `errors="replace"`: losing a byte to U+FFFD costs a character in a
 diagnostic, and raising costs the run. Pinning it also means the same suite
 reads the same way here and in the sandbox, which the locale-dependent version
 did not guarantee.
+
+---
+
+## 43 · A thread is not a session, and the test said it was
+
+Found by running the deny proof against a live harness after the unit tests had
+passed. `POST /sessions/main/turns` → `404 Session not found: main`.
+
+An approval event carries a `thread_id`, and a `thread_id` looks exactly like
+something that belongs in the URL. It is not. A thread is a conversation
+*inside* a session — the root one is called `main`, and subagents get their own
+— so the session has to come from whoever started it.
+
+`Client.send` read the session out of the event, with a comment explaining that
+asking the caller for it again "invites the two disagreeing." That reasoning was
+confident and wrong: the two are not two spellings of one thing.
+
+The test did not catch it because the test agreed with it:
+
+```python
+event = {"type": "user.tool_approval", "thread_id": "sess-9", ...}
+assert path == "/api/v1/sessions/sess-9/turns"
+```
+
+A `thread_id` of `sess-9` is not a value the harness produces. The fixture
+committed in #13 has carried `"thread_id": "main"` since the day it was
+recorded, and nothing read it.
+
+**This is the third time in this project a test has held a defect in place**
+(34, 38, and now 43). The pattern is the same each time: the test and the code
+were written together, from the same wrong idea, so agreement between them
+proved nothing. What broke the tie twice was a property asserted over many
+shapes at once, and this time it was a live run — evidence from outside the
+author's head, either way.
+
+The fix is not a corrected URL. `Client` no longer implements `Channel` at all;
+`TurnChannel(client, session_id)` does, and it cannot be constructed without
+being told which session. The mistake is now unavailable rather than documented,
+and the `thread_id` still travels in the payload where the harness reads it.
 
 ---
 
