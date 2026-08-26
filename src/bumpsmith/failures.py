@@ -150,14 +150,31 @@ class RunShape(Enum):
 class BreakClass(Enum):
     """Which pydantic v1-to-v2 break this is.
 
-    Numbering follows the project's six-class taxonomy. Classes 2 and 3 exist in
-    that taxonomy but have no recorded sample, so no classifier is written for
-    them: a pattern authored against an unobserved signature would misfile real
-    failures while looking like coverage.
+    Numbering follows the project's six-class taxonomy. Class 2 -- a field V1
+    made optional by implication and V2 requires -- is the one member missing
+    here, and it is missing for a weaker reason than it used to be. It now has a
+    recorded sample: peel classes 4, 3 and 1 off fixture B and the run turns from
+    a collection error into five failing tests, every one of them a
+    ``ValidationError`` for a field nobody declared a default for. What it does
+    not have is a classifier, because that signature is a ``ValidationError``
+    like any other and telling "V1 would have defaulted this" from "this input
+    really is missing a field" is not something the traceback text settles.
+
+    A pattern authored against an unobserved signature would misfile real
+    failures while looking like coverage; a pattern authored against an
+    ambiguous one would do the same more quietly. Both are reasons to leave the
+    member out rather than to define it and guess.
     """
 
     VALIDATOR_FIELD_CONFIG = 1
-    """``@validator`` taking ``field`` or ``config``, which V2 replaced with ``info``."""
+    """``@validator`` taking ``field`` or ``config``, which V2 accepts neither of.
+
+    The error text says to use ``info`` instead. Under the ``@validator`` shim
+    that is wrong -- ``info`` belongs to V2's ``@field_validator`` and the shim
+    refuses it -- so the migration is to remove both parameters and leave
+    ``values``, which still works. ``proofs/validator.py`` is the run that
+    settles this against a real pydantic.
+    """
 
     REGEX_KEYWORD = 3
     """A ``regex=`` argument, which V2 renamed to ``pattern=``.

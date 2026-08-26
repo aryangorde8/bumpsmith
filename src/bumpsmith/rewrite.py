@@ -38,11 +38,34 @@ from bumpsmith.rules import (
     pydantic_name,
     pydantic_names,
     regex_keyword_sites,
+    validator_parameter_sites,
 )
 from bumpsmith.sources import read_source
 
 _V1_REGEX = "regex"
 _V2_PATTERN = "pattern"
+_DYNAMIC_SCOPE = frozenset({"locals", "vars", "eval", "exec"})
+"""Names whose presence means a parameter's uses cannot be read off the tree.
+
+`locals()["field"]` is a read of `field` that is not an :class:`ast.Name` for
+it, so the use detector below cannot see it and the deletion would look safe.
+Anything here is a refusal rather than a puzzle to solve: whether the string
+handed to `eval` names a parameter is not a question a parser answers.
+
+Each member has to be able to reach a *local* by name, which is why `globals`
+is not one. It was, briefly. A parameter is a local and the module namespace
+does not hold it, so a body doing nothing dynamic but calling `globals()` was
+being refused with a reason that was not true of it -- and a guard is allowed
+to cost a false refusal only when the reason it gives for one is honest.
+"""
+
+_SEPARATOR = re.compile(r"^\s*,\s*$")
+"""What may sit between two parameters for the first to be removable.
+
+A comma and whitespace. Anything else there -- a comment, most of all -- is
+something a person wrote that a parameter deletion has no business taking with
+it, and the site is skipped instead.
+"""
 _ROOT_FIELD = "__root__"
 _V2_ROOT_FIELD = "root"
 _BASE_MODEL = "BaseModel"
@@ -143,24 +166,51 @@ def _lines(text: str) -> list[str]:
 def _replace(text: str, replacements: Iterable[_Replacement]) -> str | None:
     """Apply every replacement, or return ``None`` if any position does not hold.
 
-    Applied last-first so that earlier positions are still valid, and in bytes
-    because ``col_offset`` is a byte offset rather than a character index. Each
-    replacement states the text it expects to find, and one that is wrong
+    Positions arrive as a line and a byte offset into that line, the way
+    :mod:`ast` reports them, and are resolved here to one offset into the whole
+    encoded source. Resolving them is what lets ``old`` cross a line ending,
+    which a deletion has to: the parameter being removed and the comma that
+    joined it to what came before are not always on the same line.
+
+    In bytes throughout, because ``col_offset`` is a byte offset rather than a
+    character index. Applied last-first so that earlier offsets are still valid.
+    Each replacement states the text it expects to find, and one that is wrong
     abandons the whole file: a position that has drifted is a reason to write
     nothing, never a reason to write a guess.
     """
-    lines = _lines(text)
-    for item in sorted(replacements, key=lambda r: (r.line, r.col), reverse=True):
+    data = text.encode("utf-8")
+    lines = [line.encode("utf-8") for line in _lines(text)]
+    starts: list[int] = []
+    offset = 0
+    for line in lines:
+        starts.append(offset)
+        offset += len(line)
+
+    resolved: list[tuple[int, int, bytes]] = []
+    for item in replacements:
         if not 1 <= item.line <= len(lines):
             return None
-        raw = lines[item.line - 1].encode("utf-8")
-        old = item.old.encode("utf-8")
-        if raw[item.col : item.col + len(old)] != old:
+        # Bounded to its own line before being used as an offset into the whole
+        # text. Without this a column past the end of a short line would run on
+        # into the next one and could match there, which is a position that has
+        # drifted reading as a position that holds.
+        if item.col > len(lines[item.line - 1]):
             return None
-        lines[item.line - 1] = (
-            raw[: item.col] + item.new.encode("utf-8") + raw[item.col + len(old) :]
-        ).decode("utf-8")
-    return "".join(lines)
+        start = starts[item.line - 1] + item.col
+        old = item.old.encode("utf-8")
+        if data[start : start + len(old)] != old:
+            return None
+        resolved.append((start, len(old), item.new.encode("utf-8")))
+
+    for start, length, new in sorted(resolved, key=lambda item: item[0], reverse=True):
+        data = data[:start] + new + data[start + length :]
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        # Only reachable from a position landing inside a multi-byte character,
+        # which is the same drift the checks above exist for and gets the same
+        # answer: write nothing.
+        return None
 
 
 def _own_namespace_nodes(tree: ast.Module) -> Iterator[ast.AST]:
@@ -453,6 +503,224 @@ def _plan_root_model_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None
     return (edit if edit.changes_anything else None), skipped
 
 
+def _positional_defaults(
+    arguments: ast.arguments,
+) -> list[tuple[ast.arg, ast.expr | None]]:
+    """Pair every positional parameter with its default, or with ``None``.
+
+    :attr:`ast.arguments.defaults` is a bare list that aligns to the *end* of
+    ``posonlyargs + args``, so the pairing has to be counted from the right. The
+    default matters because it is part of the parameter: removing ``field`` from
+    ``field=None`` and leaving the ``=None`` behind is a syntax error.
+    """
+    positional = [*arguments.posonlyargs, *arguments.args]
+    offset = len(positional) - len(arguments.defaults)
+    paired: list[tuple[ast.arg, ast.expr | None]] = []
+    for index, argument in enumerate(positional):
+        default = arguments.defaults[index - offset] if index >= offset else None
+        paired.append((argument, default))
+    return paired
+
+
+def _element_span(argument: ast.arg, default: ast.expr | None) -> tuple[int, int, int, int]:
+    """Where one parameter starts and ends, counting its annotation and default.
+
+    ``arg.end_col_offset`` already covers an annotation. A default is a sibling
+    node rather than a child, so it has to be reached for separately.
+    """
+    end_line = argument.end_lineno if argument.end_lineno is not None else argument.lineno
+    end_col = (
+        argument.end_col_offset if argument.end_col_offset is not None else argument.col_offset
+    )
+    if (
+        default is not None
+        and default.end_lineno is not None
+        and default.end_col_offset is not None
+        and (default.end_lineno, default.end_col_offset) > (end_line, end_col)
+    ):
+        end_line, end_col = default.end_lineno, default.end_col_offset
+    return argument.lineno, argument.col_offset, end_line, end_col
+
+
+def _names_used(node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    """Every name this function reads or writes anywhere inside itself.
+
+    Parameters are :class:`ast.arg` nodes rather than :class:`ast.Name`, so a
+    parameter that is never used contributes nothing here -- which is the whole
+    question being asked. ``global`` and ``nonlocal`` carry their names as plain
+    strings and would otherwise be invisible.
+
+    Deliberately blunt: a nested function with its own ``field`` parameter
+    registers a use that shadowing makes harmless. Reading it as a use costs a
+    skip with a reason on it; missing a real one costs a NameError at runtime in
+    somebody else's repository.
+
+    What it cannot see is a name reached without being written -- ``locals()``,
+    ``eval`` and the rest of :data:`_DYNAMIC_SCOPE`. Those are not detected here
+    because they are not uses of the parameter; they are evidence that uses may
+    exist which this function is not able to find. :func:`_drop_parameters`
+    treats them as such.
+    """
+    used: set[str] = set()
+    for inner in ast.walk(node):
+        if isinstance(inner, ast.Name):
+            used.add(inner.id)
+        elif isinstance(inner, (ast.Global, ast.Nonlocal)):
+            used.update(inner.names)
+    return used
+
+
+def _drop_parameters(
+    source: str,
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    offending: Sequence[ast.arg],
+) -> tuple[list[_Replacement], str | None]:
+    """Delete ``field`` and ``config`` from a validator's signature.
+
+    That deletion is the whole fix, and it is worth saying why it is not the
+    rename the rule's name suggests. Under V2's ``@validator`` shim a parameter
+    called ``info`` is refused outright -- "Unsupported signature for V1 style
+    validator" -- because ``info`` belongs to ``@field_validator``, the V2
+    decorator. ``values`` is still accepted and still carries what it did. So the
+    smallest text that makes the site correct is the removal, and a rewrite to
+    ``info`` would trade one raised error for another.
+
+    Each deletion spans from the end of the parameter before it to the end of
+    itself, which is what takes the separating comma with it. Returns the
+    replacements, or a reason nothing can be written.
+    """
+    used = _names_used(node)
+    # Asked before the parameter names are, because it is a different question.
+    # The check below finds uses; this one establishes whether finding them is
+    # possible at all. A body holding `locals()["field"]` reads the parameter
+    # without ever naming it in a way the tree records, so a clean answer from
+    # the use check would be an absence of evidence read as evidence of absence.
+    dynamic = sorted(used & _DYNAMIC_SCOPE)
+    if dynamic:
+        names = " and ".join(f"`{name}`" for name in dynamic)
+        return [], (
+            f"{node.name} calls {names}, so what it reads cannot be settled by "
+            f"reading it; a parameter removed here could still be reached by name "
+            f"at runtime"
+        )
+
+    reading = sorted({argument.arg for argument in offending} & used)
+    if reading:
+        names = " and ".join(f"`{name}`" for name in reading)
+        return [], (
+            f"{node.name} reads {names} somewhere inside itself, and V2 passes "
+            f"nothing to rebind it from; removing the parameter would leave a "
+            f"name that is not defined"
+        )
+
+    positional = _positional_defaults(node.args)
+    deletable = {id(argument) for argument, _ in positional}
+    elsewhere = [argument.arg for argument in offending if id(argument) not in deletable]
+    if elsewhere:
+        names = " and ".join(f"`{name}`" for name in sorted(elsewhere))
+        return [], (
+            f"{node.name} declares {names} keyword-only or positional-only, and "
+            f"removing it there can leave a bare `*` or `/` that will not parse"
+        )
+
+    spans = [_element_span(argument, default) for argument, default in positional]
+    wanted = {id(argument) for argument in offending}
+    encoded = source.encode("utf-8")
+    lines = [line.encode("utf-8") for line in _lines(source)]
+    starts: list[int] = []
+    offset = 0
+    for line in lines:
+        starts.append(offset)
+        offset += len(line)
+
+    def at(line: int, col: int) -> int:
+        return starts[line - 1] + col
+
+    replacements: list[_Replacement] = []
+    for index, (argument, _default) in enumerate(positional):
+        if id(argument) not in wanted:
+            continue
+        if index == 0:
+            # No parameter before it to attach the comma to. A pydantic
+            # validator always has `cls` first, so this is unreachable in the
+            # shapes that reach here -- and a deletion that guessed which side
+            # the comma was on is not worth writing on the strength of that.
+            return [], (
+                f"{node.name} declares `{argument.arg}` first, where there is no "
+                f"separator to remove with it"
+            )
+        _, _, previous_line, previous_col = spans[index - 1]
+        start_line, start_col, end_line, end_col = spans[index]
+        start = at(previous_line, previous_col)
+        boundary = at(start_line, start_col)
+        end = at(end_line, end_col)
+        separator = encoded[start:boundary].decode("utf-8")
+        removed = encoded[start:end].decode("utf-8")
+        if not _SEPARATOR.fullmatch(separator) or "#" in removed:
+            return [], (
+                f"{node.name}'s `{argument.arg}` is separated from what comes "
+                f"before it by something other than a comma, so removing it "
+                f"would take that with it"
+            )
+        replacements.append(_Replacement(previous_line, previous_col, removed, ""))
+    return replacements, None
+
+
+def _plan_validator_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, list[Skipped]]:
+    """Remove `field` and `config` from the validators the scan reported.
+
+    The signature is the only thing that changes. A validator body that used
+    either name is not rewritten at all -- see :func:`_drop_parameters` for why
+    the alternative is a name that is not defined.
+    """
+    try:
+        source = read_source(path)
+        tree = ast.parse(source.text)
+    except _UNREADABLE as exc:
+        return None, [Skipped(path, line, f"could not be read: {exc!r}") for line in lines]
+
+    by_line: dict[
+        int, list[tuple[ast.FunctionDef | ast.AsyncFunctionDef, tuple[ast.arg, ...]]]
+    ] = {}
+    for line, node, offending in validator_parameter_sites(tree):
+        by_line.setdefault(line, []).append((node, offending))
+
+    replacements: dict[tuple[int, int], _Replacement] = {}
+    skipped: list[Skipped] = []
+    # A `def` line holds one function, so unlike the other rewriters this cannot
+    # see the same line twice from distinct sites -- but the scan can still
+    # report a line twice, and counting one function once is what keeps
+    # `rewritten` honest when it does.
+    seen: set[tuple[int, int]] = set()
+    for line in sorted(set(lines)):
+        found = by_line.get(line)
+        if not found:
+            skipped.append(Skipped(path, line, "the site the scan reported is not there any more"))
+            continue
+        for node, offending in found:
+            here = (node.lineno, node.col_offset)
+            if here in seen:
+                continue
+            seen.add(here)
+            dropped, reason = _drop_parameters(source.text, node, offending)
+            if reason is not None:
+                skipped.append(Skipped(path, line, reason))
+                continue
+            for item in dropped:
+                replacements[(item.line, item.col)] = item
+
+    if not replacements:
+        return None, skipped
+
+    after = _replace(source.text, replacements.values())
+    if after is None:
+        reason = "the source moved under the positions the parser reported"
+        return None, [Skipped(path, line, reason) for line in lines]
+
+    edit = Edit(path=path, before=source.text, after=after, encoding=source.encoding)
+    return (edit if edit.changes_anything else None), skipped
+
+
 def _plan_regex_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, list[Skipped]]:
     """Rename `regex=` to `pattern=` at the sites the scan reported in one file.
 
@@ -501,6 +769,7 @@ def _plan_regex_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, lis
 
 
 _PLANNERS = {
+    BreakClass.VALIDATOR_FIELD_CONFIG: _plan_validator_file,
     BreakClass.ROOT_MODEL: _plan_root_model_file,
     BreakClass.REGEX_KEYWORD: _plan_regex_file,
 }

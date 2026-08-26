@@ -64,6 +64,12 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 55 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | Cumulative stub state attributed to the current run | **Fixed** — baselined, and nothing is deleted | this PR |
 | 56 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | `migrate()` would keep local edits verified in a sandbox | **Fixed** — the loop checks where each run happened | this PR |
 | 57 | [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | `inf` and `nan` passed the timeout check | **Fixed** — a bound has to be finite | this PR |
+| 58 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The class-1 rule told you to write `info`, which pydantic refuses — *found by asking pydantic instead of reading its error* | **Fixed** — the rule says remove, and `proofs/validator.py` is the run behind it | this PR |
+| 59 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | `BreakClass` said class 3 had no recorded sample, three lines above the class 3 that had two — *self-found* | **Fixed** — and class 2 now has a sample named, with why it still has no classifier | this PR |
+| 60 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The README said the loop ends one of ten ways; there were eleven — *self-found* | **Fixed** — stale since `WRONG_PLACE` landed in #16 | this PR |
+| 61 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The use check could not see `locals()["field"]`, so the deletion looked safe | **Fixed** — a body that can reach its locals by name is refused | this PR |
+| 62 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The proof accepted an exception type without the reason it was claiming | **Fixed** — stage, type and message, all three | this PR |
+| 63 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | `globals` sat in the dynamic-scope guard, which refused safe sites with a false reason — *self-found re-reading the fix for 61* | **Fixed** — a parameter is a local and the module namespace does not hold one | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -1129,6 +1135,171 @@ parse and neither is `<= 0`. `inf` silently removes the per-run cap the flag
 exists to set; `nan` compares false against everything, so `subprocess`'s own
 timeout never fires either. Both are now refused as invocation errors, which is
 what they are.
+
+---
+
+## 58 · The error message named a fix that does not work
+
+The class-1 rule has said this since #8:
+
+> Replace a v1 validator's `field` and `config` parameters with v2's `info`
+
+It reads like a summary of what pydantic itself prints, because it is one:
+
+> The `field` and `config` parameters are not available in Pydantic V2, please
+> use the `info` parameter instead.
+
+Both are wrong about the same thing, and the library is wrong first. `info` is
+V2's `@field_validator` parameter. Under the `@validator` shim — which is the
+decorator that raised the message — a parameter called `info` is refused
+outright, as an unsupported V1 signature. Following the advice in the error
+trades one raised error for another.
+
+The migration that works is smaller than the one the message describes: remove
+both parameters and leave `values`, which V2 still accepts and which still
+carries what it did.
+
+This was found before the rewriter was written, by running eight candidate
+signatures against a real pydantic rather than by reading the message and
+believing it. Had it been found after, there would have been a rewriter, a green
+test suite, and a migration that broke every repository it touched — because the
+tests would have been written from the same misreading as the code.
+
+That is now `proofs/validator.py`, and it is a proof rather than a test because
+this package has no pydantic to test against and should not acquire one: it
+works on source text and never imports the library it migrates. The script exits
+non-zero if any of the eight signatures stops behaving as `bumpsmith.rules` says
+it does.
+
+**The rewriter's own tests do not re-derive this.** They are built on the
+recorded answers. A test that decided for itself what pydantic accepts would be
+the same misreading in a second place.
+
+## 59 · A docstring that contradicted the code three lines below it
+
+`BreakClass` opened by saying classes 2 and 3 "exist in that taxonomy but have no
+recorded sample, so no classifier is written for them". `REGEX_KEYWORD = 3` is
+the next member down, it has a classifier, and its own docstring ends "Both are
+recorded samples."
+
+Stale rather than wrong when written — class 3 got its sample in #4 and the
+paragraph above it was not revisited. Harmless to the code and not harmless to a
+reader, who has to decide which of two adjacent statements to believe.
+
+Corrected, and the correction was worth more than the tidy-up. Class 2 — a field
+V1 made optional by implication and V2 requires — turns out to have a recorded
+sample now, discovered while checking what fixture B does once class 1 is fixed:
+peel classes 4, 3 and 1 and the run stops being a collection error and becomes
+five `ValidationError`s. What class 2 still lacks is a *classifier*, for a
+different reason than "nobody has seen one": its signature is a `ValidationError`
+like any other, and no traceback text distinguishes "V1 would have defaulted
+this" from "this input really is missing a field". The docstring now says which
+of the two reasons applies, because they call for different work.
+
+## 60 · Eleven reasons, described as ten
+
+`Stop` gained `WRONG_PLACE` in #16, as the fix for finding 56. The README's count
+of how many ways the loop can end was not updated with it.
+
+Small, and recorded at the same size as the others because the alternative is a
+log that only lists findings flattering to the person keeping it. It is also the
+second time in two pull requests that a number stated in prose has drifted from
+the code it describes, which is the argument for stating fewer of them.
+
+---
+
+## 61–62 · Two from Qodo, both accepted
+
+Both are the same shape as findings this log already holds, which is the useful
+thing about them: the pattern was known and the code was written into it anyway.
+
+### 61 · A read the parser could not see
+
+`_names_used` collects `ast.Name` nodes, and refuses the deletion if `field` or
+`config` is among them. A body doing `locals()["field"]` reads the parameter
+without producing an `ast.Name` for it, so the check came back clean and the
+rewriter wrote the edit. Reproduced before fixing:
+
+```python
+@validator("status")
+def check(cls, v, field):
+    return v if locals()["field"] else None
+```
+
+went to `def check(cls, v):` with the body untouched.
+
+What makes it worth the finding rather than the shrug it first invites — nobody
+writes that in a pydantic validator — is the direction of the damage. The
+original break is an `ImportError` at collection: loud, immediate, every test in
+the module. What the rewrite produces is a `KeyError` raised only when that one
+validator runs. **Quieter, later, and conditional**, in a repository the tool was
+asked to make safer.
+
+The fix is not a cleverer detector. `locals`, `vars`, `globals`, `eval` and
+`exec` in a validator's body mean this function cannot answer the question it is
+being asked, and the honest answer to a question you cannot answer is to say so.
+Asked *before* the use check, because it is a different question: the use check
+finds uses, and this one establishes whether finding them is possible at all. A
+clean answer from a detector that cannot see is an absence of evidence read as
+evidence of absence.
+
+### 62 · The proof checked the type and called it the reason
+
+`_verdict` compared the exception class and nothing else. Four of the eight cases
+expect `PydanticUserError`, and **two of them expect it for different reasons** --
+that is the entire point of running both. `validator with field and config`
+raises it because those parameters are gone; `validator with info` raises it
+because the V1 shim will not take an `info` parameter at all. A check on the type
+could not tell those apart, so a future pydantic that refused every V1 validator
+with one blanket error would satisfy every case while the conclusion the script
+exists to support quietly stopped being true.
+
+Same shape as finding 54 on #16, where "nonzero and something parsed" accepted a
+sandbox failure that had nothing to do with the break being demonstrated. A proof
+that accepts a superset of what it claims is worth less than no proof, because it
+reports confidence at exactly the moment it has least.
+
+Now checked three ways -- stage, type, and a fragment of the message -- and the
+stage is load-bearing on its own: `root_validator` fails at *call* time where
+every `validator` case fails at *build* time, and that difference is one of the
+things the rewriter's design rests on.
+
+Demonstrated by breaking the claim rather than the check: pointing the `info`
+case at the field/config message passes under the old verdict and fails under the
+new one.
+
+---
+
+## 63 · A guard member that could not do the thing it was guarding against
+
+Found re-reading the fix for 61 before merging it, which is the only reason it
+is here rather than in somebody else's review.
+
+`_DYNAMIC_SCOPE` held `locals`, `vars`, `globals`, `eval` and `exec` — names
+whose presence means a parameter's uses cannot be read off the tree. Four of
+those can reach a local by name. `globals` cannot: a parameter is a local, and
+the module namespace does not hold it. Checked rather than reasoned about:
+
+```
+globals sees it      False
+locals sees it       True
+vars() sees it       True
+eval reaches it      True
+```
+
+The cost is not a wrong rewrite — it is a refusal, which is the safe direction.
+What makes it a finding is the *reason* attached to the refusal:
+
+> `check` calls `globals`, so what it reads cannot be settled by reading it; a
+> parameter removed here could still be reached by name at runtime
+
+Which is not true of `globals`. A guard is allowed to cost a false refusal only
+when the reason it gives for one is honest; otherwise the log of skipped sites —
+the thing a person reads to decide whether to finish the migration by hand —
+contains a sentence that will not survive being checked.
+
+The boundary is now pinned from both sides: a test that `globals()` alone does
+not stop the rewrite, and one that `exec` still does.
 
 ---
 
