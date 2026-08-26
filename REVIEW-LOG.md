@@ -70,6 +70,8 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 61 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The use check could not see `locals()["field"]`, so the deletion looked safe | **Fixed** — a body that can reach its locals by name is refused | this PR |
 | 62 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | The proof accepted an exception type without the reason it was claiming | **Fixed** — stage, type and message, all three | this PR |
 | 63 | [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | `globals` sat in the dynamic-scope guard, which refused safe sites with a false reason — *self-found re-reading the fix for 61* | **Fixed** — a parameter is a local and the module namespace does not hold one | this PR |
+| 64 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | `migrate.py` said the loop names one of *nine* things; there were ten — *self-found, a sibling of 60 that 60 did not look for* | **Fixed** — the number is gone; the enum is the count | this PR |
+| 65 | [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | `proofs/README.md` gave the suite as 448 tests; it was 453 — *self-found* | **Fixed** — the number is gone, and it was never the point of the sentence | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -1300,6 +1302,54 @@ contains a sentence that will not survive being checked.
 
 The boundary is now pinned from both sides: a test that `globals()` alone does
 not stop the rewrite, and one that `exec` still does.
+
+---
+
+## 64–65 · The same stale count, in the two places finding 60 did not look
+
+Finding 60 was "the README says ten ways for the loop to end and there are
+eleven". It was fixed by correcting the README. Writing the README's first full
+draft turned up the same drift twice more, both older than 60 and neither found
+by it:
+
+- `migrate.py`'s own module docstring: *"it names which of nine specific things
+  happened"*. `Stop` has eleven members, ten of which are not `GREEN`, so the
+  sentence was right when it was written and stale from the moment `WRONG_PLACE`
+  landed in #16 — the same commit that made 60 stale, the same day.
+- `proofs/README.md`: *"`tests/` does that, 448 times"*. It was 448 when the file
+  was written in #17 and 453 by the time #17 merged, because the fixes Qodo
+  caused brought five tests with them. **The number went stale inside the pull
+  request that introduced it.**
+
+The interesting part is not either defect, which is trivial. It is that fixing 60
+did not find them. A finding was closed by correcting the one instance in front
+of it, and two siblings a `grep` away stayed. **Fixing an instance is not fixing
+a class**, and the log now says so in the one place a reader would check whether
+it had been.
+
+### The fix is to state fewer numbers, not to state them more carefully
+
+Both are gone rather than corrected. `migrate.py` sat three lines above the enum
+that *is* the count, and `proofs/README.md`'s sentence — "they do not test the
+package, `tests/` does that, offline" — carries its whole meaning without a
+figure in the middle of it. A number repeated beside its own source is a second
+copy of a fact, and the second copy is the one that rots.
+
+Where the number does earn its place, it is now pinned instead of trusted. The
+README's count of `Stop` reasons is reader-facing and worth being concrete about,
+so `tests/test_docs.py` asserts that the spelled-out number equals `len(Stop)`,
+that every `Stop` member appears in the README's table, and that every `Outcome`
+member appears in the list beside it. Adding a member without documenting it now
+fails the suite, which is the moment the drift costs nothing to fix.
+
+That is this log's recurring shape 6 — *prose stating a property is not the
+property* — applied to the prose that had just demonstrated it three times.
+
+**The test caught something on its first run: itself.** The pattern matched a
+literal space, the README is hard-wrapped, and the sentence it was looking for
+straddles a line ending. It reported the claim as missing rather than as wrong.
+Fixed with `\s+`, and noted in the test, because a doc test that silently stops
+matching would be worse than no doc test at all — it would pass forever.
 
 ---
 
