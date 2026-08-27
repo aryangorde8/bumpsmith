@@ -235,6 +235,21 @@ def _strings(value: object, key: str) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _phase_happened(value: object, what: str) -> bool:
+    """Whether a step got as far as this phase, from the count it reported.
+
+    The report writes a number when the phase ran and ``null`` when it did not,
+    so presence is the question and the number is not. The type is checked all
+    the same: reading "not null" as "it ran" accepts a string, and `bool` is an
+    `int` in Python, so an unchecked `true` would arrive as a count of one.
+    """
+    if value is None:
+        return False
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ReportError(f"{what} is {value!r}, which is neither a count nor null")
+    return True
+
+
 def _read_step(raw: object, index: int) -> ReportedStep:
     where = f"step {index + 1}"
     if not isinstance(raw, Mapping):
@@ -254,12 +269,31 @@ def _read_step(raw: object, index: int) -> ReportedStep:
 
     # `sites` is null exactly when there was no scan, and `rewritten` is null
     # exactly when there was no plan. Both are read as presence rather than as
-    # counts, because the count is not what completeness turns on.
-    scanned = raw.get("sites") is not None
-    planned = raw.get("rewritten") is not None
+    # counts, because the count is not what completeness turns on -- but the
+    # type is still checked, because "not null" is a weaker claim than "a
+    # number", and a `sites` of `"none"` would read as a scan that happened.
+    scanned = _phase_happened(raw.get("sites"), f"{where} sites")
+    planned = _phase_happened(raw.get("rewritten"), f"{where} rewritten")
 
     unreadable = _strings(raw.get("unreadable", []), f"{where} unreadable")
     skipped = _strings(raw.get("skipped", []), f"{where} skipped")
+
+    # A phase that never ran cannot have left anything behind. Without this,
+    # a report saying `sites: null` beside a non-empty `unreadable` list parses
+    # cleanly and reports **complete**, because completeness asks about a scan
+    # and this step is claiming there was not one. The producer never writes
+    # that pair; a truncated, merged or hand-edited report can, and this reader
+    # exists for text nobody here produced.
+    if not scanned and unreadable:
+        raise ReportError(
+            f"{where} did not scan and lists {len(unreadable)} unreadable file(s); "
+            f"a phase that never ran left nothing behind"
+        )
+    if not planned and skipped:
+        raise ReportError(
+            f"{where} did not plan and lists {len(skipped)} skipped site(s); "
+            f"a phase that never ran left nothing behind"
+        )
 
     # The report states `scan_complete` as well as listing what was unreadable.
     # Checked against each other rather than one being chosen: they are the same
@@ -538,11 +572,41 @@ class SandboxJob:
         self._model = model
         self._workspace = workspace
         self._poll_limit = poll_limit
+        self._exec: SandboxExec | None = None
 
     @property
     def subject(self) -> str:
         """Which fixture this job migrates."""
         return self._recipe.fixture.id
+
+    @property
+    def workspace(self) -> str:
+        """Where inside its sandbox this job works."""
+        return self._workspace
+
+    def session_id(self) -> str | None:
+        """The session this job used, or ``None`` if it has not run.
+
+        Exposed so that anything wanting to look at the tree this job migrated
+        can reach *that* sandbox. A caller building its own
+        :class:`~bumpsmith.trueforge.SandboxExec` gets a new session and
+        therefore a new, empty sandbox -- where the subject is simply absent,
+        and where a check for "did anything change" would be answered by a
+        filesystem that never held the subject at all.
+        """
+        return None if self._exec is None else self._exec.session_id()
+
+    def exec_in_its_sandbox(self, command: str, cwd: str) -> Completed:
+        """Run one more command in the sandbox this job used.
+
+        Refuses before the job has run, rather than quietly opening a session
+        and answering from an empty one.
+        """
+        if self._exec is None:
+            raise SubjectError(
+                f"{self.subject} has not run, so there is no sandbox of its own to ask"
+            )
+        return SandboxRunner(self._exec).run(["sh", "-c", command], Path(cwd))
 
     def _runner(self) -> SandboxRunner:
         client = (
@@ -550,7 +614,10 @@ class SandboxJob:
             if self._base_url is None
             else Client(self._base_url, poll_limit=self._poll_limit)
         )
-        return SandboxRunner(SandboxExec(client, self._model))
+        # Kept, so the sandbox this job used can be reached afterwards. A fresh
+        # `SandboxExec` is a fresh session and therefore a fresh sandbox.
+        self._exec = SandboxExec(client, self._model)
+        return SandboxRunner(self._exec)
 
     def __call__(self) -> Reported:
         """Prepare the subject, migrate it, and bring back the verdict.

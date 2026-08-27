@@ -43,6 +43,11 @@ from bumpsmith.rules import Match, ScanResult, Unreadable
 from bumpsmith.run import Completed
 
 GREEN = Completed(returncode=0, output="2 passed in 0.10s\n", where="local")
+
+# Paths inside a sandbox, never on this machine -- the same reason
+# `bumpsmith.remote` names its own.
+SANDBOX_TMP = "/tmp"  # noqa: S108
+ELSEWHERE = "/tmp/elsewhere"  # noqa: S108
 RED = Completed(returncode=1, output="1 failed in 0.10s\n", where="local")
 
 
@@ -426,3 +431,65 @@ def test_a_v2_subject_may_have_its_dependencies_installed() -> None:
     script = setup_script(Recipe(fixture=C, with_dependencies=True), manifest="m")
     assert "--no-deps" not in script
     assert "pip install -q -e " in script
+
+
+# -- what a report may not claim about a phase that never ran ----------------
+
+
+def test_a_step_that_never_scanned_may_not_list_unreadable_files() -> None:
+    """The shape that parsed cleanly and reported **complete**.
+
+    `is_complete` asks about a scan, so a step claiming there was no scan is
+    never incomplete -- and an `unreadable` list beside `sites: null` is a
+    contradiction that used to resolve in the reassuring direction. The producer
+    never writes that pair; this reader exists for text nobody here produced.
+    """
+    body = json.loads(
+        _report_of(Migration(steps=(Step(number=1, run=RED),), stop=Stop.NO_RULE, reason="r"))
+    )
+    assert body["steps"][0]["sites"] is None
+    body["steps"][0]["unreadable"] = [{"path": "vendored.py", "reason": "invalid syntax"}]
+    with pytest.raises(ReportError, match="did not scan"):
+        read_report(json.dumps(body))
+
+
+def test_a_step_that_never_planned_may_not_list_skipped_sites() -> None:
+    body = json.loads(
+        _report_of(Migration(steps=(Step(number=1, run=RED),), stop=Stop.NO_RULE, reason="r"))
+    )
+    assert body["steps"][0]["rewritten"] is None
+    body["steps"][0]["skipped"] = ["a.py:3"]
+    with pytest.raises(ReportError, match="did not plan"):
+        read_report(json.dumps(body))
+
+
+@pytest.mark.parametrize("key", ["sites", "rewritten"])
+@pytest.mark.parametrize("value", ["one", True, 1.5])
+def test_a_phase_count_that_is_not_a_count_is_refused(key: str, value: object) -> None:
+    """ "Not null" is a weaker claim than "a number", and `bool` is an `int`."""
+    body = json.loads(_report_of(Migration(steps=(_applied_step(),), stop=Stop.GREEN, reason="g")))
+    body["steps"][0][key] = value
+    with pytest.raises(ReportError, match="neither a count nor null"):
+        read_report(json.dumps(body))
+
+
+# -- reaching the sandbox a job actually used --------------------------------
+
+
+def test_a_job_that_has_not_run_has_no_sandbox_to_ask() -> None:
+    """Refused rather than answered from a session opened on the spot.
+
+    A fresh `SandboxExec` is a fresh session and therefore a fresh, empty
+    sandbox. Asking one of those whether the subject changed gets a confident
+    answer from a filesystem that never held the subject.
+    """
+    job = SandboxJob(Recipe(fixture=C), manifest="m.toml")
+    assert job.session_id() is None
+    with pytest.raises(SubjectError, match="no sandbox of its own"):
+        job.exec_in_its_sandbox("git status --porcelain", SANDBOX_TMP)
+
+
+def test_a_job_reports_where_it_works_so_a_caller_need_not_guess() -> None:
+    job = SandboxJob(Recipe(fixture=C), manifest="m.toml", workspace=ELSEWHERE)
+    assert job.workspace == ELSEWHERE
+    assert ELSEWHERE in setup_script(Recipe(fixture=C), manifest="m", workspace=ELSEWHERE)

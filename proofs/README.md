@@ -267,6 +267,23 @@ environment produces a red suite about the environment, and the loop classifies
 it as a migration break with total sincerity — which is a convincing-looking run
 that proves nothing.
 
+**What it costs, which is worth knowing before you run it.** One sandbox per
+subject, each holding a clone of this repository, a clone of the fixture, and an
+installed dependency tree. Twenty-two of them exhausted a 30 GiB Daytona quota
+on 27 Aug 2026 — call it 1.4 GiB apiece — and the failure that followed is worth
+describing, because it is the one a reader is most likely to hit.
+
+Sandboxes outlive the sessions that made them. Deleting a TrueForge session does
+**not** delete its Daytona sandbox; the provider's own intervals do, and this
+project's are auto-stop after 5 idle minutes, auto-archive 60 minutes later.
+Between filling the quota and that archiving, every subject comes back
+unreached — correctly, and for a reason that has nothing to do with migrations.
+
+The script says so plainly, and only because of finding 118. Before that fix it
+reported `` `success` is None, which is neither true nor false `` while holding
+Daytona's actual sentence about disk. A proof whose failure mode is illegible is
+a proof that costs an afternoon the first time it fails.
+
 ## The recorded runs
 
 `recorded/` holds the output of every script, verbatim — the two harness ones

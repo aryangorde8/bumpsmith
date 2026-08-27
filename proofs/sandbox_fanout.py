@@ -42,8 +42,8 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
-from bumpsmith.fanout import DEFAULT_TIMEOUT, Fanout, Unreached, fan_out
-from bumpsmith.fixtures import Fixture, load_manifest
+from bumpsmith.fanout import DEFAULT_TIMEOUT, Fanout, Job, Unreached, fan_out
+from bumpsmith.fixtures import load_manifest
 from bumpsmith.migrate import Outcome
 from bumpsmith.remote import (
     DEFAULT_MODEL,
@@ -51,13 +51,20 @@ from bumpsmith.remote import (
     Recipe,
     Reported,
     SandboxJob,
+    SubjectError,
     jobs_for,
 )
-from bumpsmith.run import RunError, SandboxRunner
-from bumpsmith.trueforge import Client, SandboxExec, TransportError
+from bumpsmith.run import RunError
+from bumpsmith.trueforge import TransportError
 
 CONTROL = "C"
 """The fixture that is already migrated. Named so the checks below can say why."""
+
+END_OF_STATUS = "END_OF_STATUS"
+"""Printed after `git status`, so an empty answer is told apart from no answer.
+
+A clean tree and a command that produced nothing both print nothing, and only
+one of them is evidence."""
 
 UNREACHABLE_URL = "http://127.0.0.1:9/api/v1"
 """Port 9 is discard. Nothing listens, so the connection is refused rather than
@@ -140,42 +147,67 @@ class Unreachable:
     def subject(self) -> str:
         return f"{self._job.subject}-unreachable"
 
-    def __call__(self) -> object:
+    def __call__(self) -> Reported:
         return self._job()
 
 
-def _control_is_untouched(
-    fixture: Fixture, *, base_url: str | None, model: str
-) -> tuple[bool, str]:
+def _control_is_untouched(job: SandboxJob) -> tuple[bool, dict[str, object]]:
     """Ask the control's own sandbox whether its files changed.
 
     The report already says ``already-green``, and this asks the disk instead,
     because those are two claims and only one of them is about a filesystem. A
     loop that edited the control and then reverted it perfectly would produce
-    the same report as one that never touched it; ``git status`` in the sandbox
-    that ran it is the only place the difference exists.
+    the same report as one that never touched it.
 
-    Its own session, so the answer comes from the sandbox the migration ran in
-    -- a fresh one would have a clean checkout for reasons that say nothing.
+    It has to be *that* sandbox. An earlier version of this function built its
+    own `SandboxExec`, which opens a new session and therefore a new, empty
+    sandbox -- where the control checkout does not exist at all, and where
+    "nothing changed" would be answered by a filesystem that never held the
+    subject. The docstring said so at the time and the code did the opposite;
+    Qodo caught it (finding 119).
+
+    Nothing in the porcelain output is dropped. An earlier version filtered
+    every ``??`` line, which let an agent that *added* a file pass a check whose
+    whole claim is that the files are unchanged. Untracked paths are reported as
+    evidence either way, and an untracked Python file fails outright -- a
+    coverage report is what running the suite leaves behind, and a new module is
+    not.
     """
-    client = Client(poll_limit=600.0) if base_url is None else Client(base_url, poll_limit=600.0)
-    runner = SandboxRunner(SandboxExec(client, model))
-    subject = f"{WORKSPACE}/fixtures/{fixture.id}"
-    command = f"cd {shlex.quote(subject)} && git status --porcelain && echo END_OF_STATUS"
+    subject = f"{job.workspace}/fixtures/{job.subject}"
+    command = f"cd {shlex.quote(subject)} && git status --porcelain && echo {END_OF_STATUS}"
     try:
-        seen = runner.run(["sh", "-c", command], Path("/tmp"))  # noqa: S108
-    except (RunError, TransportError) as exc:
-        return False, f"the sandbox could not be asked: {exc}"
-    if seen.returncode != 0 or "END_OF_STATUS" not in seen.output:
-        return False, f"git status did not complete (rc={seen.returncode})"
-    changed = [
-        line
+        seen = job.exec_in_its_sandbox(command, "/tmp")  # noqa: S108
+    except (RunError, TransportError, SubjectError) as exc:
+        return False, {"asked": False, "why": f"the sandbox could not be asked: {exc}"}
+    if seen.returncode != 0 or END_OF_STATUS not in seen.output:
+        return False, {"asked": False, "why": f"git status did not complete (rc={seen.returncode})"}
+
+    lines = [
+        line.strip()
         for line in seen.output.splitlines()
-        if line.strip() and line.strip() != "END_OF_STATUS" and not line.startswith("??")
+        if line.strip() and line.strip() != END_OF_STATUS
     ]
-    if changed:
-        return False, f"{len(changed)} tracked file(s) differ: {changed[:3]}"
-    return True, "no tracked file differs"
+    tracked = [line for line in lines if not line.startswith("??")]
+    untracked = [line[2:].strip() for line in lines if line.startswith("??")]
+    added_source = [path for path in untracked if path.endswith(".py")]
+
+    evidence: dict[str, object] = {
+        "asked": True,
+        "session": job.session_id(),
+        "tracked_changes": tracked,
+        "untracked": untracked,
+        "added_python_files": added_source,
+    }
+    if tracked:
+        evidence["why"] = f"{len(tracked)} tracked file(s) differ: {tracked[:3]}"
+        return False, evidence
+    if added_source:
+        evidence["why"] = f"the migration left new Python file(s) behind: {added_source}"
+        return False, evidence
+    evidence["why"] = "no tracked file differs" + (
+        f"; {len(untracked)} untracked artefact(s) from running the suite" if untracked else ""
+    )
+    return True, evidence
 
 
 def _describe(result: Fanout) -> None:
@@ -244,16 +276,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     jobs = list(
         jobs_for(recipes, manifest=remote_manifest, base_url=args.base_url, model=args.model)
     )
-    jobs.append(Unreachable(recipes[0], remote_manifest))  # type: ignore[arg-type]
+    everything: list[Job] = [*jobs, Unreachable(recipes[0], remote_manifest)]
 
     print(
-        f"fanning out over {len(jobs)} subjects "
-        f"({', '.join(job.subject for job in jobs)}) on {args.workers} workers\n"
+        f"fanning out over {len(everything)} subjects "
+        f"({', '.join(j.subject for j in everything)}) on {args.workers} workers\n"
         f"each one gets its own TrueForge session, and therefore its own sandbox\n",
         flush=True,
     )
     started = time.monotonic()
-    result = fan_out(jobs, workers=args.workers, timeout=args.timeout)
+    result = fan_out(everything, workers=args.workers, timeout=args.timeout)
     wall = time.monotonic() - started
 
     print(f"\n{wall:.1f}s wall clock\n")
@@ -268,12 +300,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     control = next(a for a in result.attempts if a.subject == CONTROL)
-    untouched, why = _control_is_untouched(
-        next(r.fixture for r in recipes if r.fixture.id == CONTROL),
-        base_url=args.base_url,
-        model=args.model,
-    )
-    print(f"\ncontrol {CONTROL}: report says {control.outcome}; disk says {why}")
+    # The job object, not a fresh one: the question is about the sandbox this
+    # subject was migrated in, and only that job knows which session that was.
+    control_job = next(j for j in jobs if j.subject == CONTROL)
+    untouched, evidence = _control_is_untouched(control_job)
+    print(f"\ncontrol {CONTROL}: report says {control.outcome}; disk says {evidence['why']}")
+    left_behind = evidence.get("untracked")
+    if isinstance(left_behind, list):
+        for path in left_behind:
+            print(f"  untracked: {path}")
 
     args.out.write_text(
         json.dumps(
@@ -287,7 +322,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "subject": CONTROL,
                     "outcome": None if control.outcome is None else control.outcome.value,
                     "files_unchanged": untouched,
-                    "checked_by": why,
+                    "checked_on_disk": evidence,
                 },
                 "fanout": result.as_dict(),
             },
@@ -313,7 +348,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"it is on pydantic v2 and there was nothing to migrate"
         )
     if not untouched:
-        problems.append(f"the control's files changed in the sandbox: {why}")
+        problems.append(f"the control's files changed in the sandbox: {evidence['why']}")
     reached_real = [a for a in result.attempts if a.ran and not a.subject.endswith("-unreachable")]
     if len(reached_real) != len(recipes):
         problems.append(
