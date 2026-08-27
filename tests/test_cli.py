@@ -155,6 +155,25 @@ def test_the_sandbox_flag_is_refused_with_the_reason(
     assert "proofs/sandbox.py" in message
 
 
+def test_the_refusal_names_where_the_loop_does_run_in_a_sandbox(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The refusal must not describe a gap the package has already closed.
+
+    This text once ended "carrying the edits across is the missing piece; until
+    it is written and reviewed, this refuses" -- and by then it had been
+    written, by moving the agent instead of the edits. `bumpsmith.remote` runs
+    the whole loop inside the sandbox, and `remote`'s own docstring cites this
+    refusal approvingly, so the two modules agreed about the design while the
+    only text a user ever sees still described the hole. Nothing failed,
+    because nothing asked. This asks.
+    """
+    assert cli.main([str(_repo(tmp_path)), "--sandbox"]) == 2
+    message = capsys.readouterr().err
+    assert "bumpsmith.remote" in message
+    assert "proofs/sandbox_fanout.py" in message
+
+
 def test_the_refusal_happens_before_anything_runs(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

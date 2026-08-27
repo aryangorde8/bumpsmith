@@ -67,8 +67,17 @@ def _no_sandbox() -> str:
         "so a green result would keep a change that nothing had tested.\n"
         "\n"
         "That is the same defect bumpsmith.run exists to prevent, one level up, and a\n"
-        "flag that quietly did it would be worse than no flag. Carrying the edits\n"
-        "across is the missing piece; until it is written and reviewed, this refuses.\n"
+        "flag that quietly did it would be worse than no flag.\n"
+        "\n"
+        "The way past it was not to carry the edits across. It was to stop splitting:\n"
+        "bumpsmith.remote.SandboxJob installs this package into the sandbox and runs\n"
+        "the whole loop there, so editing and testing land on one filesystem again --\n"
+        "just not this one. proofs/sandbox_fanout.py does that to two real third-party\n"
+        "repositories at once, and its output is recorded in proofs/recorded/.\n"
+        "\n"
+        "So the missing piece is no longer the mechanism. It is a command-line route to\n"
+        "it, and until that exists this flag refuses rather than quietly doing the\n"
+        "split version.\n"
     )
 
 
