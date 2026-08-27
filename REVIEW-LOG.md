@@ -38,6 +38,18 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 17 | [#9](https://github.com/aryangorde8/bumpsmith/pull/9) | Symlink edit replaces the link | **Fixed** — reproduced | this PR |
 | 18 | [#9](https://github.com/aryangorde8/bumpsmith/pull/9) | CRLF round trip not exact | **Fixed** — reproduced | this PR |
 | 19 | [#9](https://github.com/aryangorde8/bumpsmith/pull/9) | Verify/apply race window | **Fixed** | this PR |
+| 20 | [#10](https://github.com/aryangorde8/bumpsmith/pull/10) | `cast("Approver", ...)` "will fail CI because mypy type-checks `tests/`" | **Rejected** — the claim is false and was tested, not argued: `typing.cast` takes a string as a forward reference by design, mypy flags only an undefined one, and CI had already passed on the commit under review | [§20–22](#2022--three-on-the-approval-gate-one-of-them-real) |
+| 21 | [#10](https://github.com/aryangorde8/bumpsmith/pull/10) | `Gate.run` computed the fingerprint outside the guard, so a `detail` that would not serialise raised `TypeError` rather than `NotApprovedError` — **the gate refused something and recorded nothing** | **Fixed** — rejected where it is written, with the fingerprint call guarded as a backstop that records the refusal. Fail-closed held; the *trail* did not | [§20–22](#2022--three-on-the-approval-gate-one-of-them-real) |
+| 22 | [#10](https://github.com/aryangorde8/bumpsmith/pull/10) | Unbounded history memory growth in `_records` | **Rejected, with the arithmetic** — 460 bytes per decision, so a million records for 439 MiB, and the rate is bounded by human attention. The remedy is worse than the condition: trimming an audit trail drops the **oldest denial first** | [§20–22](#2022--three-on-the-approval-gate-one-of-them-real) |
+| 23 | [#11](https://github.com/aryangorde8/bumpsmith/pull/11) | Two declarations on one line: one dropped, both counted | **Fixed** | [§23–27](#2327--five-on-the-rewriter-all-accepted-all-one-root-cause) |
+| 24 | [#11](https://github.com/aryangorde8/bumpsmith/pull/11) | A rebound base was rewritten — `BaseModel = Other` then `class Items(BaseModel)` is not pydantic's | **Fixed** — reproduced exactly as reported | [§23–27](#2327--five-on-the-rewriter-all-accepted-all-one-root-cause) |
+| 25 | [#11](https://github.com/aryangorde8/bumpsmith/pull/11) | An import is not a guarantee the name still means that: `RootModel = Other` after the import set `already_imported` and skipped the collision check | **Fixed** | [§23–27](#2327--five-on-the-rewriter-all-accepted-all-one-root-cause) |
+| 26 | [#11](https://github.com/aryangorde8/bumpsmith/pull/11) | `RootModel, other = pair()` binds `RootModel`, and binding collection missed it | **Fixed** | [§23–27](#2327--five-on-the-rewriter-all-accepted-all-one-root-cause) |
+| 27 | [#11](https://github.com/aryangorde8/bumpsmith/pull/11) | An import under `if TYPE_CHECKING:` binds nothing at run time, and one in a class body binds an attribute — either could be chosen as the import to extend, producing a `NameError` in the class just rewritten | **Fixed** | [§23–27](#2327--five-on-the-rewriter-all-accepted-all-one-root-cause) |
+| 28 | [#12](https://github.com/aryangorde8/bumpsmith/pull/12) | `removed-kwargs` does not identify one break — measured against pydantic 2.12.5, `const` and `unique_items` raise the same slug | **Fixed** | [§28–31](#2831--four-on-the-regex-class-all-accepted) |
+| 29 | [#12](https://github.com/aryangorde8/bumpsmith/pull/12) | A function *parameter* named `constr` was treated as pydantic's, because one module-wide import map was applied to every call in the file | **Fixed** — `calls_in_scope`, whose docstring names this failure. 🔴 **Reintroduced as [106](#106107--the-paragraph-one-function-above-the-mistake) on #22**, in a new function written beside that docstring | [§28–31](#2831--four-on-the-regex-class-all-accepted) |
+| 30 | [#12](https://github.com/aryangorde8/bumpsmith/pull/12) | Two sites on one line, one gone since the scan: the survivor stood in for both — two reported rewritten, one written, plan `complete` | **Fixed** — the combination is worse than either half, because it looks like success | [§28–31](#2831--four-on-the-regex-class-all-accepted) |
+| 31 | [#12](https://github.com/aryangorde8/bumpsmith/pull/12) | A stdlib-shaped substring is not an interpreter root: `/lib/pythonX.Y/` anywhere in the path meant a project holding its own `lib/python3.13/` had frames skipped | **Fixed** | [§28–31](#2831--four-on-the-regex-class-all-accepted) |
 | 32 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | Wrapper named instead of the tool — *raised by the live harness* | **Fixed** — reproduced twice, before and after | this PR |
 | 33 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | `mcp:unknown` reported as an attribution — *raised by the live harness* | **Fixed** | this PR |
 | 34 | [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | A failed send re-asks, so a refusal can become an approval | **Fixed** — my own test pinned the bug | this PR |
@@ -114,6 +126,8 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 105 | [#22](https://github.com/aryangorde8/bumpsmith/pull/22) | `if not bound: return` read as a correctness guard but is not one — the loop below it tests `node.id in bound`, which already yields nothing for an empty set — *self-found by breaking it and having nothing fail* | **Kept, relabelled** — finding 95's shape a second time. It is a real optimisation, so it stays with the measurement that earns it: 12.6ms → 5.9ms on a file that does not import the symbol, which is nearly every file in a scan | this PR |
 | 106 | [#22](https://github.com/aryangorde8/bumpsmith/pull/22) | `_removed_symbol_sites` put imports from every lexical scope into one file-wide set, so a parameter, a local, or a comprehension target sharing the spelling was reported as a line that would break — and the refusal asserts a `NameError` at each line it names, which for those is a specific, checkable, **false** statement about somebody's code. False matches could also fill the five listed slots ahead of the real use | **Fixed** — scope is followed: `_uses_in_scope` subtracts what a scope binds itself before adding what its own import binds, and comprehensions are scopes with their targets as bindings. Verified before accepting: three of Qodo's four sub-claims reproduced; attribute access was already correct. 🔴 **`calls_in_scope` documents this exact failure one function above the one that had it** | this PR |
 | 107 | [#22](https://github.com/aryangorde8/bumpsmith/pull/22) | The unpacking-target test used `[a for (a, X) in pairs]`, where the only occurrence of `X` is a **store** — never a use whether unpacking shadows or not, so it passed with the guard removed — *self-found by breaking it* | **Fixed** — the element now reads the name. **The fourth instance of this shape** after 96, 97 and 103 | this PR |
+| 108 | [#23](https://github.com/aryangorde8/bumpsmith/pull/23) | The README said the log holds **65 findings**; it held 107 — and the paragraph carrying that number is the one ending *"a stale number was corrected in one file and left standing in two others a `grep` away"* — *self-found by reading the README cold, as a stranger would* | **Fixed** — the sentence is now checked against the log's own table by `tests/test_docs.py`, both the total and the three parts summing to it. Findings 64/65's shape, inside the paragraph that describes it | this PR |
+| 109 | [#23](https://github.com/aryangorde8/bumpsmith/pull/23) | This table skipped **20–31**: twelve findings with prose sections and no row, in the file the README calls *"every finding raised and what happened to it"* — *self-found the same way* | **Fixed** — twelve rows written from the prose, index now contiguous 1..N, and a test fails on the next gap. A finding in prose but absent from the index is indistinguishable from one nobody recorded | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -2164,6 +2178,61 @@ assuming; 106 was created three hours later by assuming instead of reading the
 function directly above. Neighbouring shapes: 95/105 (*a branch that is not the
 reason the code behaves as it does*) and 80–90 (*a guarantee argued for at
 length in a file that did not have it*).
+
+---
+
+## 108–109 · Reading the README the way a stranger would
+
+Both of these were found by following the README from a cold clone — installing
+from it, running its commands, and checking its claims one at a time — rather
+than by anything failing.
+
+Most of it held, and the strongest claim held best. The section headed *"One run,
+verbatim"* is **byte-identical** to a real run against fixture B from a fresh
+clone. `git -C ./fixtures/B diff` is empty; `git -C ./fixtures/B status
+--ignored` is exactly the seven `__pycache__/` it says and nothing else, which is
+also #21's barrier still doing its job. `--html` is 7,716 bytes with **zero**
+external references and **zero** script tags. "No runtime dependencies" is true:
+`pip install -e .` brings in nothing but bumpsmith.
+
+Two things were wrong, and both are about the review trail the README calls a
+deliverable.
+
+**108.** The README said the log holds **65 findings**. It held 107 — stale by
+42. The sentence that says it ends:
+
+> Two of the entries are that lesson failing: a stale number was corrected in one
+> file and left standing in two others a `grep` away.
+
+The paragraph describing the stale-number defect contained a stale number. That
+is findings 64 and 65 exactly, recurring inside their own description.
+
+The fix for the `Stop` count was to stop restating it, because the table was on
+the same page. That is not available here: the log is another file, and how much
+review this project has actually had is worth telling a reader. So the number is
+restated and **checked** — `tests/test_docs.py` reads the log's table and fails
+if the sentence disagrees with it, in the total and in the three parts summing to
+it.
+
+**109.** The log's index table skipped **20 through 31**. Twelve findings, all
+three of that round's pull requests (#10, #11, #12), had prose sections and no
+row. They were explained and unindexed, in the file whose own promise is that
+nothing closes silently. Prose is where a finding is explained; the table is
+where a reader learns it exists at all. The twelve rows are written from the
+prose, the index is contiguous, and a test fails on the next gap.
+
+**Finding 29 is worth the detour.** It is one of the twelve that had no row, and
+it reads: *a function parameter named `constr` was treated as pydantic's, because
+one module-wide import map was applied to every call in the file.* That is
+**106**, which Qodo raised on #22 — the same defect, in a new function, written
+directly beneath the docstring that `calls_in_scope` carries *because of finding
+29*. The project fixed it on #12, wrote down which half was dangerous, and
+reintroduced it eleven pull requests later.
+
+→ **The lesson, named: a defect the project has already fixed and documented is
+not thereby prevented.** 29 → 106 is that in its clearest form. Neighbouring
+shapes: 64/65 (*a summary restating a number the table already owns*) and 60/69
+(*prose stating a property is not the property*).
 
 ---
 

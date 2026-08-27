@@ -128,3 +128,95 @@ def test_readme_lists_every_outcome() -> None:
     assert not missing, (
         f"`Outcome` members absent from the paragraph that lists them: {', '.join(missing)}"
     )
+
+
+# --------------------------------------------------------------------------
+# The review log's own index
+#
+# Found by reading the README cold, the way somebody arriving at the repository
+# would. Two things were wrong at once, and both are this file's subject:
+# the README claimed 65 findings when the log held 107, and the log's table --
+# which the README calls "every finding raised and what happened to it" --
+# skipped 20 through 31 entirely. Those twelve had prose sections and no row, so
+# a reader scanning the index would not have found them.
+#
+# The stale sentence is the one that ends "a stale number was corrected in one
+# file and left standing in two others a `grep` away". Findings 64 and 65 named
+# that shape; this is it happening inside the paragraph that describes it.
+# --------------------------------------------------------------------------
+
+REVIEW_LOG = Path(__file__).resolve().parent.parent / "REVIEW-LOG.md"
+
+_ROW = re.compile(r"^\|\s*(\d+)\s*\|", re.MULTILINE)
+_README_TOTAL = re.compile(r"it holds \*\*(\d+) findings\*\*")
+_README_SPLIT = re.compile(
+    r"\*\*(\d+) findings\*\*: (\d+) raised by automated review, (\d+)\b.*?and (\d+)\b",
+    re.DOTALL,
+)
+
+
+def _review_log() -> str:
+    assert REVIEW_LOG.is_file(), f"expected the review log beside the README, at {REVIEW_LOG}"
+    return REVIEW_LOG.read_text(encoding="utf-8")
+
+
+def _logged_ids() -> list[int]:
+    return [int(match.group(1)) for match in _ROW.finditer(_review_log())]
+
+
+def test_the_log_index_numbers_every_finding_from_one_with_no_gaps() -> None:
+    """A table presenting itself as the index has to be one.
+
+    20-31 were missing when this was written: twelve findings with prose
+    sections and no row. Prose is where a finding is *explained*; the table is
+    where a reader finds out it exists at all. A gap there is indistinguishable
+    from a finding nobody recorded, which is exactly what the README promises
+    cannot happen here.
+    """
+    ids = _logged_ids()
+    assert ids, "no numbered rows found in REVIEW-LOG.md -- has the table format changed?"
+    expected = list(range(1, len(ids) + 1))
+    missing = sorted(set(expected) - set(ids))
+    assert ids == expected, (
+        f"the review log's index is not 1..{len(ids)} in order. "
+        f"Missing: {missing or 'none'}. First disagreement at position "
+        f"{next((i for i, (a, b) in enumerate(zip(ids, expected, strict=False)) if a != b), len(ids))}."
+    )
+
+
+def test_the_readme_finding_count_matches_the_log_it_describes() -> None:
+    """The README's most quotable number, checked against the table that owns it.
+
+    Findings 64 and 65 are a summary restating a number the table already owns.
+    The `Stop` count was fixed by not restating it, because the table was on the
+    same page. This one is in another file and is worth telling a reader, so it
+    is restated and *checked* instead.
+    """
+    match = _README_TOTAL.search(_readme())
+    assert match is not None, (
+        "the README no longer states a finding total in the form "
+        "'it holds **N findings**'. If the wording changed, update this anchor."
+    )
+    claimed = int(match.group(1))
+    actual = len(_logged_ids())
+    assert claimed == actual, (
+        f"the README says the log holds {claimed} findings; its table has {actual} rows."
+    )
+
+
+def test_the_readme_finding_breakdown_adds_up_to_its_own_total() -> None:
+    """Three sources, and they have to sum to the number beside them.
+
+    This is the arithmetic version of the same defect: a total corrected without
+    the parts, or the reverse, reads as precise while being wrong.
+    """
+    match = _README_SPLIT.search(_readme())
+    assert match is not None, (
+        "could not read the README's finding breakdown. If the sentence was "
+        "reworded, update this anchor."
+    )
+    total, review, harness, author = (int(group) for group in match.groups())
+    assert review + harness + author == total, (
+        f"the README's breakdown does not sum to its own total: "
+        f"{review} + {harness} + {author} = {review + harness + author}, stated as {total}."
+    )
