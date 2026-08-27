@@ -360,11 +360,32 @@ the first version of this, and a docstring is not an enforcement.
 
 Running against the right tree is not enough, because pytest does not take its
 settings from the tree it runs in. It walks **upward** for the first file that
-counts as an inifile — `pytest.ini`, a `pyproject.toml` with
-`[tool.pytest.ini_options]`, a `tox.ini` with `[pytest]`, a `setup.cfg` with
-`[tool:pytest]` — and whatever it finds sets `rootdir`, `addopts` and
+counts as an inifile, and whatever it finds sets `rootdir`, `addopts` and
 `testpaths`. A repository that configures nothing itself therefore inherits the
 configuration of whatever it happens to sit beneath.
+
+Seven filenames count, in this order, and the rules are not uniform:
+
+| file | counts when | notes |
+|---|---|---|
+| `pytest.toml` | always, even empty | pytest 9 |
+| `.pytest.toml` | always, even empty | pytest 9 |
+| `pytest.ini` | always, even empty | |
+| `.pytest.ini` | always, even empty | pytest 9 |
+| `pyproject.toml` | `[tool.pytest.ini_options]` is present — **or** `[tool.pytest]` holds something | an empty `[tool.pytest]` is walked past; an empty `ini_options` is not |
+| `tox.ini` | `[pytest]` is present | |
+| `setup.cfg` | `[tool:pytest]` is present | |
+
+That table was measured against the pinned pytest, not read off a page.
+`pytest --collect-only -v` prints `configfile:` and names every file it ignored,
+so it will tell you which of several it picked. The first version of this check
+knew only `pytest.ini` and would walk straight past a repository that configured
+itself in any of the other three dedicated names — refusing it for a
+configuration that was not governing it.
+
+`pytest -c FILE` replaces discovery outright: pytest reads that file and puts
+`rootdir` beside it, wherever it is. So the check reads the argv too, and judges
+the named file instead of walking.
 
 That is not hypothetical. `python -m bumpsmith.fixtures` clones into
 `./fixtures/` **inside this checkout**, and this checkout sets
@@ -388,11 +409,19 @@ once before the first run, never after a verdict exists to argue with.
 The check is deliberately blunt. Rather than decide which pytest settings are
 dangerous — a list that would be wrong the first time pytest grows an option —
 an outside inifile that sets **anything at all** is refused, and one that sets
-nothing is allowed through. An empty `[pytest]` section is a real and useful
-thing: it counts as an inifile, so it stops the walk, while contributing no
-settings. That is how a directory of cloned subjects keeps the host checkout
-out of them, and `python -m bumpsmith.fixtures` writes exactly such a barrier
-into `fixtures/` when it clones.
+nothing is allowed through. An empty `pytest.ini` is a real and useful thing: it
+counts as configuration, so it stops the walk, while contributing no settings.
+That is how a directory of cloned subjects keeps the host checkout out of them,
+and `python -m bumpsmith.fixtures` writes exactly such a barrier into
+`fixtures/` when it clones. It must be a **file** — pytest reads configuration
+from files, so a directory of that name stops nothing, and a guard that only
+asked whether the path existed would report a barrier that was not there.
+
+Only a command that recognisably runs pytest is checked at all: pytest as the
+program, or `-m pytest` given to an interpreter. `make pytest` is an ordinary
+way to spell a suite command and is left alone, as are `tox` and `uv run` — the
+refusal is about pytest's discovery, and one nobody could act on would be worse
+than none.
 
 Of the four fixtures, three configure pytest themselves and are unaffected;
 only B does not, which is why the barrier exists. The refusal names the file and

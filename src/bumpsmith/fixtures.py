@@ -412,13 +412,32 @@ def write_barrier(root: Path) -> Path:
     Returns:
         The path written, or the existing path left alone.
 
-    An existing file is never overwritten. It may be somebody's deliberate
+    Raises:
+        FixtureError: if the path is taken by something that is not a file, or
+            the file cannot be written.
+
+    An existing *file* is never overwritten. It may be somebody's deliberate
     configuration for this directory, and silently replacing it would be the
     same class of surprise this function exists to prevent.
+
+    Anything else occupying that name is refused rather than accepted. pytest
+    only reads configuration from files, so a directory called ``pytest.ini``
+    stops nothing -- and an earlier version, asking only whether the path
+    existed, would have reported a barrier that was not there and let every
+    clone inherit the checkout's settings in silence.
     """
     barrier = root / BARRIER_NAME
-    if not barrier.exists():
+    if barrier.is_file():
+        return barrier
+    if barrier.exists():
+        raise FixtureError(
+            f"Refusing to clone: {barrier} is not a file, so pytest will not read it as "
+            f"configuration and the fixture would inherit this checkout's pytest settings."
+        )
+    try:
         barrier.write_text(BARRIER, encoding="utf-8")
+    except OSError as exc:
+        raise FixtureError(f"Could not write the pytest barrier at {barrier}: {exc}") from exc
     return barrier
 
 

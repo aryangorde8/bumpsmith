@@ -66,12 +66,12 @@ from collections.abc import Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from enum import Enum
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from bumpsmith.apply import ApplyError, Attempt, Edit, RevertError, attempt
 from bumpsmith.failures import Failure, parse_failures
 from bumpsmith.rewrite import Plan, UnsupportedRuleError, plan
-from bumpsmith.rootdir import describe, foreign_config
+from bumpsmith.rootdir import describe, foreign_config, runs_pytest
 from bumpsmith.rules import Rule, RuleKind, ScanResult, find_matches, write_rule
 from bumpsmith.run import Completed, RunError, Runner, Where
 
@@ -364,27 +364,6 @@ def _writes(planned: Plan) -> tuple[Edit, ...]:
     return tuple(edit for edit in planned.edits if edit.changes_anything)
 
 
-_PYTEST_NAMES = frozenset({"pytest", "py.test"})
-
-
-def _runs_pytest(command: Sequence[str]) -> bool:
-    """Whether this argv recognisably runs pytest.
-
-    Deliberately narrow. The configuration check below is about pytest's rootdir
-    algorithm and nothing else, so a command this cannot recognise -- a tox run,
-    a make target, somebody's shell wrapper -- is left alone rather than refused
-    on a guess. Under-recognising costs a check that does not happen;
-    over-recognising costs a refusal nobody can act on.
-
-    One name check covers every spelling, ``python -m pytest`` included: the
-    module argument *is* the bare word ``pytest``, so a separate ``-m`` branch
-    can never be the reason this returns ``True``. There was one, and a
-    parametrised test appeared to cover it -- deleting the branch changed no
-    answer, which is how it was found.
-    """
-    return any(PurePosixPath(argument).name in _PYTEST_NAMES for argument in command)
-
-
 @dataclass(frozen=True, slots=True)
 class _Setup:
     """The inputs that do not change between steps."""
@@ -447,8 +426,8 @@ def migrate(
     # see, and the whole point is that the number should never have been
     # produced. Nothing has been applied at this line, so there is nothing to
     # take back and no step to record.
-    if _runs_pytest(command):
-        outside = foreign_config(root)
+    if runs_pytest(command):
+        outside = foreign_config(root, command)
         if outside is not None:
             return Migration(
                 steps=(),

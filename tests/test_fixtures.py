@@ -559,3 +559,62 @@ def test_the_barrier_is_a_pytest_ini_because_the_others_do_not_count_when_empty(
     """
     assert BARRIER_NAME == "pytest.ini"
     assert "[pytest]" in BARRIER
+
+
+def test_a_directory_in_the_barriers_place_is_refused_not_accepted(tmp_path: Path) -> None:
+    """pytest reads configuration from files, so a directory stops nothing.
+
+    Asking only whether the path *existed* reported a barrier that was not there
+    and let every clone inherit the checkout's settings in silence -- the worst
+    available failure for a guard, which is to appear to be working.
+    """
+    root = tmp_path / "work"
+    root.mkdir()
+    (root / BARRIER_NAME).mkdir()
+
+    with pytest.raises(FixtureError, match="is not a file"):
+        write_barrier(root)
+
+
+def test_a_barrier_that_cannot_be_written_fails_that_fixture_not_the_command(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`clone_all` converts `FixtureError` per fixture; an `OSError` would escape.
+
+    A permission or disk-full error ended the whole command in a traceback, so
+    the fixtures that would have worked were never attempted.
+
+    The failure here is a dangling symlink rather than a permission bit: it is
+    deterministic, needs no `chmod` that a root-owned CI would ignore, and lands
+    on the *write* rather than on the "not a file" check above -- which is the
+    point. A first version of this test used a directory, which tripped the other
+    guard and left this one covered by nothing.
+    """
+    origin, sha, _ = _origin_with_two_commits(tmp_path)
+    manifest = _write_manifest(tmp_path, _MANIFEST_TEMPLATE.format(url=f"file://{origin}", sha=sha))
+    root = tmp_path / "work"
+    root.mkdir()
+    (root / BARRIER_NAME).symlink_to(root / "no-such-directory" / "target.ini")
+
+    exit_code = main(["--manifest", str(manifest), "--root", str(root)])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "FAIL  demo" in captured.err
+    assert "Could not write the pytest barrier" in captured.err
+
+
+def test_a_directory_in_the_barriers_place_fails_that_fixture_too(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The same routing, for the other of the two ways the barrier can be refused."""
+    origin, sha, _ = _origin_with_two_commits(tmp_path)
+    manifest = _write_manifest(tmp_path, _MANIFEST_TEMPLATE.format(url=f"file://{origin}", sha=sha))
+    root = tmp_path / "work"
+    root.mkdir()
+    (root / BARRIER_NAME).mkdir()
+
+    exit_code = main(["--manifest", str(manifest), "--root", str(root)])
+
+    assert exit_code == 1
+    assert "is not a file" in capsys.readouterr().err

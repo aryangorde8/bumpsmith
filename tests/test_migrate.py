@@ -863,25 +863,21 @@ def test_a_command_that_is_not_recognisably_pytest_is_left_alone(tmp_path: Path)
         '[tool.pytest.ini_options]\naddopts = "-q"\n', encoding="utf-8"
     )
 
-    result = migrate(root, _Scripted(GREEN), ("make", "test"))
+    result = migrate(root, _Scripted(GREEN), ("make", "pytest"))
 
     assert result.stop is Stop.GREEN
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        ("pytest", "-q"),
-        ("py.test", "-q"),
-        ("/somewhere/else/bin/pytest",),
-        ("python", "-m", "pytest"),
-        ("./venv/bin/python", "-m", "pytest", "-q"),
-    ],
-)
-def test_the_usual_ways_of_spelling_a_pytest_run_are_all_recognised(
+@pytest.mark.parametrize("command", [("pytest", "-q"), ("./venv/bin/python", "-m", "pytest")])
+def test_the_recognizer_is_actually_wired_into_the_loop(
     tmp_path: Path, command: tuple[str, ...]
 ) -> None:
-    """Each of these is how somebody actually writes it on a command line."""
+    """One case per shape it accepts -- the command itself, and `-m`.
+
+    The full matrix of spellings, and of things that only look like pytest, is
+    `test_rootdir.py`'s. This is the wiring: a recognizer that worked perfectly
+    and was never consulted would pass every test over there.
+    """
     root = _repo(tmp_path / "repo")
     (tmp_path / "pyproject.toml").write_text(
         '[tool.pytest.ini_options]\naddopts = "-q"\n', encoding="utf-8"

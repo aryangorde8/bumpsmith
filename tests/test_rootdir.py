@@ -13,7 +13,15 @@ from pathlib import Path
 import pytest
 
 from bumpsmith.fixtures import BARRIER_NAME, write_barrier
-from bumpsmith.rootdir import Governing, describe, foreign_config, governing_config
+from bumpsmith.rootdir import (
+    CANDIDATES,
+    Governing,
+    config_argument,
+    describe,
+    foreign_config,
+    governing_config,
+    runs_pytest,
+)
 
 CONFIGURING = '[tool.pytest.ini_options]\naddopts = "-q"\ntestpaths = ["tests"]\n'
 NEUTRAL = "# nothing here\n[pytest]\n"
@@ -362,3 +370,292 @@ def test_pytest_agrees_about_the_barrier(tmp_path: Path) -> None:
     behind_barrier = _run()
     assert foreign_config(root) is None, "predicted: the barrier stops the walk"
     assert behind_barrier.returncode == 0, behind_barrier.stdout + behind_barrier.stderr
+
+
+# --------------------------------------------------------------------------
+# The four dedicated filenames pytest 9 added
+# --------------------------------------------------------------------------
+
+_ALL_SEVEN: tuple[tuple[str, str, str], ...] = (
+    ("pytest.toml", "", '[pytest]\naddopts = ["-q"]\n'),
+    (".pytest.toml", "", '[pytest]\naddopts = ["-q"]\n'),
+    ("pytest.ini", "", "[pytest]\naddopts = -q\n"),
+    (".pytest.ini", "", "[pytest]\naddopts = -q\n"),
+    ("pyproject.toml", "", '[tool.pytest.ini_options]\naddopts = "-q"\n'),
+    ("tox.ini", "", "[pytest]\naddopts = -q\n"),
+    ("setup.cfg", "", "[tool:pytest]\naddopts = -q\n"),
+)
+"""Every name pytest reads, with an empty spelling and a configured one.
+
+The order is pytest's own precedence, measured with `--collect-only -v`, which
+prints `configfile:` and warns which files it ignored.
+"""
+
+
+def test_the_candidate_list_is_pytests_own_order() -> None:
+    """Ordering is not cosmetic: it decides which of several files wins."""
+    assert tuple(name for name, _, _ in _ALL_SEVEN) == CANDIDATES
+
+
+@pytest.mark.parametrize(("name", "_empty", "configured"), _ALL_SEVEN)
+def test_every_name_pytest_reads_is_seen_as_configuration(
+    tmp_path: Path, name: str, _empty: str, configured: str
+) -> None:
+    """A configured file above the subject is foreign whichever name it uses.
+
+    The dangerous direction. Missing a name means missing a configuration that
+    really does govern the suite, and the refusal never fires.
+    """
+    outer, root = _tree(tmp_path)
+    (outer / name).write_text(configured, encoding="utf-8")
+
+    found = foreign_config(root)
+
+    assert found is not None, f"{name} was not recognised as configuration"
+    assert found.path == outer / name
+    assert found.keys == ("addopts",)
+
+
+@pytest.mark.parametrize("name", ["pytest.toml", ".pytest.toml", "pytest.ini", ".pytest.ini"])
+def test_the_four_dedicated_names_count_while_completely_empty(tmp_path: Path, name: str) -> None:
+    """All four are barriers, not just `pytest.ini`.
+
+    The other direction, and the one that bit: a subject configuring itself in
+    `pytest.toml` was walked straight past and refused for a configuration that
+    was not governing it.
+    """
+    _, root = _tree(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(CONFIGURING, encoding="utf-8")
+    (root / name).write_text("", encoding="utf-8")
+
+    found = governing_config(root)
+
+    assert found is not None
+    assert found.path == root / name, f"an empty {name} did not stop the walk"
+    assert found.neutral
+    assert foreign_config(root) is None
+
+
+def test_the_nearest_name_wins_across_all_seven(tmp_path: Path) -> None:
+    """With every name present, the winner is the first in pytest's order.
+
+    Removed one at a time, the next in line takes over -- which is how the order
+    was established rather than assumed.
+    """
+    outer, root = _tree(tmp_path)
+    for name, _, configured in _ALL_SEVEN:
+        (outer / name).write_text(configured, encoding="utf-8")
+
+    for name, _, _ in _ALL_SEVEN:
+        found = governing_config(root)
+        assert found is not None
+        assert found.path == outer / name, f"expected {name} to win"
+        (outer / name).unlink()
+
+    assert governing_config(root) is None
+
+
+def test_the_native_pyproject_table_counts_only_when_it_holds_something(
+    tmp_path: Path,
+) -> None:
+    """`[tool.pytest]` and `[tool.pytest.ini_options]` do not behave alike.
+
+    An empty `ini_options` counts as configuration; an empty `[tool.pytest]` is
+    walked straight past. Measured, not assumed, because the asymmetry is the
+    sort of thing a reasonable person would get backwards.
+    """
+    outer, root = _tree(tmp_path)
+
+    (outer / "pyproject.toml").write_text("[tool.pytest]\n", encoding="utf-8")
+    assert governing_config(root) is None, "an empty [tool.pytest] should not count"
+
+    (outer / "pyproject.toml").write_text('[tool.pytest]\naddopts = ["-q"]\n', encoding="utf-8")
+    found = governing_config(root)
+    assert found is not None
+    assert found.keys == ("addopts",)
+
+    (outer / "pyproject.toml").write_text("[tool.pytest.ini_options]\n", encoding="utf-8")
+    empty = governing_config(root)
+    assert empty is not None, "an empty [tool.pytest.ini_options] does count"
+    assert empty.neutral
+
+
+# --------------------------------------------------------------------------
+# A command that names its own configuration
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        (("pytest", "-c", "custom.ini"), "custom.ini"),
+        (("pytest", "-c=custom.ini"), "custom.ini"),
+        (("pytest", "-ccustom.ini"), "custom.ini"),
+        (("pytest", "--config-file", "custom.ini"), "custom.ini"),
+        (("pytest", "--config-file=custom.ini"), "custom.ini"),
+        (("pytest", "-q"), None),
+        (("pytest", "-c"), None),
+    ],
+)
+def test_the_config_option_is_read_in_every_spelling(
+    command: tuple[str, ...], expected: str | None
+) -> None:
+    """argparse accepts all five, so a reader that knew one would miss four.
+
+    `-c` with nothing after it returns nothing: that is a broken command line,
+    and pytest rejects it on its own terms rather than ours.
+    """
+    assert config_argument(command) == expected
+
+
+def test_a_named_configuration_outside_the_tree_is_refused(tmp_path: Path) -> None:
+    """`-c` replaces discovery, so the walk's answer is not the one that governs.
+
+    The subject has its own barrier here. Walking would find it and allow the
+    run; pytest would ignore it entirely and read the named file instead.
+    """
+    outer, root = _tree(tmp_path)
+    (root / "pytest.ini").write_text("", encoding="utf-8")
+    (outer / "custom.ini").write_text("[pytest]\naddopts = -m 'not slow'\n", encoding="utf-8")
+
+    assert foreign_config(root) is None, "the walk alone sees the subject's own barrier"
+
+    found = foreign_config(root, ("pytest", "-c", "../custom.ini"))
+
+    assert found is not None
+    assert found.path == outer / "custom.ini"
+    assert "not slow" in describe(found)
+
+
+def test_a_named_configuration_inside_the_tree_is_allowed(tmp_path: Path) -> None:
+    """And the other way round: naming your own config is the remedy, not the offence."""
+    outer, root = _tree(tmp_path)
+    (outer / "pyproject.toml").write_text(CONFIGURING, encoding="utf-8")
+    (root / "mine.ini").write_text("[pytest]\naddopts = -q\n", encoding="utf-8")
+
+    assert foreign_config(root) is not None, "the walk alone finds the outer configuration"
+    assert foreign_config(root, ("pytest", "-c", "mine.ini")) is None
+
+
+def test_a_named_configuration_that_is_not_there_is_not_our_complaint(
+    tmp_path: Path,
+) -> None:
+    """pytest exits before running anything, which the loop already reports.
+
+    Refusing here would put a configuration complaint in front of a plain typo.
+    """
+    outer, root = _tree(tmp_path)
+    (outer / "pyproject.toml").write_text(CONFIGURING, encoding="utf-8")
+
+    assert foreign_config(root, ("pytest", "-c", "nope.ini")) is None
+
+
+# --------------------------------------------------------------------------
+# Which commands are pytest at all
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ("pytest", "-q"),
+        ("py.test", "-q"),
+        ("/somewhere/else/bin/pytest",),
+        ("python", "-m", "pytest"),
+        ("./venv/bin/python", "-m", "pytest", "-q"),
+        ("python3.13", "-mpytest"),
+        ("python", "-m", "coverage", "run", "-m", "pytest"),
+    ],
+)
+def test_pytest_in_a_position_where_it_could_be_the_program(command: tuple[str, ...]) -> None:
+    """Each of these is how somebody actually writes it on a command line."""
+    assert runs_pytest(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ("make", "pytest"),
+        ("python", "script.py", "pytest"),
+        ("python", "-c", "print('ok')", "pytest"),
+        ("tox", "-e", "py313"),
+        ("./run-tests.sh",),
+        (),
+    ],
+)
+def test_the_word_pytest_somewhere_in_the_argv_is_not_a_pytest_run(
+    command: tuple[str, ...],
+) -> None:
+    """`make pytest` is an ordinary way to spell a suite command.
+
+    Refusing it would be a refusal nobody could act on, and the recognizer's own
+    docstring promises otherwise. An earlier version scanned every position and
+    broke that promise for all five of these.
+    """
+    assert not runs_pytest(command)
+
+
+@pytest.mark.parametrize("barrier", ["pytest.toml", ".pytest.toml", "pytest.ini", ".pytest.ini"])
+def test_pytest_agrees_which_names_are_barriers(tmp_path: Path, barrier: str) -> None:
+    """Each of the four, checked against the program the claim is about.
+
+    `test_pytest_agrees_about_the_barrier` covers `pytest.ini` end to end. This
+    asks the narrower question for all four names at once, by reading back the
+    `configfile:` pytest prints -- which is pytest stating outright which file it
+    chose, rather than us inferring it from behaviour.
+    """
+    _, root = _tree(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(CONFIGURING, encoding="utf-8")
+    (root / barrier).write_text("", encoding="utf-8")
+    tests = root / "tests"
+    tests.mkdir()
+    (tests / "test_x.py").write_text("def test_one() -> None:\n    assert True\n", encoding="utf-8")
+
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-m", "pytest", "--collect-only", "-v"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert f"configfile: {barrier}" in result.stdout, result.stdout
+    found = governing_config(root)
+    assert found is not None
+    assert found.path == root / barrier, "pytest and this module disagree about the file"
+    assert foreign_config(root) is None
+
+
+def test_pytest_agrees_about_an_explicitly_named_configuration(tmp_path: Path) -> None:
+    """`-c` really does override a barrier the subject already has.
+
+    The premise finding 2 rests on. Without this the `-c` handling could be
+    guarding against something pytest does not do.
+    """
+    outer, root = _tree(tmp_path)
+    (root / "pytest.ini").write_text("", encoding="utf-8")
+    (outer / "custom.ini").write_text("[pytest]\naddopts = --strict-markers\n", encoding="utf-8")
+    tests = root / "tests"
+    tests.mkdir()
+    (tests / "test_x.py").write_text(
+        "import pytest\n\n\n@pytest.mark.unregistered\ndef test_one() -> None:\n    assert True\n",
+        encoding="utf-8",
+    )
+
+    def _run(*extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # noqa: S603
+            [sys.executable, "-m", "pytest", "-q", *extra],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    assert _run().returncode == 0, "the subject's own barrier governs an ordinary run"
+    assert foreign_config(root) is None
+
+    named = _run("-c", "../custom.ini")
+
+    assert named.returncode != 0, "-c did not override the barrier"
+    assert "unregistered" in named.stdout + named.stderr
+    assert foreign_config(root, ("pytest", "-c", "../custom.ini")) is not None
