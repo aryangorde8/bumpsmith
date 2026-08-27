@@ -606,7 +606,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 27 August 2026 it holds **128 findings**: 88 raised by automated review, 4
+As of 27 August 2026 it holds **129 findings**: 89 raised by automated review, 4
 that only a live run against the harness could have raised, and 36 the author
 found rather than review. The count is not maintained by hand -- `tests/test_docs.py`
 reads the log's own table and fails if this sentence and that table disagree,
@@ -660,8 +660,8 @@ all. The point of keeping this paragraph is that the follow-up review is not a
 formality — it found real defects in merged code, which is the argument for
 requiring one.
 
-**The whole trail.** Twenty-seven pull requests; Qodo reviewed every one;
-twenty-three raised at least one finding, **88 in total**. Every finding is in
+**The whole trail.** Twenty-eight pull requests; Qodo reviewed every one;
+twenty-four raised at least one finding, **89 in total**. Every finding is in
 [`REVIEW-LOG.md`](REVIEW-LOG.md) with what happened to it and why.
 
 **What was intentionally dismissed.** Three findings were rejected rather than

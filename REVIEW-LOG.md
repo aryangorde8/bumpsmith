@@ -147,6 +147,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 126 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | The check compares blob **text** and never the file mode, so a pre-existing executable-bit change on a target passes whenever the contents match. Staging the path records the mode change — in a writer that goes out of its way to preserve permissions rather than set them | **Fixed** — the committed mode is read with `ls-tree` and compared against the file's execute bit. 🔴 **The test fake never answered `ls-tree` at all**, so a mode check added without touching the harness would have passed every test while never running | this PR |
 | 127 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | **The gate one.** `propose()` validates HEAD, the index and the target contents *before* the blocking approval prompt, and `_do_open()` revalidates none of them after it. Anything that changes while a human is deciding — another process, another shell, the person themselves — is inside the approval and outside the checks. The window is bounded by human attention, which is to say it is the longest window in the program | **Fixed** — `_do_open` runs the whole check again before it touches anything, against the contents the approval was granted for, so `Proposal` now carries `originals` and derives `paths` from them rather than storing both. 🔴 **The module already knew about this window for one thing**: the push goes to the approved *URL* rather than the remote name, because `git remote set-url` could land in it. The tree can move in the same window and nothing looked. Tested by a gate whose `decide` changes the repository on its way to returning `Allow` — nothing else in the suite holds the prompt open | this PR |
 | 128 | [#28](https://github.com/aryangorde8/bumpsmith/pull/28) | The publish test fake built its committed-blobs map with `dict(committed or {...})`, so passing `{}` — a repository where the target is **untracked**, the exact state finding 124 is about — silently got the default map with the file present. The case could not be expressed in the suite that was supposed to check it — *self-found while writing 124's guard* | **Fixed** — `is not None`, not `or`. The same shape as the defect it was blocking: an absence read as *nothing was specified* rather than as *the answer* | this PR |
+| 129 | [#28](https://github.com/aryangorde8/bumpsmith/pull/28) | Revalidating after the approval — the fix for 127, in this same pull request — checked the target against its **pre-migration** contents and never against what the migration actually wrote. HEAD is unchanged either way, so a target edited while the prompt waits passes every question being asked and is staged as this migration's output. Replacing it with a **symlink** passes too, because `is_file()` follows the link and answers about a different file | **Fixed** — `Proposal` carries `(path, before, after, encoding)` and the check asks both questions: *is somebody else's work in the way* against `before`, *is ours still there* against `after`, read back with the encoding and `newline=""` it was written with. Symlinks refused outright. 🔴 **Eighth instance of the shape, and the sharpest**: the fix for a window left the window open for the one thing the window is about | this PR |
 
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
@@ -2566,7 +2567,24 @@ case that finding 124 is entirely about could not be written. That is finding
 128, and it is the same shape as the defect it was hiding — an absence read as
 "nothing was specified" rather than as the answer.
 
-**5 of 5 guards caught** when broken one at a time, plus a no-op control.
+Then Qodo reviewed the fix and raised **129**, which is the best finding in this
+log. Revalidating after the approval compared each target against what it held
+*before* the migration — and never against what the migration wrote. HEAD is
+unchanged either way, so somebody editing a target while the prompt waits passes
+every question the revalidation asks, and is then staged as this run's output.
+Replacing the file with a symlink passes as well, because `is_file()` follows the
+link and answers about a different file.
+
+The fix for the window left the window open for the one thing the window is
+about. It is the eighth instance of the shape this log keeps naming, and the
+first where the defect is *inside the remedy for the previous instance of it* —
+not prose that failed to match code, but a repair that reproduced the flaw it was
+repairing, one level down. `Proposal` now carries `(path, before, after,
+encoding)` and the check asks both questions, reading the file back with the
+encoding and `newline=""` it was written with.
+
+**7 of 7 guards caught** when broken one at a time, plus a no-op control on each
+round.
 
 ## How this stays honest
 

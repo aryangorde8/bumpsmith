@@ -148,13 +148,13 @@ class Proposal:
     base: str
     title: str
     body: str
-    originals: tuple[tuple[str, str], ...]
-    """Every path the migration wrote, sorted, paired with what that file held
-    when the migration first found it.
+    targets: tuple[tuple[str, str, str, str], ...]
+    """Every path the migration wrote, sorted: ``(path, before, after, encoding)``.
 
     Carried rather than discarded because the checks have to be answerable
-    *again* after the approval, and the contents are what they are answered
-    against. See :func:`_do_open`."""
+    *again* after the approval, and these are what they are answered against --
+    ``before`` for "is somebody else's work in the way", ``after`` for "is ours
+    still there". See :func:`_do_open`."""
 
     @property
     def paths(self) -> tuple[str, ...]:
@@ -165,7 +165,7 @@ class Proposal:
         of one fact is two chances to disagree, and this one decides what gets
         staged.
         """
-        return tuple(path for path, _ in self.originals)
+        return tuple(target[0] for target in self.targets)
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,20 +324,24 @@ def _title_for(migration: Migration) -> str:
     return f"pydantic v2: {_count(len(rules), 'migration rule')} applied, suite green"
 
 
-def _originals_of(migration: Migration, root: Path) -> dict[str, str]:
-    """Every file the migration wrote, and what it held when the migration found it.
+def _targets_of(migration: Migration, root: Path) -> dict[str, tuple[str, str, str]]:
+    """Every file the migration wrote: what it held before, and what we left there.
 
     Taken from the plans of steps that were *applied*. A planned edit that never
     reached the disk is not a file to stage, and staging it would either do
     nothing or -- worse, if somebody else had since edited it -- commit their
     change as this tool's.
 
-    The *first* ``before`` for each path, not the last. A chain that edits one
-    file at steps 1 and 3 records step 3's ``before`` as step 1's output, and
-    the question being answered later is what the file looked like before
-    bumpsmith touched it at all.
+    The *first* ``before`` for each path and the *last* ``after``. A chain that
+    edits one file at steps 1 and 3 records step 3's ``before`` as step 1's
+    output; the questions asked later are what the file looked like before
+    bumpsmith touched it at all, and what bumpsmith left on the disk.
+
+    The encoding comes with them because :func:`~bumpsmith.apply._write` writes
+    in it with ``newline=""``, so it is also how the file has to be read back to
+    be compared with what was written.
     """
-    originals: dict[str, str] = {}
+    targets: dict[str, tuple[str, str, str]] = {}
     for step in migration.steps:
         if not step.applied or step.plan is None:
             continue
@@ -351,8 +355,9 @@ def _originals_of(migration: Migration, root: Path) -> dict[str, str]:
                     f"{edit.path} is outside {root}; refusing to stage a file the "
                     "migration should never have been able to write"
                 ) from exc
-            originals.setdefault(name, edit.before)
-    return originals
+            before = targets[name][0] if name in targets else edit.before
+            targets[name] = (before, edit.after, edit.encoding)
+    return targets
 
 
 def propose(
@@ -385,8 +390,8 @@ def propose(
     """
     if migration.outcome is not Outcome.MIGRATED:
         raise NothingToPublishError(_why_nothing(migration.outcome))
-    originals = _originals_of(migration, root)
-    if not originals:
+    targets = _targets_of(migration, root)
+    if not targets:
         raise NothingToPublishError(
             "the run reports edits were kept, but none of them changed a file. "
             "There is nothing to put in a pull request."
@@ -394,7 +399,7 @@ def propose(
     url = _push_url(runner, root, remote)
     if not base:
         base = _default_base(runner, root, remote)
-    _require_a_publishable_tree(runner, root, remote, base, branch, originals)
+    _require_a_publishable_tree(runner, root, remote, base, branch, targets)
 
     return Proposal(
         root=root,
@@ -404,7 +409,7 @@ def propose(
         base=base,
         title=_title_for(migration),
         body=body_for(migration),
-        originals=tuple(sorted(originals.items())),
+        targets=tuple((path, *rest) for path, rest in sorted(targets.items())),
     )
 
 
@@ -445,7 +450,7 @@ def _require_a_publishable_tree(
     remote: str,
     base: str,
     branch: str,
-    originals: Mapping[str, str],
+    targets: Mapping[str, tuple[str, str, str]],
 ) -> None:
     """Refuse unless the only thing this would publish is the migration.
 
@@ -515,7 +520,7 @@ def _require_a_publishable_tree(
         )
 
     modified = {line for line in _git(runner, root, "diff", "--name-only").splitlines() if line}
-    strays = sorted(modified - set(originals))
+    strays = sorted(modified - set(targets))
     if strays:
         listed = "\n  ".join(strays)
         raise NothingToPublishError(
@@ -524,7 +529,7 @@ def _require_a_publishable_tree(
             "Commit or stash them first."
         )
 
-    for path, first_read in originals.items():
+    for path, (first_read, written, encoding) in targets.items():
         # `show HEAD:path` fails for a path that is not in the commit, which is
         # what an untracked file is. The scan walks Python files, not *tracked*
         # Python files, so the migration reaches them -- and `git add` on one
@@ -554,6 +559,26 @@ def _require_a_publishable_tree(
             raise NothingToPublishError(
                 f"{path} is not there any more, though the migration wrote it. Something "
                 "removed it after the run. Nothing here is safe to publish."
+            )
+        # Following a symlink to answer "is this the file we wrote" answers it
+        # about a different file. `is_file()` follows; `is_symlink()` is the
+        # question actually being asked.
+        if on_disk.is_symlink():
+            raise NothingToPublishError(
+                f"{path} is a symlink now, and the migration wrote a file there. "
+                "Staging it would publish the link rather than the change."
+            )
+        # And the contents. Everything above asks whether somebody else's work is
+        # in the way; this asks whether ours is still there. Between the checks
+        # and the commit sits a human deciding, and a target edited in that time
+        # passes every question about HEAD while being staged as our output.
+        with on_disk.open(encoding=encoding, newline="") as handle:
+            on_disk_now = handle.read()
+        if on_disk_now != written:
+            raise NothingToPublishError(
+                f"{path} no longer holds what the migration wrote. Something changed it "
+                "since the run, so staging it would publish that change under this "
+                "migration's name rather than the migration."
             )
         entry = _git(runner, root, "ls-tree", "HEAD", "--", path).split()
         committed_mode = entry[0] if entry else ""
@@ -667,7 +692,7 @@ def _do_open(proposal: Proposal, runner: Runner) -> Opened:
         proposal.remote,
         proposal.base,
         proposal.branch,
-        dict(proposal.originals),
+        {path: (before, after, enc) for path, before, after, enc in proposal.targets},
     )
     _git(runner, root, "checkout", "-b", proposal.branch)
     # `--` and one path at a time. Not `-A`, not `-a`, and not a glob: the tree

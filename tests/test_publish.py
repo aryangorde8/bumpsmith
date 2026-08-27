@@ -14,7 +14,7 @@ make the most important assertion in this file impossible to write: that after a
 denial, nothing happened anywhere.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -737,6 +737,18 @@ def test_a_target_removed_after_the_run_is_refused(tmp_path: Path) -> None:
     assert git.written == [], git.written
 
 
+class _SaysAndDoes:
+    """Approves, and runs `action` on the way out -- the approval window."""
+
+    def __init__(self, decision: Decision, action: "Callable[[], object]") -> None:
+        self.decision = decision
+        self.action = action
+
+    def decide(self, request: Request) -> Decision:  # noqa: ARG002
+        self.action()
+        return self.decision
+
+
 class _SaysAndMovesTheTree:
     """Approves, and changes the repository on the way out.
 
@@ -793,8 +805,49 @@ def test_an_unmoved_tree_still_publishes_after_the_approval(tmp_path: Path) -> N
     assert written == ["checkout", "add", "commit", "push"], written
 
 
-def test_the_proposals_paths_come_from_its_originals(tmp_path: Path) -> None:
+def test_the_proposals_paths_come_from_its_targets(tmp_path: Path) -> None:
     """Derived, not stored beside them: two copies is two chances to disagree."""
     proposal = _proposal(tmp_path)
-    assert proposal.paths == tuple(path for path, _ in proposal.originals)
+    assert proposal.paths == tuple(target[0] for target in proposal.targets)
     assert proposal.paths == ("emnify/models.py",)
+
+
+def test_a_target_edited_while_a_human_decides_is_refused(tmp_path: Path) -> None:
+    """Finding 129, and the half of the window the first fix left open.
+
+    Revalidating against `before` answers "is somebody else's work in the way".
+    It does not answer "is ours still there" -- HEAD is unchanged either way, so
+    a target edited while the prompt waits passes every question that was being
+    asked and is then staged as this migration's output.
+    """
+    proposal = _proposal(tmp_path)
+    git = _git_that_resolves()
+    target = tmp_path / "emnify" / "models.py"
+    gate = Gate(
+        _SaysAndDoes(
+            Allow(fingerprint=request_for(proposal).fingerprint()),
+            lambda: target.write_text("somebody else typed this", encoding="utf-8"),
+        )
+    )
+
+    with pytest.raises(NothingToPublishError, match="no longer holds"):
+        open_pull_request(gate, proposal, git)
+    assert git.written == [], git.written
+
+
+def test_a_target_replaced_by_a_symlink_is_refused(tmp_path: Path) -> None:
+    """`is_file()` follows the link and answers about a different file."""
+    proposal = _proposal(tmp_path)
+    git = _git_that_resolves()
+    target = tmp_path / "emnify" / "models.py"
+    decoy = tmp_path / "decoy.py"
+    decoy.write_text("pattern=", encoding="utf-8")
+
+    def _swap() -> None:
+        target.unlink()
+        target.symlink_to(decoy)
+
+    gate = Gate(_SaysAndDoes(Allow(fingerprint=request_for(proposal).fingerprint()), _swap))
+    with pytest.raises(NothingToPublishError, match="symlink"):
+        open_pull_request(gate, proposal, git)
+    assert git.written == [], git.written
