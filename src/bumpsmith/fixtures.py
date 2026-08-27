@@ -381,13 +381,78 @@ def _fetch_pinned_commit(fixture: Fixture, destination: Path, timeout: float) ->
     return "FETCH_HEAD"
 
 
+BARRIER_NAME = "pytest.ini"
+"""The file written beside the clones so this checkout does not configure them."""
+
+BARRIER = """\
+# Written by `python -m bumpsmith.fixtures`. Deliberately empty.
+#
+# pytest resolves its settings by walking UP from the directory it runs in until
+# it finds a file that counts as an inifile. A fixture with no pytest
+# configuration of its own would keep walking, out of this directory and into
+# the bumpsmith checkout above it -- and would then be measured under
+# bumpsmith's own `addopts` and `testpaths` rather than its own. A fixture is
+# somebody else's repository; running it under our settings makes its green mean
+# something other than what it says.
+#
+# An empty `[pytest]` section counts as an inifile while contributing no
+# settings, so it stops the walk here without configuring anything. This is the
+# barrier `Stop.FOREIGN_CONFIG` exists to make unnecessary; see
+# `bumpsmith.rootdir`.
+[pytest]
+"""
+
+
+def write_barrier(root: Path) -> Path:
+    """Write the empty ``pytest.ini`` that keeps this checkout out of the clones.
+
+    Args:
+        root: The directory the fixtures are cloned into.
+
+    Returns:
+        The path written, or the existing path left alone.
+
+    Raises:
+        FixtureError: if the path is taken by something that is not a file, or
+            the file cannot be written.
+
+    An existing *file* is never overwritten. It may be somebody's deliberate
+    configuration for this directory, and silently replacing it would be the
+    same class of surprise this function exists to prevent.
+
+    Anything else occupying that name is refused rather than accepted. pytest
+    only reads configuration from files, so a directory called ``pytest.ini``
+    stops nothing -- and an earlier version, asking only whether the path
+    existed, would have reported a barrier that was not there and let every
+    clone inherit the checkout's settings in silence.
+    """
+    barrier = root / BARRIER_NAME
+    if barrier.is_file():
+        return barrier
+    if barrier.exists():
+        raise FixtureError(
+            f"Refusing to clone: {barrier} is not a file, so pytest will not read it as "
+            f"configuration and the fixture would inherit this checkout's pytest settings."
+        )
+    try:
+        barrier.write_text(BARRIER, encoding="utf-8")
+    except OSError as exc:
+        raise FixtureError(f"Could not write the pytest barrier at {barrier}: {exc}") from exc
+    return barrier
+
+
 def clone(fixture: Fixture, root: Path, *, timeout: float = DEFAULT_TIMEOUT) -> Path:
     """Clone one fixture into ``root/<id>`` at its pinned SHA and return the path.
+
+    Also writes an empty ``pytest.ini`` beside the clone -- see
+    :func:`write_barrier` for why a fixture needs protecting from the checkout
+    it is cloned into.
 
     Raises :class:`GitError` if git fails, and :class:`FixtureError` if the
     destination is unusable or the checked-out commit is not the pinned one.
     """
     destination = _prepare_destination(root, fixture)
+    write_barrier(destination.parent)
     _git(["init", "--quiet", "."], cwd=destination, timeout=timeout)
     _git(["remote", "add", "origin", fixture.url], cwd=destination, timeout=timeout)
     checkout_target = _fetch_pinned_commit(fixture, destination, timeout)

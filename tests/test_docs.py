@@ -37,19 +37,6 @@ README = Path(__file__).resolve().parent.parent / "README.md"
 _STOP_TABLE_HEADER = "| `Stop` | meaning |"
 _OUTCOME_ANCHOR = "`Outcome` says what is on disk"
 
-_NUMBERS = {
-    "four": 4,
-    "five": 5,
-    "six": 6,
-    "seven": 7,
-    "eight": 8,
-    "nine": 9,
-    "ten": 10,
-    "eleven": 11,
-    "twelve": 12,
-    "thirteen": 13,
-}
-
 
 def _readme() -> str:
     assert README.is_file(), f"expected the README beside the package, at {README}"
@@ -88,26 +75,25 @@ def _outcome_paragraph(text: str) -> str:
     )
 
 
-def test_readme_counts_the_stop_reasons_correctly() -> None:
-    """The spelled-out number in the README must be `len(Stop)`.
+def test_the_readme_does_not_restate_the_number_of_stop_reasons() -> None:
+    """The table owns the list; a count beside it is a number waiting to go stale.
 
-    Failing here means one of two edits was made without the other: a member was
-    added to `Stop`, or the sentence was reworded. Both are fine; leaving them
-    disagreeing is not.
+    This replaced a test that checked the spelled-out number against `len(Stop)`.
+    That test was not useless -- it is precisely what failed when
+    `FOREIGN_CONFIG` was added, which is how the sentence was found. But keeping
+    a restated number correct is a weaker aim than not restating it, and
+    `test_readme_table_has_a_row_for_every_stop_reason` below already guarantees
+    the part a reader actually needs. Findings 64 and 65 are the same shape: a
+    summary restating a number the table already owns.
+
+    The pattern is the old test's, inverted, so it pins the exact wording that
+    regressed rather than every conceivable way of writing a number down.
     """
-    text = _readme()
-    # `\s+` rather than a literal space: the README is hard-wrapped, so the
-    # sentence being matched is split across a line ending and a pattern
-    # assuming spaces finds nothing. The first run of this test failed that way.
-    match = re.search(r"one\s+of\s+(\w+)\s+members\s+of\s+a\s+`Stop`\s+enum", text)
-    assert match is not None, (
-        "the README no longer claims a count of `Stop` members in the expected "
-        "wording. If the claim was dropped on purpose, drop this test with it; "
-        "if it was reworded, update the pattern."
+    match = re.search(r"one\s+of\s+(\w+)\s+members\s+of\s+a\s+`Stop`\s+enum", _readme())
+    assert match is None, (
+        f"the README has gone back to counting `Stop` members ({match.group(1)!r} of them). "
+        f"The table below that sentence is the list; let it be the only place."
     )
-    spelled = match.group(1)
-    assert spelled in _NUMBERS, f"unrecognised spelled number in the README: {spelled!r}"
-    assert _NUMBERS[spelled] == len(Stop)
 
 
 def test_readme_table_has_a_row_for_every_stop_reason() -> None:

@@ -98,6 +98,18 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 89 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | The proof ignored the CLI's exit status, so a crash read as a refusal honoured | **Fixed** — each case states its status; verified by making refusals exit 1 | this PR |
 | 90 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | A timed-out proof child survived `communicate` and outlived the `rmtree` | **Fixed** — killed and reaped; reproduced with a sleeping suite | this PR |
 | 91 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | `_git` strips its output and `status --porcelain`'s leading space is significant, so every publish was refused — *self-found fixing 84, by running it* | **Fixed** — two `git diff` reads with no whitespace to lose | this PR |
+| 92 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | `README.md` told the reader `git -C ./fixtures/B status --ignored` would show `.pytest_cache/`. It cannot: pytest writes the cache at `rootdir`, which for that fixture is the bumpsmith checkout — *self-found on #20's cold clone* | **Fixed** — the line names the seven `__pycache__/` it does leave; the README had already said so 260 lines earlier and contradicted itself | this PR |
+| 93 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | The correction at `README.md:194` was right about *what* and wrong about *why* — it blamed stale residue from a previous day's runs, not rootdir resolution — *self-found on #20's cold clone* | **Fixed** — the mechanism named, and it turned out to be worth a section of its own | this PR |
+| 94 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | The suite's verdict is not purely the subject's: pytest resolves settings by walking **upward**, so a repository under this checkout is measured under bumpsmith's `addopts` and `testpaths` — *self-found on #20's cold clone* | **Fixed** — `Stop.FOREIGN_CONFIG`, checked before the first run; `bumpsmith.fixtures` writes an empty `pytest.ini` barrier so the documented workflow still runs | this PR |
+| 95 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | `_runs_pytest` carried a `-m pytest` branch that could never be the reason it returned `True` — the module argument *is* the bare word `pytest`, which the name check already matches — *self-found by breaking it* | **Fixed** — branch deleted; a parametrised test appeared to cover it and passed with the branch gone | this PR |
+| 96 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | The test named for an empty `pytest.ini` used a file that still carried `[pytest]`, so the flag making that name always count was never exercised — *self-found by breaking it* | **Fixed** — a zero-byte case added; breaking the flag now fails | this PR |
+| 97 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | `interpolation=None` on the ini reader guarded a path the code never took: only key *names* were read, and configparser interpolates on value access — *self-found by breaking it* | **Fixed** — the refusal now quotes values as well as names, which makes the guard load-bearing and the message actionable | this PR |
+| 98 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | `CANDIDATES` knew only `pytest.ini`, but pytest 9 also reads `pytest.toml`, `.pytest.toml` and `.pytest.ini`, and honours a native `[tool.pytest]` table | **Fixed** — all seven names, in pytest's own order, each rule measured with `--collect-only -v`. Both directions were live: a missed foreign config, and a subject refused for a configuration it had already overridden | this PR |
+| 99 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | `pytest -c FILE` replaces discovery outright, so the guard judged a file the run would never open | **Fixed** — the argv is read for `-c`/`--config-file` in all five spellings and the named file is judged instead of the walk | this PR |
+| 100 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | `runs_pytest` matched the word anywhere in the argv, so `make pytest` and `python script.py pytest` were refused — contradicting the paragraph directly above it | **Fixed** — pytest must be the program or the `-m` argument. This is also what made finding 95's branch dead; narrowing the scan made it load-bearing again | this PR |
+| 101 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | `write_barrier` let `OSError` escape, and `clone_all` converts only `FixtureError`, so one unwritable barrier ended the whole command in a traceback | **Fixed** — wrapped as `FixtureError`, so that fixture fails and the rest are still attempted | this PR |
+| 102 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | `write_barrier` accepted any existing path, including a **directory**. pytest reads configuration only from files, so the barrier silently was not one | **Fixed** — `is_file()`, and anything else in that place is refused by name. The worst kind of guard is one that appears to be working | this PR |
+| 103 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | The test written for 101 used a directory, which trips 102's guard instead — so the `OSError` wrapping was covered by nothing — *self-found by breaking it* | **Fixed** — a dangling symlink lands on the write itself; deterministic, and needs no `chmod` a root-owned CI would ignore | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -1869,6 +1881,177 @@ two questions asked separately, each answering exactly one of the two things 84
 is about, and neither with any leading whitespace to lose.
 
 ---
+
+---
+
+## 92–97 · A cold clone, and the question nobody had asked pytest
+
+Six findings, none from a reviewer. Three came out of running the merge gate on
+[#20](https://github.com/aryangorde8/bumpsmith/pull/20) — a fresh clone, a fresh
+venv, all four checks, the fixture end to end. Three more came out of trying to
+fix the third one, and were caught by breaking the guards written for it.
+
+### The question
+
+The cold clone left `.pytest_cache/` somewhere the README said it would not be.
+Chasing that turned up something the project had never asked: **which
+configuration file governs the subject's suite?**
+
+pytest does not read its settings from the directory it runs in. It walks
+*upward* for the first file that counts as an inifile and takes `rootdir`,
+`addopts` and `testpaths` from whatever it finds. `fixtures/B` has a
+`pyproject.toml` with no `[tool.pytest.ini_options]`, so the walk continued out
+of the fixture and landed on **bumpsmith's own**. The tell was in pytest's own
+output all along — the nodeid it prints for the fixture's suite is
+`fixtures/B/tests/test_emnify.py`, a path relative to the bumpsmith checkout.
+
+Same tree, same interpreter, same command, on a project with one unregistered
+marker:
+
+| where the subject sits | what pytest does |
+|---|---|
+| under a checkout that configures pytest | `1 error`, exit **2** |
+| anywhere else | `1 passed, 1 deselected`, exit **0** |
+
+### Why it is a refusal and not a note
+
+Only one of the two directions is loud. A *stricter* outside configuration turns
+green into red, and the cost is a wasted migration attempt against a break that
+was never a pydantic break. An outside configuration that **deselects** —
+`-m "not slow"`, a narrowing `testpaths`, an `--ignore` — runs fewer tests than
+the repository's own suite would, so a suite that should have gone red goes green
+and the loop keeps the edits.
+
+That second one is `WRONG_PLACE`'s defect arriving by a different road, and
+`WRONG_PLACE` is already a hard stop. `migrate.py` had argued the general form of
+this in its own docstring — *"a paragraph is not an enforcement"* — about a
+different mechanism, one level up.
+
+**Latent, not live.** Of the four fixtures only B lacks a pytest configuration of
+its own, and B uses no markers, so nothing was misbehaving. That is the kind of
+luck that stops being true without anything failing.
+
+### The shape of the fix
+
+`Stop.FOREIGN_CONFIG`, checked once before the first run, never after a verdict
+exists to argue with — a scripted green answer sits in the test and is never
+consumed, which is how "before" is asserted rather than inferred.
+
+The check is deliberately blunt. Rather than decide which pytest settings are
+dangerous — a list that would be wrong the first time pytest grows an option —
+an outside inifile that sets **anything at all** is refused and one that sets
+nothing is allowed through. An empty `[pytest]` counts as an inifile while
+contributing no settings, so `python -m bumpsmith.fixtures` writes exactly that
+barrier into `fixtures/`, and the documented workflow runs unchanged: verified
+end to end, three breaks peeled, reverted, working tree hashing to the same tree
+object as `HEAD`.
+
+### The three the break run found
+
+Sixteen guards were broken one at a time to check the suite noticed. Thirteen
+were caught; **three were not**, and each was a real defect in the new code:
+
+- **95** — `_runs_pytest` had a `-m pytest` branch. Deleting it changed no
+  answer, because the module argument *is* the bare word `pytest` and the name
+  check matches it one iteration later. A parametrised test covering
+  `python -m pytest` passed with the branch gone.
+- **96** — the test named for an *empty* `pytest.ini` used a file that still
+  carried `[pytest]`. The flag that makes that filename count regardless of
+  contents — which is the whole reason the barrier works — was never exercised.
+- **97** — `interpolation=None` guarded a path the code could not reach.
+  configparser interpolates on value *access*, and only names were being read.
+  Fixed by reading the values too, which makes the guard load-bearing and turns
+  the refusal from "sets `addopts`" into "sets `addopts = -m 'not slow'`".
+
+97 is the one worth keeping. A defensive line with a comment explaining why it is
+needed, in code that cannot reach it, reads exactly like a guard — and the test
+written for it passed either way. It is the same shape as
+[80–90](https://github.com/aryangorde8/bumpsmith/pull/20): *a guarantee stated
+well is not a guarantee tested well.* The break run is what tells them apart.
+
+---
+
+## 98–103 · Five from Qodo, on a module whose whole job is to be right about pytest
+
+The largest single lesson in the log, and it is not about any of the five
+individually. `rootdir.py` exists to encode **another program's behaviour**. Every
+one of these findings is a place where it encoded what that behaviour used to be,
+or what it would be if pytest were simpler than it is.
+
+### The pinned pytest was never asked
+
+**98** is the one that matters. `CANDIDATES` listed four filenames. The pinned
+pytest — 9.1.1, in this repository's own dev extra — reads **seven**, and the
+three that were missing (`pytest.toml`, `.pytest.toml`, `.pytest.ini`) all
+*outrank* the one that was there.
+
+Both directions were live:
+
+- a foreign configuration in one of the missing names is **not seen**, and the
+  refusal never fires — the dangerous direction;
+- a subject that configures *itself* in one of them is walked straight past and
+  **refused for a configuration it had already overridden** — a false refusal on
+  the exact arrangement the refusal message tells people to adopt.
+
+The rules are not uniform, either, which is the part no amount of care would have
+produced from first principles:
+
+| file | counts when |
+|---|---|
+| `pytest.toml`, `.pytest.toml`, `pytest.ini`, `.pytest.ini` | always, even empty |
+| `pyproject.toml` | `[tool.pytest.ini_options]` present — **or** `[tool.pytest]` non-empty |
+| `tox.ini` / `setup.cfg` | `[pytest]` / `[tool:pytest]` present |
+
+An empty `[tool.pytest.ini_options]` counts; an empty `[tool.pytest]` does not.
+Nobody would guess that. It was measured.
+
+**The instrument was there all along.** `pytest --collect-only -v` prints
+`configfile:` and names every file it ignored:
+
+```
+configfile: pytest.toml (WARNING: ignoring pytest config in .pytest.toml,
+pytest.ini, .pytest.ini, tox.ini, setup.cfg!)
+```
+
+pytest will simply *say* which file it chose. The original module was written
+from a reading of how discovery works instead of from asking, and
+`test_pytest_agrees_about_the_barrier` — the one test whose whole point was to
+check the module against the real program — only ever exercised `pytest.ini`, so
+it agreed about the one name that was right.
+
+### The other four
+
+**99** — `pytest -c FILE` replaces discovery. The guard walked upward regardless,
+so it could clear a run whose explicitly named configuration sat outside the
+tree, and refuse one that explicitly named its own. Verified by running pytest
+with `-c` against a subject that already had a barrier: the barrier was ignored.
+
+**100** — `runs_pytest` matched the word anywhere in the argv, so `make pytest`
+was refused. The docstring one line above promised the opposite. This is also the
+answer to finding **95**: that `-m` branch was only dead *because* the scan was
+too wide. Narrowing it made the branch necessary again, so 95 was a correct
+observation about incorrect code, and deleting the branch was right at the time
+and wrong afterwards.
+
+**101 / 102** — the barrier. `OSError` escaped `write_barrier` while `clone_all`
+converts only `FixtureError`, so one unwritable barrier ended the whole command
+in a traceback rather than failing that fixture. And `write_barrier` accepted any
+existing path, **including a directory** — pytest reads configuration from files
+only, so the promised protection silently was not there. A guard that appears to
+be working is worse than an absent one.
+
+### 103, and the pattern it completes
+
+Twenty-five guards were broken one at a time. Twenty-four were caught. The one
+that was not: the test written for **101** used a *directory* to provoke the
+failure — which trips **102**'s check first, so the `OSError` wrapping it was
+written for was never reached.
+
+That is the third time in two pull requests: **96** (a test for an empty
+`pytest.ini` that used a file with a section), **97** (a guard the code could not
+reach), and now **103**. The shape is always the same — *the test provokes a
+different failure than the one it names, and passes either way.* Reading it will
+not find it. Only breaking the line it claims to cover will.
 
 ---
 
