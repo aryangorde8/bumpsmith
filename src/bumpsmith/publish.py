@@ -572,8 +572,19 @@ def _require_a_publishable_tree(
         # in the way; this asks whether ours is still there. Between the checks
         # and the commit sits a human deciding, and a target edited in that time
         # passes every question about HEAD while being staged as our output.
-        with on_disk.open(encoding=encoding, newline="") as handle:
-            on_disk_now = handle.read()
+        # A target made unreadable, or rewritten with bytes that are not this
+        # file's encoding, is one more thing that can happen while somebody is
+        # deciding -- and neither OSError nor UnicodeError is a PublishError, so
+        # both would leave this module past the only handler the CLI has for it.
+        # Shape 1 in this project's own list, for the fifth time.
+        try:
+            with on_disk.open(encoding=encoding, newline="") as handle:
+                on_disk_now = handle.read()
+        except (OSError, UnicodeError) as exc:
+            raise NothingToPublishError(
+                f"{path} cannot be read back as {encoding} to check it still holds what the "
+                f"migration wrote, so there is no way to tell what would be published ({exc})."
+            ) from exc
         if on_disk_now != written:
             raise NothingToPublishError(
                 f"{path} no longer holds what the migration wrote. Something changed it "
@@ -584,7 +595,13 @@ def _require_a_publishable_tree(
         committed_mode = entry[0] if entry else ""
         if committed_mode in {"100644", "100755"}:
             was_executable = committed_mode == "100755"
-            if was_executable != _is_executable(on_disk):
+            try:
+                executable_now = _is_executable(on_disk)
+            except OSError as exc:  # pragma: no cover - the read above would have raised first
+                raise NothingToPublishError(
+                    f"{path} cannot be inspected to check its mode ({exc})."
+                ) from exc
+            if was_executable != executable_now:
                 became = "executable" if not was_executable else "non-executable"
                 raise NothingToPublishError(
                     f"{path} was made {became} before the migration touched it, and the "

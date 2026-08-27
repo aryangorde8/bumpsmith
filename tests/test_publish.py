@@ -851,3 +851,27 @@ def test_a_target_replaced_by_a_symlink_is_refused(tmp_path: Path) -> None:
     with pytest.raises(NothingToPublishError, match="symlink"):
         open_pull_request(gate, proposal, git)
     assert git.written == [], git.written
+
+
+def test_a_target_that_cannot_be_read_back_is_refused_not_raised(tmp_path: Path) -> None:
+    """Finding 130.
+
+    `OSError` and `UnicodeError` are not `PublishError`, and the CLI catches
+    only the latter -- so a target made unreadable, or rewritten with bytes that
+    are not its encoding, left this module past the one handler meant for it.
+    Shape 1 in this project's own list, for the fifth time, in a check added two
+    commits earlier to close a different hole.
+    """
+    proposal = _proposal(tmp_path)
+    git = _git_that_resolves()
+    target = tmp_path / "emnify" / "models.py"
+    gate = Gate(
+        _SaysAndDoes(
+            Allow(fingerprint=request_for(proposal).fingerprint()),
+            lambda: target.write_bytes(b"\xff\xfe not utf-8 at all"),
+        )
+    )
+
+    with pytest.raises(NothingToPublishError, match="cannot be read back"):
+        open_pull_request(gate, proposal, git)
+    assert git.written == [], git.written
