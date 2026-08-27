@@ -110,6 +110,8 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 101 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | `write_barrier` let `OSError` escape, and `clone_all` converts only `FixtureError`, so one unwritable barrier ended the whole command in a traceback | **Fixed** — wrapped as `FixtureError`, so that fixture fails and the rest are still attempted | this PR |
 | 102 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | `write_barrier` accepted any existing path, including a **directory**. pytest reads configuration only from files, so the barrier silently was not one | **Fixed** — `is_file()`, and anything else in that place is refused by name. The worst kind of guard is one that appears to be working | this PR |
 | 103 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | The test written for 101 used a directory, which trips 102's guard instead — so the `OSError` wrapping was covered by nothing — *self-found by breaking it* | **Fixed** — a dangling symlink lands on the write itself; deterministic, and needs no `chmod` a root-owned CI would ignore | this PR |
+| 104 | [#22](https://github.com/aryangorde8/bumpsmith/pull/22) | A `REMOVED_INTERNAL` rule said "stop importing `X` from `Y`" and the scan reported only the import line, never where `X` was still read — so following the tool's own advice turns an error at import time into a `NameError` at call time — *self-found while measuring whether a class-5 rewriter could exist* | **Fixed** — `Role.SITE`/`Role.USE` on `Match`, `count` stays sites-only, `_by_path` filters to sites so no planner can be handed a use, and the refusal names the lines that would break. Measured on fixture F4 under pydantic 2.13.4: deleting the import gives `NameError`, repointing at the `pydantic.v1` shim gives `AttributeError` two lines later | this PR |
+| 105 | [#22](https://github.com/aryangorde8/bumpsmith/pull/22) | `if not bound: return` read as a correctness guard but is not one — the loop below it tests `node.id in bound`, which already yields nothing for an empty set — *self-found by breaking it and having nothing fail* | **Kept, relabelled** — finding 95's shape a second time. It is a real optimisation, so it stays with the measurement that earns it: 12.6ms → 5.9ms on a file that does not import the symbol, which is nearly every file in a scan | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -2052,6 +2054,62 @@ That is the third time in two pull requests: **96** (a test for an empty
 reach), and now **103**. The shape is always the same — *the test provokes a
 different failure than the one it names, and passes either way.* Reading it will
 not find it. Only breaking the line it claims to cover will.
+
+---
+
+## 104–105 · The task that turned out to be the wrong task
+
+The plan for Friday said **Fixture F4 (class 5)** — write the rewriter for
+`REMOVED_INTERNAL` and take the project from three rewritable break classes to
+four. The measurement said not to.
+
+F4 is the real repository that carries this break. `proto.py:10` imports
+`pydantic.utils:DUNDER_ATTRIBUTES`, which v2 deleted, and `proto.py:40` still
+reads it. Both mechanical edits a rewriter could make were run against F4's own
+source under pydantic 2.13.4:
+
+| candidate edit | result |
+|---|---|
+| delete the removed import | `NameError: name 'DUNDER_ATTRIBUTES' is not defined` |
+| repoint it at the `pydantic.v1` shim | `AttributeError: 'FieldInfo' object has no attribute 'field_info'` |
+
+The second is the more dangerous. The import *succeeds*, so the failure moves to
+a different line and would come back classified as a fresh, unrelated break —
+progress that is really a loop.
+
+Fixture C is the same repository one migration later, so upstream's real fix is
+on record: drop the dunder check because v2's `__dict__` no longer carries those
+keys, `__fields__` → `model_fields`, `field_info.repr` → `.repr`. Three
+coordinated semantic changes, none derivable from the import line.
+
+So `_PLANNERS` omitting this class was already right, and the docstring saying
+*"only some of them reduce to an edit safe enough to write without asking"* was
+already right. **What was wrong was one level up.** The rule said "stop importing
+`X` from `Y`" and the scan reported the import. A person doing exactly what they
+were told got the `NameError` — the tool was correct about the site and silent
+about the consequence, which is a way of being wrong that reads as being right.
+
+The fix is not a rewriter. It is a scan that reports uses beside sites, a `count`
+that still means sites because that number is shown to somebody immediately
+before they approve an edit, a `_by_path` that filters to sites so no rewriter
+written later can be handed a use to edit, and a refusal that names the lines
+that would break — because `UnsupportedRuleError` is the sentence read at the
+moment the work is handed back to a human.
+
+**105 is finding 95 for the second time.** Ten guards were broken one at a time
+and nine failed a test. The tenth, `if not bound: return`, failed nothing —
+because the loop below it tests `node.id in bound` and already yields nothing for
+an empty set. It is not a guard. It is a genuine optimisation, so it stays, now
+labelled as one and carrying the measurement that earns it: 12.6ms → 5.9ms on a
+file that does not import the symbol, which is nearly every file in a scan.
+Finding 95 was deleted for being unreachable and had to come back two commits
+later; this one is kept, which is the other correct answer to the same question.
+
+→ **The lesson, named: advice that is true can still be incomplete enough to
+break the repository that follows it.** The neighbouring shapes are 60/69
+(*prose stating a property is not the property*) and 80–90 (*a guarantee stated
+well is not a guarantee tested well*). This is the third: **a correct statement,
+acted on as instructions, producing a defect the statement never mentioned.**
 
 ---
 
