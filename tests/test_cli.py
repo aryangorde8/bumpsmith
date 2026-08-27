@@ -378,7 +378,7 @@ def test_a_pull_request_that_was_asked_for_and_did_not_happen_exits_nonzero(
         base="trunk",
         title="t",
         body="b",
-        paths=("a.py",),
+        targets=(("a.py", "before", "after", "utf-8"),),
     )
     opened = publish.Opened(branch="b", pushed_to="/srv/git/thing.git", note="pushed, not opened")
 
