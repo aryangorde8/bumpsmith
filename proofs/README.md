@@ -7,9 +7,11 @@ restated in prose and left behind by the thing it counted.
 
 Two of them run against a live TrueForge and cover the halves of the hackathon's
 control-and-safety criterion — *does the agent run its code somewhere safe, and
-does it stop for a human before anything irreversible.* The third asks a real
-pydantic v2 which validator signatures it accepts, which needs no harness at all
-but does need a dependency this package deliberately does not have.
+does it stop for a human before anything irreversible.* The others need no harness
+at all, but do need a dependency this package deliberately does not have: one asks
+a real pydantic v2 which validator signatures it accepts, and one runs several real
+migrations at the same time to show that a subject nobody reached is not reported
+as a subject with nothing to do.
 
 They are here rather than in `tests/` because each needs something a laptop
 running `pytest` does not have, and a test suite that cannot run on a laptop is
@@ -40,8 +42,10 @@ could do it. Findings 35 and 39 both said so. What is left is four lines of
 
 Install the package first (`pip install -e .`) so the imports resolve.
 `sandbox.py` and `deny.py` need a TrueForge on `http://localhost:8790`; pass
-`--base-url` for anywhere else. `validator.py` needs neither, and is the one a
-reader with no harness can run.
+`--base-url` for anywhere else. `pull_request.py`, `validator.py` and `fanout.py`
+need no harness at all — those are the ones a reader without one can run.
+`validator.py` wants an interpreter with pydantic v2; `fanout.py` wants pydantic
+v2 and pytest, and says so before it starts.
 
 ### `sandbox.py` — the suite runs somewhere safe
 
@@ -192,11 +196,41 @@ else's library rather than asserted in a docstring. The script exits non-zero if
 any of the eight stops behaving the way `bumpsmith.rules` says it does — the
 rewriter is built on these answers, so a change here is a change there.
 
+### `fanout.py` — several migrations at once, and one that never happened
+
+```
+python proofs/fanout.py --python /path/to/a/venv/bin/python
+```
+
+Needs an interpreter with **pydantic v2 and pytest** on it — the subjects are
+migrated by running their own suites through it, so both are prerequisites and
+both are checked up front, before anything is built. No harness, no network, no
+credentials. It writes three small projects with real v1 breaks in them, plus
+a fourth subject that cannot be reached at all, and migrates them concurrently
+through `bumpsmith.fanout.fan_out`.
+
+`tests/test_fanout.py` proves the bookkeeping with jobs that do as they are told.
+What a test suite cannot reach is *simultaneity*: this runs the real loop — real
+breaks, real edits, real pytest runs — against several subjects at once, and
+checks that four concurrent migrations reach the verdicts four sequential ones
+would. Measured on the recorded run: **2.1s at one worker, 1.1s at four.**
+
+The fourth subject is the point of the module. It raises the exception a refused
+connection actually produces, and the proof fails unless the report keeps it
+apart from the subject that was reached and needed nothing. Both contribute zero
+migrations; only one of them is good news.
+
+The already-v2 subject is the negative control, and it is checked twice — that
+the report calls it `already-green`, and that its file on disk is still the bytes
+that were written. `ALREADY_GREEN` is a claim about a tree, so the tree is what
+settles it.
+
 ## The recorded runs
 
-`recorded/` holds the output of every script, verbatim, from 26 August 2026 —
-the two harness ones against TrueForge 0.1.4 with `bedrock-mantle/qwen-3-coder-480b`,
-and `validator.py` against pydantic 2.12.5. They are committed because a judge
+`recorded/` holds the output of every script, verbatim — the two harness ones
+against TrueForge 0.1.4 with `bedrock-mantle/qwen-3-coder-480b` and `validator.py`
+against pydantic 2.12.5, all from 26 August 2026, and `fanout.py` against pydantic
+2.12.5 from 27 August. They are committed because a judge
 without a harness cannot run the first two, and a claim nobody can check is worth
 what it costs to make.
 
@@ -204,6 +238,7 @@ what it costs to make.
 |---|---|
 | `sandbox.log` / `sandbox.json` | pytest ran in Daytona and came back `rc=2`; `bumpsmith.failures` read it as `[REGEX_KEYWORD] \`regex\` is removed. use \`pattern\` instead` |
 | `validator.log` / `validator.json` | pydantic 2.12.5, eight signatures, all eight as documented — `field`/`config` raise, `values` survives, and `info` is refused under `@validator` |
+| `fanout.log` / `fanout.json` | four subjects migrated at once against pydantic 2.12.5 — two migrated, one already green and unedited, and one never reached, reported as `unreached` with the reason rather than folded into the zero |
 | `deny.log` / `deny.json` | a real `tool.approval_required` on thread `main`, denied through `TurnChannel`; the session then run to rest — 2 turns, both `done` — and the harness's own MCP server reports **0 tool calls served during the run** |
 
 Neither file was edited. They contain no credentials. The repository and branch

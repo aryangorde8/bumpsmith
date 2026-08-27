@@ -1,0 +1,160 @@
+{
+  "pydantic": "2.12.5",
+  "pytest": "9.1.1",
+  "workers": 4,
+  "fanout": {
+    "subjects": 4,
+    "reached": 3,
+    "unreached": 1,
+    "complete": false,
+    "outcomes": {
+      "already-green": 1,
+      "migrated": 2,
+      "reverted": 0,
+      "untouched": 0
+    },
+    "attempts": [
+      {
+        "subject": "regex-keyword",
+        "ran": true,
+        "result": {
+          "outcome": "migrated",
+          "stop": "green",
+          "reason": "the suite passed on this machine",
+          "applied": 1,
+          "kept": true,
+          "complete": true,
+          "steps": [
+            {
+              "step": 1,
+              "returncode": 2,
+              "where": "local",
+              "break_class": "REGEX_KEYWORD",
+              "message": "`regex` is removed. use `pattern` instead",
+              "culprit": "app.py:5",
+              "rule": "Rename the `regex=` argument to `pattern=`",
+              "sites": 1,
+              "match_files": 1,
+              "uses": [],
+              "scan_complete": true,
+              "unreadable": [],
+              "rewritten": 1,
+              "edit_files": 1,
+              "skipped": [],
+              "applied": true
+            },
+            {
+              "step": 2,
+              "returncode": 0,
+              "where": "local",
+              "break_class": null,
+              "message": null,
+              "culprit": null,
+              "rule": null,
+              "sites": null,
+              "match_files": null,
+              "uses": [],
+              "scan_complete": null,
+              "unreadable": [],
+              "rewritten": null,
+              "edit_files": null,
+              "skipped": [],
+              "applied": false
+            }
+          ]
+        }
+      },
+      {
+        "subject": "root-model",
+        "ran": true,
+        "result": {
+          "outcome": "migrated",
+          "stop": "green",
+          "reason": "the suite passed on this machine",
+          "applied": 1,
+          "kept": true,
+          "complete": true,
+          "steps": [
+            {
+              "step": 1,
+              "returncode": 2,
+              "where": "local",
+              "break_class": "ROOT_MODEL",
+              "message": "To define root models, use `pydantic.RootModel` rather than a field called '__root__'",
+              "culprit": "app.py:6",
+              "rule": "Replace a `__root__` field with pydantic.RootModel",
+              "sites": 1,
+              "match_files": 1,
+              "uses": [],
+              "scan_complete": true,
+              "unreadable": [],
+              "rewritten": 1,
+              "edit_files": 1,
+              "skipped": [],
+              "applied": true
+            },
+            {
+              "step": 2,
+              "returncode": 0,
+              "where": "local",
+              "break_class": null,
+              "message": null,
+              "culprit": null,
+              "rule": null,
+              "sites": null,
+              "match_files": null,
+              "uses": [],
+              "scan_complete": null,
+              "unreadable": [],
+              "rewritten": null,
+              "edit_files": null,
+              "skipped": [],
+              "applied": false
+            }
+          ]
+        }
+      },
+      {
+        "subject": "already-v2",
+        "ran": true,
+        "result": {
+          "outcome": "already-green",
+          "stop": "green",
+          "reason": "the suite passed on this machine",
+          "applied": 0,
+          "kept": false,
+          "complete": true,
+          "steps": [
+            {
+              "step": 1,
+              "returncode": 0,
+              "where": "local",
+              "break_class": null,
+              "message": null,
+              "culprit": null,
+              "rule": null,
+              "sites": null,
+              "match_files": null,
+              "uses": [],
+              "scan_complete": null,
+              "unreadable": [],
+              "rewritten": null,
+              "edit_files": null,
+              "skipped": [],
+              "applied": false
+            }
+          ]
+        }
+      },
+      {
+        "subject": "sandbox-that-never-came-up",
+        "ran": false,
+        "result": {
+          "reason": "ConnectionRefusedError: [Errno 111] Connection refused",
+          "still_running": false
+        }
+      }
+    ]
+  },
+  "problems": []
+}
