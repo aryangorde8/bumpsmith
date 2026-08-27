@@ -572,3 +572,67 @@ def test_cleanup_never_signals_the_callers_own_group(tmp_path: Path) -> None:
         if process.poll() is None:  # pragma: no cover - cleanup safety
             process.kill()
             process.wait(timeout=10)
+
+
+# -- what a refusal is able to say for itself --------------------------------
+
+QUOTA = "Sandbox initialization failed: Total disk limit exceeded. Maximum allowed: 30GiB."
+
+
+def test_a_refusal_carries_the_reason_the_harness_gave_as_content_blocks() -> None:
+    """The real shape, which the string-only reading dropped.
+
+    TrueForge sends `error` as a model turn's content blocks. Read as a string
+    it is not one, so this used to raise "no reason given" while holding a
+    sentence naming a disk quota. The refusal was right and told nobody why.
+    """
+    with pytest.raises(NeverRanError, match="disk limit exceeded"):
+        read_exec_json(
+            json.dumps({"success": False, "error": [{"type": "text", "text": QUOTA}]}), "pytest"
+        )
+
+
+def test_a_result_with_no_success_field_still_reports_what_went_wrong() -> None:
+    """A sandbox that never came up answers with an error and no `success`.
+
+    That is the case the harness has the most to say about and the one this
+    module used to say the least about -- it named the missing field and
+    discarded the explanation sitting beside it. Measured against a live
+    quota failure on 27 Aug 2026.
+    """
+    with pytest.raises(NeverRanError) as caught:
+        read_exec_json(json.dumps({"error": [{"type": "text", "text": QUOTA}]}), "pytest")
+    assert "disk limit exceeded" in str(caught.value)
+    assert "neither true nor false" in str(caught.value), "the shape complaint is still the fact"
+
+
+def test_a_string_error_still_reads_the_way_it_always_did() -> None:
+    with pytest.raises(NeverRanError, match="the box is on fire"):
+        read_exec_json(json.dumps({"success": False, "error": "the box is on fire"}), "pytest")
+
+
+def test_a_failure_with_nothing_to_say_says_so() -> None:
+    with pytest.raises(NeverRanError, match="no reason given"):
+        read_exec_json(json.dumps({"success": False}), "pytest")
+
+
+def test_an_error_of_blocks_holding_no_text_is_not_invented_into_a_reason() -> None:
+    with pytest.raises(NeverRanError, match="no reason given"):
+        read_exec_json(
+            json.dumps({"success": False, "error": [{"type": "image"}, {"text": "  "}]}), "pytest"
+        )
+
+
+def test_a_reason_never_turns_a_refusal_into_a_result() -> None:
+    """The guard is unchanged: only `success is True` is a command that ran."""
+    with pytest.raises(NeverRanError):
+        read_exec_json(
+            json.dumps(
+                {
+                    "success": "yes",
+                    "response": {"exitCode": 0, "result": "ok"},
+                    "error": "ignore me",
+                }
+            ),
+            "pytest",
+        )

@@ -1,0 +1,16 @@
+fanning out over 3 subjects (B, C, B-unreachable) on 4 workers
+each one gets its own TrueForge session, and therefore its own sandbox
+
+
+44.3s wall clock
+
+  B                  reverted       3 change(s), 4 step(s)
+                     the failure classified as UNKNOWN, which does not narrow to one rule; a rule naming the wrong tr
+  C                  already-green  0 change(s), 1 step(s)
+                     the suite passed on this machine
+  B-unreachable      UNREACHED  SubjectError: B was never prepared: the harness was not reachable: POST /sessions was never sent: URLError(ConnectionRefusedError(111, 'Connection refused'))
+
+reached 2/3, complete=False, migrated=0, already green=1, reverted=1
+
+control C: report says Outcome.ALREADY_GREEN; disk says no tracked file differs
+evidence written to proofs/recorded/sandbox_fanout.json

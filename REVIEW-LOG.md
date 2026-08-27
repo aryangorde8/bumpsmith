@@ -135,6 +135,12 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 114 | [#24](https://github.com/aryangorde8/bumpsmith/pull/24) | `fan_out` read the shared results *after* the timed wait and the pool shutdown, so a job finishing after the deadline but before that read was reported as **reached** — a verdict accepted because the bookkeeping in between took long enough, making the timeout nondeterministic exactly at its boundary | **Fixed** — the `done` set `wait` returns *is* the deadline, decided at the instant it passed; the results only supply the value. 🔴 **The comment three lines above the defect stated the correct rule** — *"reading it as unreached is the safe direction"* — and the code did the opposite. Written while fixing 112, in the paragraph belonging to the timeout it broke | this PR |
 | 115 | [#24](https://github.com/aryangorde8/bumpsmith/pull/24) | `proofs/fanout.py` said it needed *"pydantic v2 and nothing else"* and probed only pydantic, but every subject is migrated by running `python -m pytest` through that same interpreter — so an interpreter meeting the documented requirement fails all four subjects, and the proof reports it as migrations that did not work rather than as a missing prerequisite | **Fixed** — both are probed before anything is built, and the failure exits 2 naming both. The docstring and `proofs/README.md` corrected. **A missing prerequisite is not a result** — shape 9's family, where not-knowing is reported as an outcome | this PR |
 | 116 | [#24](https://github.com/aryangorde8/bumpsmith/pull/24) | Fixing 114 put the rule in `_verdict` and left the *call site* untested: a `fan_out` passing `finished_by_deadline=True` unconditionally passed every test in the file, because the deadline tests use a job that is still blocked and therefore never records a result for the flag to decide about — *self-found by breaking the guard* | **Fixed** — assembly extracted to `_assemble` and checked with futures a test builds itself, one of them recorded but absent from `done`. **Finding 55's shape**: a guarantee spelled across two places needs both halves tested, and the dangerous half is the one that fails quietly | this PR |
+| 117 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | `Attempt.ran` asked whether a result *is a verdict* rather than whether it is `Unreached`. Both answers agree for the two types that exist, so swapping one for the other passed all 713 tests — and they disagree for anything else, where the protocol version answers *"nobody reached this subject"* about a subject that was reached. The module's own docstring stated the correct rule; nothing tested it — *self-found by breaking the guard* | **Fixed** — the discriminator is `Unreached`, the type this module owns, and a test now hands `fan_out` a result of a kind it has never met. **Prose stating a property is not the property** (60, 69), and the fourth defect found sitting inside its own recorded warning | this PR |
+| 118 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | `_read_exec_result` refused a real harness failure by naming the missing field and discarding the sentence beside it. TrueForge sends `error` as a model turn's **content blocks**, not a string, so the `success is False` branch reported *"no reason given"* while holding the explanation — and the branch for a result with no `success` at all never consulted `error`, which is precisely the shape a sandbox that never came up produces. A live Daytona disk-quota failure surfaced as *"`success` is None"* | **Fixed** — both branches read the reason in either form. Nothing about which results are *accepted* changes; only what a rejected one can say for itself. **Raised by running it, not by reading it**: the string-only shape had been assumed since the module was written and no test could have contradicted it | this PR |
+| 119 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | **High.** `_control_is_untouched` built its own `SandboxExec`, which opens a *new session* and therefore a new, empty sandbox — so the negative control's `git status` ran against a filesystem that had never held the control checkout. Normally the subject is simply absent and the proof fails; with unrelated state present it would certify the wrong filesystem as clean | **Fixed** — `SandboxJob` keeps the session it used and exposes `exec_in_its_sandbox`, which refuses before the job has run rather than opening one on the spot. 🔴 **The function's own docstring stated the requirement** — *"a fresh one would have a clean checkout for reasons that say nothing"* — and the code created a fresh one. **Fifth instance**, in the same pull request that named the pattern | this PR |
+| 120 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | The control check filtered every `??` line out of `git status --porcelain`, so an agent that *added* a file passed a check whose entire claim is that the files are unchanged | **Fixed** — nothing is dropped. Tracked changes fail; an untracked `.py` fails outright; every untracked path is recorded as evidence either way. The filter had a real reason — C's own suite writes `htmlcov/` and `coverage.xml`, so a naive check never passes — but *"the artefacts of running the suite"* and *"anything untracked"* are different sets, and only one of them was safe to ignore | this PR |
+| 121 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | `_read_step` inferred that a scan or plan happened purely from `sites`/`rewritten` being non-null, without checking their types or forbidding `unreadable`/`skipped` entries beside them. A report with `sites: null` and a non-empty `unreadable` list parsed cleanly and derived **`complete = True`** — because completeness asks about a scan, and the step was claiming there was not one | **Fixed** — both counts are checked as int-or-null (`bool` is an `int` in Python, so an unchecked `true` arrives as a count of one), and a phase that never ran may not list what it left behind. The producer never writes that pair; this reader exists for text nobody here produced, which is the only reason it is worth hardening | this PR |
+| 122 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | `sandbox_fanout.py` opened *"Four subjects go out together"* and fans out **three** — and structurally cannot fan out four, because `EXTRAS` is the only place a measured environment exists and it holds two. The README repeated the figure. Nothing was wrong with the code; the paragraph describing it was wrong, in the module whose entire subject is reports that disagree with their evidence — *self-found when the recorded run printed its own subject count on line one* | **Fixed** — the docstring states the rule (`EXTRAS` decides) instead of a number that has to be maintained beside it, and the one figure kept is the one the run prints. **Prose stating a property is not the property** (60, 69, 117) — sixth instance, and the first found by the proof it describes | this PR |
 
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
@@ -2373,6 +2379,123 @@ no real run can be made to produce on demand.
 **17 of 17 real guards caught** on the re-run, plus the no-op control. The
 eighteenth remains `counting()`'s redundant filter, unchanged and still
 labelled.
+
+## 117–118 · Two refusals that were right and said the wrong thing
+
+Both findings here are the same mistake in two places, and neither changes what
+the code *accepts*. They change what it says when it refuses — which is the half
+nobody tests, because a refusal that fires looks like a success from the test's
+point of view.
+
+**117 — the discriminator that was documented and not tested.** `fanout` was
+widened to take a `Verdict` protocol so that a report read back from a sandbox
+could be one without pretending to be a `Migration`. That left a choice: ask
+whether a result *is* a verdict, or ask whether it is an `Unreached`. The module
+already had a paragraph explaining why the second is correct — testing for the
+protocol means a result of an unfamiliar kind reads as a subject nobody reached,
+which is a fact nobody established, in the one direction the module exists to
+refuse.
+
+The paragraph was there. The test was not. Swapping the two passed **all 713
+tests**, because the two answers are identical for both types that exist today;
+they differ only for a third, and no test had ever produced one. Writing the
+reason down had felt like doing the work.
+
+That is the fourth time in this project a defect has been found inside its own
+recorded warning — 29 → 106 eleven PRs apart, 108 → 110 two lines apart, 114's
+comment contradicting the statement below it, and now a rule explained in prose
+and left unchecked. It is worth naming as a pattern rather than as four
+coincidences: **the act of writing down why something matters reliably feels
+like having handled it.**
+
+**118 — the refusal that threw away its reason.** A fan-out of four sandboxes
+came back with every subject unreached and this explanation: `` `success` is
+None, which is neither true nor false ``. True, unhelpful, and hiding the actual
+answer, which was sitting in the same payload — Daytona's disk quota was
+exhausted, and it said so in a sentence.
+
+Two bugs, one shape. The `success is False` branch read `error` as a string; the
+harness sends it as a model turn's content blocks, so a genuine failure with a
+genuine explanation reported *"no reason given"*. And the branch for a payload
+with no `success` field at all never looked at `error` — which is exactly the
+shape a sandbox that failed to *start* produces, so the case with the most to
+say was the case that said the least.
+
+Neither could have been found by reading. The string form is what the API
+documents, the tests used the documented form, and every one of them passed. It
+took a real quota failure in a real harness. That makes this the fourth finding
+in the log raised by running the thing rather than reviewing it, and it is the
+clearest of them: **a rejection is a diagnostic, and a diagnostic that discards
+the diagnosis is a correct answer to the wrong question.**
+
+**18 of 18 real guards caught** on the run that found 117, plus the no-op
+control — a "break" scoped so tightly it changes nothing, which looks exactly
+like a guard that works.
+
+## 119–122 · The fifth time, in the paragraph that named the pattern
+
+Finding 117, three sections up, is about writing down why something matters and
+mistaking that for having handled it. It was recorded as the *fourth* instance of
+a defect sitting inside its own recorded warning.
+
+**119 is the fifth, and it is in the same pull request.**
+
+The negative control has to be checked against a filesystem, not only against a
+report — a loop that edited the control and reverted it perfectly produces the
+same report as one that never touched it. So `_control_is_untouched` runs
+`git status` in the sandbox. Its docstring said, in as many words:
+
+> Its own session, so the answer comes from the sandbox the migration ran in — a
+> fresh one would have a clean checkout for reasons that say nothing.
+
+The function then constructed a fresh `SandboxExec`, which opens a new session
+and a new sandbox. The sentence naming the failure mode sat directly above the
+line implementing it. Qodo caught it; nothing in 732 tests could have, because
+the check only runs against a live harness.
+
+Two things are worth separating here. The first is that this is now a *reliable*
+pattern rather than a run of bad luck — five times, across eleven pull requests,
+a warning has been written and then contradicted within a few lines of itself.
+The second is more uncomfortable: **117 and 119 were committed together.** The
+paragraph diagnosing the habit and a fresh instance of the habit went in on the
+same branch, hours apart. Naming a class of mistake does not confer immunity
+from it, and this log would be more flattering and less useful if that were
+quietly separated into two pull requests.
+
+**120 — the filter with a real reason and the wrong scope.** The control check
+dropped every `??` line from `git status`, which let an agent that *added* a file
+pass. The reason it was there is genuine: fixture C's own pytest run writes
+`htmlcov/` and `coverage.xml`, so a check that fails on any untracked path never
+passes at all. But "the artefacts of running the suite" and "anything untracked"
+are different sets, and only one of them is safe to ignore. Nothing is dropped
+now — tracked changes fail, an untracked `.py` fails, and every untracked path is
+recorded either way, so a reader can see what the run left behind instead of
+taking the script's word that it did not matter.
+
+**121 — a contradiction that resolved in the reassuring direction.** A report
+saying `sites: null` beside a non-empty `unreadable` list parsed perfectly and
+derived `complete = True`, because completeness asks about a scan and the step
+was claiming there had not been one. The producer never writes that pair. That is
+exactly why it was worth fixing: `read_report` exists to read text this project
+did not produce, and a reader that only survives well-formed input is a reader
+whose strictness is decorative.
+
+**122 — the count in the first paragraph.** The module opens *"Four subjects go
+out together"*; the run's first line says `fanning out over 3 subjects`. There
+was never a fourth: `EXTRAS` is the only place a measured environment exists, the
+script refuses a fixture without one, and `EXTRAS` holds two. So the number could
+not have drifted — it was wrong when it was written, survived every test, every
+type check and every review, and was contradicted the first time the thing ran.
+
+It is worth recording for where it was rather than what it cost. This is the
+module built on the position that a report is not a migration and that a
+conclusion must be derived from its evidence rather than asserted beside it — and
+its own summary paragraph asserted a figure beside evidence that said otherwise.
+The fix is not the corrected number. It is that the docstring now names `EXTRAS`
+as what decides, so there is no second copy of the count to be wrong; the only
+figure left is the one the run prints for itself.
+
+**4 of 4 guards caught** on the re-run, plus the no-op control.
 
 ## How this stays honest
 

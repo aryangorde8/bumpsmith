@@ -21,6 +21,7 @@ from bumpsmith.fanout import (
     Fanout,
     Job,
     Unreached,
+    Verdict,
     _assemble,
     _verdict,
     fan_out,
@@ -108,7 +109,7 @@ def test_an_unreached_subject_has_no_outcome_rather_than_a_fourth_one() -> None:
 
     (attempt,) = fan_out([Fake("bad", boom)]).attempts
     assert attempt.outcome is None
-    assert attempt.migration is None
+    assert attempt.verdict is None
     assert attempt.ran is False
 
 
@@ -531,3 +532,39 @@ def test_the_defaults_are_the_measured_ones() -> None:
     """Pins the numbers the module docstring argues for."""
     assert DEFAULT_WORKERS == 4
     assert DEFAULT_TIMEOUT == 1800.0
+
+
+def test_a_result_of_an_unfamiliar_kind_is_not_called_a_subject_nobody_reached() -> None:
+    """`ran` asks whether the result is an `Unreached`, not whether it is a `Verdict`.
+
+    The two answers agree for both types this module has met, which is why this
+    needed writing on purpose: swapping one for the other passed all 713 tests.
+    They disagree for a job that hands back something else -- a future verdict
+    type, a stub, a mistake -- and the protocol version answers "nobody reached
+    this subject", which is a fact nobody established, in the exact direction
+    this module exists to refuse. Asking about `Unreached` instead says the
+    subject *was* reached and lets the missing attribute be loud, because a
+    result that cannot say what became of the repository is a bug in the job,
+    not evidence that the sandbox never came up.
+    """
+
+    class NotAVerdict:
+        """Reached the subject; cannot say what became of it."""
+
+        def as_dict(self) -> dict[str, object]:
+            return {"what": "something a later version returns"}
+
+    assert not isinstance(NotAVerdict(), Verdict)
+    assert not isinstance(NotAVerdict(), Unreached)
+
+    class Odd:
+        subject = "B"
+
+        def __call__(self) -> Verdict:
+            return NotAVerdict()  # type: ignore[return-value]
+
+    (attempt,) = fan_out([Odd()]).attempts
+    assert attempt.ran, "a subject that was reached must not be recorded as unreached"
+    assert isinstance(attempt.result, NotAVerdict)
+    with pytest.raises(AttributeError):
+        _ = attempt.outcome

@@ -1,0 +1,105 @@
+{
+  "orchestrator": "bumpsmith.fanout.fan_out",
+  "job": "bumpsmith.remote.SandboxJob",
+  "model": "bedrock-mantle/qwen-3-coder-480b",
+  "workers": 4,
+  "wall_seconds": 44.25,
+  "control": {
+    "subject": "C",
+    "outcome": "already-green",
+    "files_unchanged": true,
+    "checked_on_disk": {
+      "asked": true,
+      "session": "01m11thb1rjx9hy604cs7rgntt",
+      "tracked_changes": [],
+      "untracked": [],
+      "added_python_files": [],
+      "why": "no tracked file differs"
+    }
+  },
+  "fanout": {
+    "subjects": 3,
+    "reached": 2,
+    "unreached": 1,
+    "complete": false,
+    "outcomes": {
+      "already-green": 1,
+      "migrated": 0,
+      "reverted": 1,
+      "untouched": 0
+    },
+    "attempts": [
+      {
+        "subject": "B",
+        "ran": true,
+        "result": {
+          "outcome": "reverted",
+          "stop": "no-rule",
+          "reason": "the failure classified as UNKNOWN, which does not narrow to one rule; a rule naming the wrong transformation is worse than none",
+          "applied": 3,
+          "kept": false,
+          "complete": true,
+          "steps": [
+            {
+              "step": 1,
+              "break_class": "ROOT_MODEL",
+              "rule": "Replace a `__root__` field with pydantic.RootModel",
+              "applied": true,
+              "complete": true
+            },
+            {
+              "step": 2,
+              "break_class": "REGEX_KEYWORD",
+              "rule": "Rename the `regex=` argument to `pattern=`",
+              "applied": true,
+              "complete": true
+            },
+            {
+              "step": 3,
+              "break_class": "VALIDATOR_FIELD_CONFIG",
+              "rule": "Remove a v1 validator's `field` and `config` parameters",
+              "applied": true,
+              "complete": true
+            },
+            {
+              "step": 4,
+              "break_class": "UNKNOWN",
+              "rule": null,
+              "applied": false,
+              "complete": true
+            }
+          ]
+        }
+      },
+      {
+        "subject": "C",
+        "ran": true,
+        "result": {
+          "outcome": "already-green",
+          "stop": "green",
+          "reason": "the suite passed on this machine",
+          "applied": 0,
+          "kept": false,
+          "complete": true,
+          "steps": [
+            {
+              "step": 1,
+              "break_class": null,
+              "rule": null,
+              "applied": false,
+              "complete": true
+            }
+          ]
+        }
+      },
+      {
+        "subject": "B-unreachable",
+        "ran": false,
+        "result": {
+          "reason": "SubjectError: B was never prepared: the harness was not reachable: POST /sessions was never sent: URLError(ConnectionRefusedError(111, 'Connection refused'))",
+          "still_running": false
+        }
+      }
+    ]
+  }
+}

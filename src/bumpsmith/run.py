@@ -303,6 +303,41 @@ class SandboxRunner:
         return _read_exec_result(raw, line)
 
 
+def _reason(raw: Mapping[str, object]) -> str | None:
+    """What the harness said went wrong, however it chose to say it.
+
+    TrueForge's ``error`` is sometimes a string and sometimes the content-block
+    list a model turn carries::
+
+        {"error": [{"type": "text", "text": "Total disk limit exceeded..."}]}
+
+    Only the string form was written for, so the block form fell through to
+    "no reason given" -- and a result carrying no ``success`` field never
+    consulted ``error`` at all. Both were refusals that threw away the sentence
+    explaining them, which makes a refusal correct and useless at once: the
+    caller is told the shape was wrong instead of that the sandbox ran out of
+    disk.
+
+    Found on 27 Aug 2026 by a fan-out that exhausted a Daytona quota, reported
+    as ``success`` being ``None``. Nothing about which results are *accepted*
+    changes here; only what a rejected one is able to say for itself.
+    """
+    error = raw.get("error")
+    if isinstance(error, str):
+        return error.strip() or None
+    if isinstance(error, Sequence) and not isinstance(error, str | bytes):
+        said = [
+            block["text"].strip()
+            for block in error
+            if isinstance(block, Mapping)
+            and isinstance(block.get("text"), str)
+            and block["text"].strip()
+        ]
+        if said:
+            return " ".join(said)
+    return None
+
+
 def _read_exec_result(raw: object, command: str) -> Completed:
     """Turn one ``exec`` result into a :class:`Completed`, or refuse to.
 
@@ -321,11 +356,16 @@ def _read_exec_result(raw: object, command: str) -> Completed:
     # field all mean the answer was not the one documented, and reading a
     # truthy value as success is how a malformed result becomes a test verdict.
     if success is False:
-        error = raw.get("error")
-        detail = error if isinstance(error, str) and error.strip() else "no reason given"
-        raise NeverRanError(f"the sandbox never ran {command}: {detail}")
+        raise NeverRanError(f"the sandbox never ran {command}: {_reason(raw) or 'no reason given'}")
     if success is not True:
-        raise refuse(f"`success` is {success!r}, which is neither true nor false")
+        # The reason is repeated here rather than only above, because a result
+        # with no `success` at all is exactly the shape a failure *before* the
+        # command takes -- the sandbox never came up, so nothing got as far as
+        # reporting on it. That is the case where the harness has the most to
+        # say and this module used to say the least.
+        said = _reason(raw)
+        detail = f"`success` is {success!r}, which is neither true nor false"
+        raise refuse(f"{detail}, and it said: {said}" if said else detail)
 
     response = raw.get("response")
     if not isinstance(response, Mapping):
