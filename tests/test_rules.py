@@ -850,3 +850,139 @@ def test_a_rule_that_draws_no_distinction_reports_every_match_as_a_site(
     assert all(m.role is Role.SITE for m in scan.matches)
     assert scan.uses == ()
     assert scan.count == len(scan.matches)
+
+
+# --------------------------------------------------------------------------
+# Scope
+#
+# Qodo raised this on #22: one file-wide set of bound names reports unrelated
+# locals and parameters as lines that would break. It was verified before it was
+# accepted -- a parameter sharing the spelling really was reported. The refusal
+# says "removing the site alone would replace this error with a NameError" about
+# each line it names, and for a parameter that is a specific, checkable, false
+# statement about somebody's code.
+#
+# `calls_in_scope` documents this exact failure one function above the one that
+# had it. Over-reporting is the safe direction for a list that is read rather
+# than edited, but only while what is said about each line is true.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("label", "body", "expected"),
+    [
+        (
+            "a parameter that happens to share the spelling",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            def unrelated(DUNDER_ATTRIBUTES):
+                return DUNDER_ATTRIBUTES + 1
+            """,
+            [],
+        ),
+        (
+            "a lambda parameter that shares the spelling",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            f = lambda DUNDER_ATTRIBUTES: DUNDER_ATTRIBUTES
+            """,
+            [],
+        ),
+        (
+            "a local assignment shadowing the module-level import",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            def f():
+                DUNDER_ATTRIBUTES = set()
+                return DUNDER_ATTRIBUTES
+            """,
+            [],
+        ),
+        (
+            "a function-local import leaves the module-level name alone",
+            """
+            def inner():
+                from pydantic.utils import DUNDER_ATTRIBUTES
+                return DUNDER_ATTRIBUTES
+
+            DUNDER_ATTRIBUTES = "mine"
+            print(DUNDER_ATTRIBUTES)
+            """,
+            [3],
+        ),
+        (
+            "a comprehension target shadows for the whole comprehension",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            xs = [DUNDER_ATTRIBUTES for DUNDER_ATTRIBUTES in range(3)]
+            """,
+            [],
+        ),
+        (
+            "a comprehension that really reads it",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            xs = [k for k in DUNDER_ATTRIBUTES]
+            """,
+            [3],
+        ),
+        (
+            "the outermost iterable is evaluated before the target binds",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            xs = [x for DUNDER_ATTRIBUTES in DUNDER_ATTRIBUTES for x in DUNDER_ATTRIBUTES]
+            """,
+            [3],
+        ),
+        (
+            "an unpacking target shadows too",
+            # The element must *read* the name. With `[a for (a, X) in pairs]` the
+            # only occurrence of X on that line is a store, which is never a use
+            # whether unpacking shadows or not -- the test would pass either way.
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            xs = [DUNDER_ATTRIBUTES for (a, DUNDER_ATTRIBUTES) in pairs]
+            """,
+            [],
+        ),
+        (
+            "a real use two scopes down is still inherited",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            def outer():
+                def inner():
+                    return DUNDER_ATTRIBUTES
+                return inner
+            """,
+            [5],
+        ),
+        (
+            "a real use inside a method, which is F4's own shape",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            class M:
+                def __repr_args__(self):
+                    return [k for k in self.__dict__ if k not in DUNDER_ATTRIBUTES]
+            """,
+            [5],
+        ),
+    ],
+)
+def test_a_use_is_a_use_only_where_the_import_is_what_binds_the_name(
+    tmp_path: Path, label: str, body: str, expected: list[int]
+) -> None:
+    root = _tree(tmp_path, {"mine.py": body})
+    rule = _rule(BreakClass.REMOVED_INTERNAL, symbol="pydantic.utils:DUNDER_ATTRIBUTES")
+
+    uses = sorted(match.line for match in find_matches(rule, root).uses)
+
+    assert uses == expected, label

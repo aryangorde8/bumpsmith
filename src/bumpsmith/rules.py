@@ -567,6 +567,103 @@ def regex_keyword_sites(tree: ast.Module) -> Iterator[tuple[int, ast.keyword]]:
                 yield word.lineno, word
 
 
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+"""Comprehensions run in a scope of their own, and their targets are local to it.
+
+`calls_in_scope` does not need to know this, because a call is not shadowed by an
+iteration variable. A *name* is.
+"""
+
+_NESTED_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, *_COMPREHENSIONS)
+
+
+def _scope_body_nodes(root: ast.AST) -> Iterator[ast.AST]:
+    """Every node inside one scope, without entering a nested one.
+
+    `module_scope_nodes` is this for a module. This is the same idea rooted
+    anywhere, so a function body can be examined on its own terms.
+    """
+    pending: list[ast.AST] = list(ast.iter_child_nodes(root))
+    while pending:
+        node = pending.pop()
+        yield node
+        if isinstance(node, _NESTED_SCOPES):
+            continue
+        pending.extend(ast.iter_child_nodes(node))
+
+
+def _bound_targets(target: ast.expr) -> Iterator[str]:
+    """The names one comprehension target binds, unpacking included."""
+    if isinstance(target, ast.Name):
+        yield target.id
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            yield from _bound_targets(element)
+    elif isinstance(target, ast.Starred):
+        yield from _bound_targets(target.value)
+
+
+def _shadowed_in(scope: ast.AST) -> set[str]:
+    """Every name this scope binds itself, and so does not inherit."""
+    if isinstance(scope, _COMPREHENSIONS):
+        return {name for generator in scope.generators for name in _bound_targets(generator.target)}
+    return _locally_bound(scope)[2]
+
+
+def _uses_in_scope(
+    scope: ast.AST, module: str, name: str, inherited: frozenset[str]
+) -> Iterator[tuple[int, Role]]:
+    """Sites and uses in one scope, then in each scope nested inside it.
+
+    ``inherited`` is the set of names bound to the removed import that are
+    visible on the way in. A scope that binds one of those names by any other
+    means -- a parameter, an assignment, a nested `def` -- takes it out of that
+    set for itself and for everything under it, because a load there reads the
+    local binding and would survive the import being deleted.
+    """
+    shadowed = _shadowed_in(scope)
+
+    here: set[str] = set()
+    for node in _scope_body_nodes(scope):
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == module:
+            for alias in node.names:
+                if alias.name == name:
+                    here.add(alias.asname or alias.name)
+                    yield node.lineno, Role.SITE
+
+    # Subtract before adding: `shadowed` includes the names this scope's own
+    # import binds, and those are exactly the ones that must survive.
+    visible = frozenset({bound for bound in inherited if bound not in shadowed} | here)
+
+    # An optimisation, not a guard: the test below is `node.id in visible`, so an
+    # empty set already yields nothing. It is here because most scopes in a scan
+    # never see this name, and it skips a second walk of every one of them --
+    # measured at 12.6ms -> 5.9ms on a 400-function module.
+    if visible:
+        for node in _scope_body_nodes(scope):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in visible:
+                yield node.lineno, Role.USE
+
+    for node in _scope_body_nodes(scope):
+        if isinstance(node, _NESTED_SCOPES):
+            if isinstance(node, _COMPREHENSIONS) and node.generators:
+                # The outermost iterable is evaluated out here, before the target
+                # it is about to bind exists. Reading it under the comprehension's
+                # own names would lose a real use to a name that shadows it only
+                # afterwards.
+                yield from _loads_under(node.generators[0].iter, visible)
+            yield from _uses_in_scope(node, module, name, visible)
+
+
+def _loads_under(node: ast.AST, visible: frozenset[str]) -> Iterator[tuple[int, Role]]:
+    """Every load of a visible name in one expression, scopes inside it aside."""
+    if not visible:
+        return
+    for child in (node, *_scope_body_nodes(node)):
+        if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load) and child.id in visible:
+            yield child.lineno, Role.USE
+
+
 def _removed_symbol_sites(tree: ast.Module, module: str, name: str) -> Iterator[tuple[int, Role]]:
     """Yield every ``from <module> import <name>``, and every use of what it bound.
 
@@ -574,50 +671,34 @@ def _removed_symbol_sites(tree: ast.Module, module: str, name: str) -> Iterator[
     the same symbol, but no recorded run breaks that way, and `failures.py` already
     declines to write classifiers for signatures nobody has observed.
 
-    The uses are the reason this function is not called ``_removed_import_sites``
-    any more. `pydantic.utils:DUNDER_ATTRIBUTES` is deleted in v2, so the rule
-    says to stop importing it -- and in the fixture that actually carries this
-    break, the name is *used* two lines further down. Deleting the import on that
-    advice alone was measured: it turns a `PydanticImportError` at import time
-    into a `NameError` at call time. Reporting the import and staying quiet about
-    the use is how a correct rule produces a broken repository.
+    The uses are the reason this is not called ``_removed_import_sites`` any more.
+    `pydantic.utils:DUNDER_ATTRIBUTES` is deleted in v2, so the rule says to stop
+    importing it -- and in the fixture that actually carries this break, the name
+    is *used* two lines further down. Deleting the import on that advice alone was
+    measured: it turns a `PydanticImportError` at import time into a `NameError` at
+    call time. Reporting the import and staying quiet about the use is how a
+    correct rule produces a broken repository.
 
     The bound name is `asname` when the import renames it, because that is the
     name the rest of the file actually reads.
 
-    A use is any load of that name anywhere in the module. A local rebinding in
-    some inner scope could make one of them unrelated, and no attempt is made to
-    exclude it: this list is read, never edited, so naming one line too many
-    costs a moment's attention, and naming one too few costs the `NameError` this
-    exists to prevent.
+    Scope is followed rather than assumed. A module-wide set of bound names gets
+    this wrong in both directions -- the same two directions `calls_in_scope`
+    documents -- and the dangerous one is a parameter that happens to share the
+    spelling: the refusal would name that line and claim removing the import
+    causes a `NameError` there, which is a specific and checkable false statement
+    about somebody's code. Over-reporting is the safe direction for a list that is
+    read rather than edited, but only while what is said about each line is true.
     """
-    bound: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == module:
-            for alias in node.names:
-                if alias.name == name:
-                    bound.add(alias.asname or alias.name)
-                    yield node.lineno, Role.SITE
-
-    # An optimisation, not a guard: the loop below tests `node.id in bound`, so an
-    # empty `bound` already yields nothing. It is here because most files in a
-    # scan do not import the symbol at all, and this skips a second full walk of
-    # every one of them -- measured at 12.6ms -> 5.9ms on a 400-function module.
-    if not bound:
-        return
-
-    # One line may read the name more than once (`X or default_for(X)`), and that
-    # is one line to go and look at, not two.
     seen: set[int] = set()
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Name)
-            and isinstance(node.ctx, ast.Load)
-            and node.id in bound
-            and node.lineno not in seen
-        ):
-            seen.add(node.lineno)
-            yield node.lineno, Role.USE
+    for line, role in _uses_in_scope(tree, module, name, frozenset()):
+        if role is Role.SITE:
+            yield line, role
+        elif line not in seen:
+            # One line may read the name more than once (`X or default_for(X)`),
+            # and that is one line to go and look at, not two.
+            seen.add(line)
+            yield line, role
 
 
 def _sites(rule: Rule, tree: ast.Module) -> Iterator[tuple[int, Role]]:

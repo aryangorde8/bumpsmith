@@ -112,6 +112,8 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 103 | [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | The test written for 101 used a directory, which trips 102's guard instead — so the `OSError` wrapping was covered by nothing — *self-found by breaking it* | **Fixed** — a dangling symlink lands on the write itself; deterministic, and needs no `chmod` a root-owned CI would ignore | this PR |
 | 104 | [#22](https://github.com/aryangorde8/bumpsmith/pull/22) | A `REMOVED_INTERNAL` rule said "stop importing `X` from `Y`" and the scan reported only the import line, never where `X` was still read — so following the tool's own advice turns an error at import time into a `NameError` at call time — *self-found while measuring whether a class-5 rewriter could exist* | **Fixed** — `Role.SITE`/`Role.USE` on `Match`, `count` stays sites-only, `_by_path` filters to sites so no planner can be handed a use, and the refusal names the lines that would break. Measured on fixture F4 under pydantic 2.13.4: deleting the import gives `NameError`, repointing at the `pydantic.v1` shim gives `AttributeError` two lines later | this PR |
 | 105 | [#22](https://github.com/aryangorde8/bumpsmith/pull/22) | `if not bound: return` read as a correctness guard but is not one — the loop below it tests `node.id in bound`, which already yields nothing for an empty set — *self-found by breaking it and having nothing fail* | **Kept, relabelled** — finding 95's shape a second time. It is a real optimisation, so it stays with the measurement that earns it: 12.6ms → 5.9ms on a file that does not import the symbol, which is nearly every file in a scan | this PR |
+| 106 | [#22](https://github.com/aryangorde8/bumpsmith/pull/22) | `_removed_symbol_sites` put imports from every lexical scope into one file-wide set, so a parameter, a local, or a comprehension target sharing the spelling was reported as a line that would break — and the refusal asserts a `NameError` at each line it names, which for those is a specific, checkable, **false** statement about somebody's code. False matches could also fill the five listed slots ahead of the real use | **Fixed** — scope is followed: `_uses_in_scope` subtracts what a scope binds itself before adding what its own import binds, and comprehensions are scopes with their targets as bindings. Verified before accepting: three of Qodo's four sub-claims reproduced; attribute access was already correct. 🔴 **`calls_in_scope` documents this exact failure one function above the one that had it** | this PR |
+| 107 | [#22](https://github.com/aryangorde8/bumpsmith/pull/22) | The unpacking-target test used `[a for (a, X) in pairs]`, where the only occurrence of `X` is a **store** — never a use whether unpacking shadows or not, so it passed with the guard removed — *self-found by breaking it* | **Fixed** — the element now reads the name. **The fourth instance of this shape** after 96, 97 and 103 | this PR |
 
 Rows 20–31 are described in the sections below rather than listed here; they
 arrived in groups and the group is the unit that makes sense of them.
@@ -2051,7 +2053,8 @@ written for was never reached.
 
 That is the third time in two pull requests: **96** (a test for an empty
 `pytest.ini` that used a file with a section), **97** (a guard the code could not
-reach), and now **103**. The shape is always the same — *the test provokes a
+reach), and now **103** -- with **107** on #22 making four. The shape is always
+the same — *the test provokes a
 different failure than the one it names, and passes either way.* Reading it will
 not find it. Only breaking the line it claims to cover will.
 
@@ -2110,6 +2113,57 @@ break the repository that follows it.** The neighbouring shapes are 60/69
 (*prose stating a property is not the property*) and 80–90 (*a guarantee stated
 well is not a guarantee tested well*). This is the third: **a correct statement,
 acted on as instructions, producing a defect the statement never mentioned.**
+
+---
+
+## 106–107 · The paragraph one function above the mistake
+
+Qodo raised exactly one finding on #22, and it was on the code written to fix
+104: `_removed_symbol_sites` collected imports from every lexical scope into one
+file-wide set of names, then called every load of that spelling a use.
+
+The claims were checked before the finding was accepted. Three of four
+reproduced — a parameter sharing the spelling, a function-local import leaking
+into module scope, and a comprehension target. The fourth, "class/method names",
+did not: attribute access is an `Attribute` node, never a bare `Name`, and was
+already correct.
+
+The docstring had *pre-defended* this: "naming one line too many costs a
+moment's attention, and naming one too few costs the `NameError` this exists to
+prevent." That direction is right, and it is not a defence of what shipped. The
+refusal does not merely list lines — it says **"the name is still read at X:N, so
+removing the site alone would replace this error with a NameError."** For a
+parameter, that sentence is false about a specific line in somebody's code. And
+with `_USES_LISTED = 5`, false matches can fill the list ahead of the real use.
+Over-reporting is the safe direction for a list that is read rather than edited,
+but only while what is said about each line is true.
+
+**The worst part is where the answer already was.** `calls_in_scope` sits one
+function above, and its docstring is this finding, written before the bug:
+
+> One module-wide import map applied to the whole tree gets this wrong in both
+> directions: it misses a pydantic import made inside a function, and -- the
+> dangerous half -- it claims a *parameter* named `constr` is pydantic's
+
+The project had met this problem, solved it, and written down which half was
+dangerous. The new function was written next to that paragraph without using it.
+The fix reuses the machinery it should have used first: `_locally_bound` for what
+a scope binds, subtracted before the scope's own import is added, plus
+comprehension scopes, which `calls_in_scope` does not need and a name-resolver
+does.
+
+**107** is the fourth appearance of the shape 96, 97 and 103 named. The test for
+unpacking used `[a for (a, X) in pairs]` — where the only `X` is a *store*, and a
+store is never a use whether unpacking shadows or not. It passed with the guard
+removed. Fifteen guards were broken one at a time; fourteen failed a test, and
+the fifteenth found this.
+
+→ **The lesson, named: the fix for a defect is written at the moment you are
+most convinced you understand it.** 104 was found by measuring instead of
+assuming; 106 was created three hours later by assuming instead of reading the
+function directly above. Neighbouring shapes: 95/105 (*a branch that is not the
+reason the code behaves as it does*) and 80–90 (*a guarantee argued for at
+length in a file that did not have it*).
 
 ---
 
