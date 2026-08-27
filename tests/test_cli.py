@@ -237,7 +237,7 @@ def test_every_stop_maps_to_an_exit_status_and_only_three_exist() -> None:
     assert {cli._status(stop) for stop in Stop} == {0, 1, 2}
     assert cli._status(Stop.GREEN) == 0
     assert {stop for stop in Stop if cli._status(stop) == 2} == cli.NO_RESULT
-    assert frozenset({Stop.NOT_RUN, Stop.WRONG_PLACE}) == cli.NO_RESULT
+    assert frozenset({Stop.NOT_RUN, Stop.WRONG_PLACE, Stop.FOREIGN_CONFIG}) == cli.NO_RESULT
 
 
 def test_a_report_says_when_a_kept_migration_is_not_a_finished_one(

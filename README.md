@@ -186,15 +186,27 @@ of the two happened.
 What an empty `git status` does *not* tell you is that the directory is
 untouched. This run left seven `__pycache__/` directories behind, and the fixture
 gitignores them — so the check that looked like proof of "byte-for-byte" was only
-ever proof of "no tracked file changed". Those are the interpreter's and pytest's,
-not bumpsmith's; nothing here claims to restore them, and `git status --ignored`
-is the command that shows them.
+ever proof of "no tracked file changed". Those are the interpreter's, not
+bumpsmith's; nothing here claims to restore them, and `git status --ignored` is
+the command that shows them.
 
 The count is from a clean reproduction — fresh clone, fresh fixture, nothing
 carried over — because the first version of this paragraph named `.pytest_cache/`
-as well, on the strength of a directory listing that still held residue from the
-previous day's runs. Attributing somebody else's leftovers to the run you are
-describing is the same mistake as the one this paragraph exists to correct.
+as well. That correction was right and its stated reason was not: it blamed a
+directory listing still holding the previous day's residue. The actual reason is
+better and more useful. pytest writes its cache at `rootdir`, and `rootdir` for
+this fixture is **not the fixture** — `fixtures/B` configures no pytest of its
+own, so the search walks upward out of it. `.pytest_cache/` could therefore
+never have appeared under `git -C ./fixtures/B`, on that day or any other. It
+lands wherever the walk stopped: beside this README before the barrier existed,
+and in `fixtures/` now that it does. Verified both times by deleting every
+cache, running only the fixture's suite, and finding exactly one.
+
+Being right about a claim and wrong about the mechanism under it is its own
+defect, and a quiet one — nothing fails, and the next person to reason from the
+stated reason gets a different wrong answer. [Whose settings the suite runs
+under](#whose-settings-the-suite-runs-under) is what that mechanism turned out
+to be worth.
 
 ## The report a person reads
 
@@ -217,10 +229,11 @@ as evidence.
 
 ## When it stops, it says which thing happened
 
-"bumpsmith could not finish" is never a shrug. Every exit from the loop is one of
-eleven members of a `Stop` enum — an enum rather than a message, because the
-caller sometimes has to act on the answer and matching on prose is how that goes
-wrong quietly.
+"bumpsmith could not finish" is never a shrug. Every exit from the loop is a
+member of a `Stop` enum — an enum rather than a message, because the caller
+sometimes has to act on the answer and matching on prose is how that goes wrong
+quietly. The table below is the list; this sentence used to say how many there
+were, and adding one made it wrong.
 
 | `Stop` | meaning | what to do about it |
 |---|---|---|
@@ -235,6 +248,7 @@ wrong quietly.
 | `NOT_APPLIED` | the edits were refused before anything was written to disk | read the refusal; it names the site |
 | `STEP_LIMIT` | the cap was reached and the suite was still red | raise `--steps`, or look at what it kept hitting |
 | `WRONG_PLACE` | the suite ran somewhere other than the tree being edited | see [below](#where-the-suite-runs) |
+| `FOREIGN_CONFIG` | the suite would be configured from outside that tree | give the repository its own pytest config — see [below](#whose-settings-the-suite-runs-under) |
 
 `Stop` says why the loop ended. A separate `Outcome` says what is on disk —
 `ALREADY_GREEN`, `MIGRATED`, `REVERTED`, `UNTOUCHED`. They are kept apart because
@@ -299,6 +313,7 @@ implementation.
 | [`harness.py`](src/bumpsmith/harness.py) | TrueForge's `tool.approval_required` → the same `Gate`. The event carries only ids, so the asking message is read back; **a call that cannot be read is denied** |
 | [`trueforge.py`](src/bumpsmith/trueforge.py) | the transport, and the only place in the package that opens a socket. Decides nothing about what an event means |
 | [`sources.py`](src/bumpsmith/sources.py) | one byte-exact reader honouring PEP 263, shared so encoding handling cannot drift between modules |
+| [`rootdir.py`](src/bumpsmith/rootdir.py) | which configuration would govern the subject's suite. pytest walks *upward* for it, so a repository that configures nothing inherits whatever it sits beneath — and a verdict from the right tree can still not be about it |
 | [`fixtures.py`](src/bumpsmith/fixtures.py) | clones the four fixtures from upstream at pinned SHAs and verifies `HEAD`. No vendored code in this repository |
 
 Two design choices carry more weight than the rest.
@@ -340,6 +355,48 @@ any `Runner`, so it checks where each run actually happened and stops at
 not — including a runner that reports honestly while the suite is red and
 conveniently the moment it goes green. Stating the requirement in a docstring was
 the first version of this, and a docstring is not an enforcement.
+
+### Whose settings the suite runs under
+
+Running against the right tree is not enough, because pytest does not take its
+settings from the tree it runs in. It walks **upward** for the first file that
+counts as an inifile — `pytest.ini`, a `pyproject.toml` with
+`[tool.pytest.ini_options]`, a `tox.ini` with `[pytest]`, a `setup.cfg` with
+`[tool:pytest]` — and whatever it finds sets `rootdir`, `addopts` and
+`testpaths`. A repository that configures nothing itself therefore inherits the
+configuration of whatever it happens to sit beneath.
+
+That is not hypothetical. `python -m bumpsmith.fixtures` clones into
+`./fixtures/` **inside this checkout**, and this checkout sets
+`addopts = "-ra --strict-markers --strict-config"`. Same tree, same interpreter,
+same command, on a project with one unregistered marker:
+
+| where the subject sits | what pytest does |
+|---|---|
+| under a checkout that configures pytest | `1 error`, exit **2** — collection aborted on the marker |
+| anywhere else | `1 passed, 1 deselected`, exit **0** — a warning |
+
+Only one of those two directions is loud. A *stricter* outside configuration
+turns green into red, which costs a wasted migration attempt against a break
+that was never a pydantic break. An outside configuration that **deselects** —
+`-m "not slow"`, a narrowing `testpaths`, an `--ignore` — runs fewer tests than
+the repository's own suite would, so a suite that should have gone red goes
+green and the loop keeps the edits. That is `WRONG_PLACE`'s defect by a
+different road, and it gets the same treatment: `Stop.FOREIGN_CONFIG`, checked
+once before the first run, never after a verdict exists to argue with.
+
+The check is deliberately blunt. Rather than decide which pytest settings are
+dangerous — a list that would be wrong the first time pytest grows an option —
+an outside inifile that sets **anything at all** is refused, and one that sets
+nothing is allowed through. An empty `[pytest]` section is a real and useful
+thing: it counts as an inifile, so it stops the walk, while contributing no
+settings. That is how a directory of cloned subjects keeps the host checkout
+out of them, and `python -m bumpsmith.fixtures` writes exactly such a barrier
+into `fixtures/` when it clones.
+
+Of the four fixtures, three configure pytest themselves and are unaffected;
+only B does not, which is why the barrier exists. The refusal names the file and
+what it sets, because the remedy is one line in the repository being migrated.
 
 ### Stopping before anything irreversible
 
@@ -407,7 +464,7 @@ Then run it against a real repository end to end:
 python -m bumpsmith.fixtures B
 python -m bumpsmith ./fixtures/B --package emnify -- /path/to/a/pydantic2/python -m pytest -q
 git -C ./fixtures/B diff              # empty — every edit taken back
-git -C ./fixtures/B status --ignored  # .pytest_cache/, __pycache__/ — pytest's, not bumpsmith's
+git -C ./fixtures/B status --ignored  # seven __pycache__/ — the interpreter's, not bumpsmith's
 ```
 
 [`proofs/`](proofs/README.md) holds the scripts that demonstrate things a test

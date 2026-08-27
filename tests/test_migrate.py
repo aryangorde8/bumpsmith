@@ -724,6 +724,9 @@ class _Case:
     nothing_parses: bool = False
     """Patch the parser to return nothing, which it cannot currently do."""
 
+    foreign_config: bool = False
+    """Put a pytest configuration in the directory *above* the repository."""
+
     expect: Outcome = Outcome.UNTOUCHED
 
 
@@ -750,11 +753,14 @@ CASES = (
         expect=Outcome.REVERTED,
     ),
     _Case(Stop.WRONG_PLACE, (_elsewhere(REGEX_BROKEN),)),
+    # A green answer is scripted and deliberately never reached: the refusal
+    # happens before the suite is run, so the runner is not consulted at all.
+    _Case(Stop.FOREIGN_CONFIG, (GREEN,), foreign_config=True),
 )
 
 
 def test_the_cases_cover_every_way_the_loop_can_end() -> None:
-    """Adding a tenth stop reason without a case fails here rather than silently."""
+    """Adding a stop reason without a case fails here rather than silently."""
     assert {case.stop for case in CASES} == set(Stop)
 
 
@@ -786,6 +792,10 @@ def test_nothing_is_kept_unless_a_run_came_back_green(
         root = _repo(tmp_path / "repo")
     if case.nothing_parses:
         monkeypatch.setattr(migrate_module, "parse_failures", _parses_nothing)
+    if case.foreign_config:
+        (root.parent / "pyproject.toml").write_text(
+            '[tool.pytest.ini_options]\naddopts = "-q"\n', encoding="utf-8"
+        )
 
     before = _snapshot(root)
     result = migrate(
@@ -812,6 +822,72 @@ def test_nothing_is_kept_unless_a_run_came_back_green(
 # --------------------------------------------------------------------------
 # The report
 # --------------------------------------------------------------------------
+
+
+def test_a_foreign_configuration_is_refused_before_the_suite_is_ever_run(
+    tmp_path: Path,
+) -> None:
+    """Not after a verdict exists to argue with.
+
+    A green answer is scripted and the runner records every call it receives, so
+    "the refusal came first" is checked against an empty call list rather than
+    inferred from the outcome. Refusing after the run would produce the same
+    `Stop` and the same untouched tree, and would have already spent whatever
+    the suite costs on a number nobody may use.
+    """
+    root = _repo(tmp_path / "repo")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\naddopts = "-q"\n', encoding="utf-8"
+    )
+    runner = _Scripted(GREEN)
+
+    result = migrate(root, runner, SUITE)
+
+    assert result.stop is Stop.FOREIGN_CONFIG
+    assert runner.calls == [], "the suite was run before the configuration was checked"
+    assert result.steps == ()
+    assert str(tmp_path / "pyproject.toml") in result.reason
+    assert "addopts" in result.reason
+
+
+def test_a_command_that_is_not_recognisably_pytest_is_left_alone(tmp_path: Path) -> None:
+    """The check is about pytest's rootdir algorithm and claims nothing wider.
+
+    A tox run or a make target sits under the same foreign configuration and is
+    not governed by it, so refusing would be a refusal nobody could act on. The
+    cost of the narrow reading is a check that does not happen; the cost of the
+    wide one is a tool that cannot be used.
+    """
+    root = _repo(tmp_path / "repo")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\naddopts = "-q"\n', encoding="utf-8"
+    )
+
+    result = migrate(root, _Scripted(GREEN), ("make", "test"))
+
+    assert result.stop is Stop.GREEN
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ("pytest", "-q"),
+        ("py.test", "-q"),
+        ("/somewhere/else/bin/pytest",),
+        ("python", "-m", "pytest"),
+        ("./venv/bin/python", "-m", "pytest", "-q"),
+    ],
+)
+def test_the_usual_ways_of_spelling_a_pytest_run_are_all_recognised(
+    tmp_path: Path, command: tuple[str, ...]
+) -> None:
+    """Each of these is how somebody actually writes it on a command line."""
+    root = _repo(tmp_path / "repo")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\naddopts = "-q"\n', encoding="utf-8"
+    )
+
+    assert migrate(root, _Scripted(GREEN), command).stop is Stop.FOREIGN_CONFIG
 
 
 def test_the_report_is_derived_from_the_steps_rather_than_stored(tmp_path: Path) -> None:

@@ -13,6 +13,8 @@ import pytest
 
 from bumpsmith import fixtures as fixtures_module
 from bumpsmith.fixtures import (
+    BARRIER,
+    BARRIER_NAME,
     CloneResult,
     Fixture,
     FixtureError,
@@ -24,7 +26,9 @@ from bumpsmith.fixtures import (
     load_manifest,
     main,
     select,
+    write_barrier,
 )
+from bumpsmith.rootdir import foreign_config
 
 _MANIFEST_TEMPLATE = """
 [fixtures.demo]
@@ -502,3 +506,56 @@ def test_main_returns_one_when_a_clone_fails(
 
     assert exit_code == 1
     assert "FAIL  demo" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# The barrier that keeps this checkout out of the clones
+# --------------------------------------------------------------------------
+
+
+def test_cloning_writes_the_barrier_beside_the_fixture(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A fixture arrives already protected from the checkout it was cloned into.
+
+    Writing it separately would be a step somebody forgets, and forgetting it is
+    silent: the fixture runs, it just runs under the wrong settings.
+    """
+    origin, sha, _ = _origin_with_two_commits(tmp_path)
+    manifest = _write_manifest(tmp_path, _MANIFEST_TEMPLATE.format(url=f"file://{origin}", sha=sha))
+    root = tmp_path / "work"
+
+    assert main(["--manifest", str(manifest), "--root", str(root)]) == 0
+    capsys.readouterr()
+
+    barrier = root / BARRIER_NAME
+    assert barrier.is_file()
+    assert foreign_config(root / "demo") is None
+
+
+def test_the_barrier_is_never_written_over_something_that_is_already_there(
+    tmp_path: Path,
+) -> None:
+    """It may be somebody's deliberate configuration for that directory.
+
+    Replacing it would be the same class of surprise the barrier exists to
+    prevent, arriving from the other direction.
+    """
+    root = tmp_path / "work"
+    root.mkdir()
+    mine = root / BARRIER_NAME
+    mine.write_text("[pytest]\naddopts = --mine\n", encoding="utf-8")
+
+    assert write_barrier(root) == mine
+    assert mine.read_text(encoding="utf-8") == "[pytest]\naddopts = --mine\n"
+
+
+def test_the_barrier_is_a_pytest_ini_because_the_others_do_not_count_when_empty() -> None:
+    """The filename is load-bearing, and nothing else about the file is.
+
+    `pytest.ini` is the one name pytest treats as configuration whatever it
+    contains. Written as `tox.ini` or `setup.cfg` the same empty file would not
+    stop the walk at all.
+    """
+    assert BARRIER_NAME == "pytest.ini"
+    assert "[pytest]" in BARRIER

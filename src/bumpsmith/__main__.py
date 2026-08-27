@@ -250,10 +250,10 @@ def report(migration: Migration) -> str:
     return "\n".join(lines)
 
 
-NO_RESULT = frozenset({Stop.NOT_RUN, Stop.WRONG_PLACE})
+NO_RESULT = frozenset({Stop.NOT_RUN, Stop.WRONG_PLACE, Stop.FOREIGN_CONFIG})
 """The stops that produced no usable answer about the suite.
 
-Both exit ``2`` rather than ``1``. A missing interpreter and a failing test are
+All three exit ``2`` rather than ``1``. A missing interpreter and a failing test are
 not two grades of the same thing, and automation that cannot tell them apart
 retries the wrong one -- which is the same distinction :mod:`bumpsmith.run`
 exists to keep, carried out to the process's exit status.

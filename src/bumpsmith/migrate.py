@@ -47,17 +47,31 @@ before its result is used for anything. Saying the requirement in this paragraph
 was the first version, and a paragraph is not an enforcement: :func:`migrate` is
 public and takes the general protocol, so a caller holding a ``SandboxRunner``
 never passes the command line's refusal on the way in.
+
+The tree and its configuration
+------------------------------
+Running against the right tree is not sufficient, because pytest does not read
+its settings from the tree it runs in -- it walks upward for the first file that
+counts as an inifile. A repository with no pytest configuration of its own
+inherits whatever it happens to sit beneath, so a subject cloned into a checkout
+that configures pytest is measured under settings nobody chose for it. An
+outside ``addopts`` that deselects, or a narrowing ``testpaths``, runs fewer
+tests than the repository's own suite would, and a suite that should have gone
+red goes green with the edits kept. That is ``WRONG_PLACE``'s defect arriving by
+a different road, so it gets the same treatment: :attr:`Stop.FOREIGN_CONFIG`,
+checked once before the first run. :mod:`bumpsmith.rootdir` does the looking.
 """
 
 from collections.abc import Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from bumpsmith.apply import ApplyError, Attempt, Edit, RevertError, attempt
 from bumpsmith.failures import Failure, parse_failures
 from bumpsmith.rewrite import Plan, UnsupportedRuleError, plan
+from bumpsmith.rootdir import describe, foreign_config
 from bumpsmith.rules import Rule, RuleKind, ScanResult, find_matches, write_rule
 from bumpsmith.run import Completed, RunError, Runner, Where
 
@@ -155,6 +169,18 @@ class Stop(Enum):
     nothing about the edits. Refused rather than trusted, because the failure it
     would otherwise produce is the worst one available: edits kept on the
     strength of a suite that never saw them.
+    """
+
+    FOREIGN_CONFIG = "foreign-config"
+    """The suite would be configured from outside the tree being edited.
+
+    pytest resolves its settings by walking up from the directory it runs in, so
+    a repository that configures nothing itself is governed by whatever it sits
+    beneath. Refused for the same reason as :attr:`WRONG_PLACE`: an outside
+    setting that narrows what runs makes a green suite mean less than it says,
+    and the loop keeps edits on exactly that signal. The remedy is one file --
+    the repository configuring itself -- and the message names what would have
+    governed it instead.
     """
 
 
@@ -338,6 +364,27 @@ def _writes(planned: Plan) -> tuple[Edit, ...]:
     return tuple(edit for edit in planned.edits if edit.changes_anything)
 
 
+_PYTEST_NAMES = frozenset({"pytest", "py.test"})
+
+
+def _runs_pytest(command: Sequence[str]) -> bool:
+    """Whether this argv recognisably runs pytest.
+
+    Deliberately narrow. The configuration check below is about pytest's rootdir
+    algorithm and nothing else, so a command this cannot recognise -- a tox run,
+    a make target, somebody's shell wrapper -- is left alone rather than refused
+    on a guess. Under-recognising costs a check that does not happen;
+    over-recognising costs a refusal nobody can act on.
+
+    One name check covers every spelling, ``python -m pytest`` included: the
+    module argument *is* the bare word ``pytest``, so a separate ``-m`` branch
+    can never be the reason this returns ``True``. There was one, and a
+    parametrised test appeared to cover it -- deleting the branch changed no
+    answer, which is how it was found.
+    """
+    return any(PurePosixPath(argument).name in _PYTEST_NAMES for argument in command)
+
+
 @dataclass(frozen=True, slots=True)
 class _Setup:
     """The inputs that do not change between steps."""
@@ -394,6 +441,24 @@ def migrate(
     """
     if step_limit < 0:
         raise ValueError(f"step_limit cannot be negative; got {step_limit}")
+
+    # Before the first run, not after it. A refusal that arrives once the suite
+    # has already produced a verdict has to argue with a number somebody can
+    # see, and the whole point is that the number should never have been
+    # produced. Nothing has been applied at this line, so there is nothing to
+    # take back and no step to record.
+    if _runs_pytest(command):
+        outside = foreign_config(root)
+        if outside is not None:
+            return Migration(
+                steps=(),
+                stop=Stop.FOREIGN_CONFIG,
+                reason=(
+                    f"the suite at {root} would be configured from outside the tree "
+                    f"being edited, by {describe(outside)}; give the repository its own "
+                    f"pytest configuration so its suite is measured by its own rules"
+                ),
+            )
 
     setup = _Setup(
         root=root,
