@@ -11,8 +11,10 @@ all, and the proof fails unless the report keeps that apart from the subject
 that was reached and needed nothing. Both contribute zero migrations. Only one
 of them is good news.
 
-Needs an interpreter with pydantic v2 on it, which this package deliberately
-does not depend on. No harness, no network, no credentials.
+Needs an interpreter with **pydantic v2 and pytest** on it -- the subjects are
+migrated by running their own suites through it, so both are prerequisites and
+both are checked before anything is built. This package deliberately depends on
+neither. No harness, no network, no credentials.
 """
 
 import argparse
@@ -168,16 +170,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--json", type=Path, help="write the payload here")
     args = parser.parse_args(argv)
 
+    # Both, not just pydantic. Every subject is migrated by running
+    # `python -m pytest` through this same interpreter, so an interpreter with
+    # pydantic and no pytest fails all four subjects for a reason that has
+    # nothing to do with fanning out -- and the proof would report it as
+    # migrations that did not work. A missing prerequisite is not a result.
     probe = subprocess.run(  # noqa: S603
-        [args.python, "-c", "import pydantic; print(pydantic.VERSION)"],
+        [
+            args.python,
+            "-c",
+            "import pydantic, pytest; print(pydantic.VERSION, pytest.__version__)",
+        ],
         capture_output=True,
         text=True,
         check=False,
     )
     if probe.returncode != 0:
-        print(f"--python needs pydantic v2 installed: {probe.stderr.strip()}", file=sys.stderr)
+        print(
+            f"--python needs both pydantic v2 and pytest installed: {probe.stderr.strip()}",
+            file=sys.stderr,
+        )
         return 2
-    version = probe.stdout.strip()
+    version, pytest_version = probe.stdout.split()
     if not version.startswith("2."):
         print(f"--python has pydantic {version}; this proof needs v2", file=sys.stderr)
         return 2
@@ -185,7 +199,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     where = Path(tempfile.mkdtemp(prefix="bumpsmith-fanout-"))
     try:
         jobs = build(where, args.python)
-        print(f"pydantic {version}, {len(jobs)} subjects + one unreachable, {args.workers} workers")
+        print(
+            f"pydantic {version}, pytest {pytest_version}, "
+            f"{len(jobs)} subjects + one unreachable, {args.workers} workers"
+        )
         result = fan_out([*jobs, Unreachable()], workers=args.workers)
 
         for attempt in result.attempts:
@@ -200,6 +217,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         problems = check(result.attempts, jobs)
         payload = {
             "pydantic": version,
+            "pytest": pytest_version,
             "workers": args.workers,
             "fanout": result.as_dict(),
             "problems": problems,

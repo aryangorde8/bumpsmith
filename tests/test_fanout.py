@@ -6,6 +6,7 @@ is only interesting because a wrong figure in a summary is the kind of defect
 this project has shipped before -- twice in prose, once in a renderer.
 """
 
+import concurrent.futures
 import json
 import threading
 import time
@@ -20,6 +21,8 @@ from bumpsmith.fanout import (
     Fanout,
     Job,
     Unreached,
+    _assemble,
+    _verdict,
     fan_out,
 )
 from bumpsmith.migrate import Migration, Outcome, Stop
@@ -248,6 +251,130 @@ def test_a_job_that_never_started_is_not_reported_as_still_running() -> None:
         assert queued.result.still_running is False
     finally:
         release.set()
+
+
+# -- the deadline decides, and nothing after it ----------------------------
+
+
+def test_a_result_that_arrived_after_the_deadline_is_not_accepted() -> None:
+    """The finding: reading the results first accepted a late verdict.
+
+    The job did finish and its migration is real -- it simply finished after
+    the deadline, while the orchestrator was still shutting the pool down.
+    Accepting it makes the timeout mean "unless the bookkeeping was slow".
+    """
+    late_but_real = green()
+    verdict = _verdict(
+        finished_by_deadline=False,
+        recorded=late_but_real,
+        cancelled=False,
+        timeout=30.0,
+    )
+    assert verdict is not late_but_real
+    assert isinstance(verdict, Unreached)
+    assert "30s" in verdict.reason
+
+
+def test_a_result_that_arrived_before_the_deadline_is_the_verdict() -> None:
+    on_time = green()
+    assert (
+        _verdict(finished_by_deadline=True, recorded=on_time, cancelled=False, timeout=30.0)
+        is on_time
+    )
+
+
+def test_finishing_by_the_deadline_with_nothing_recorded_is_still_unreached() -> None:
+    """Belt and braces: the two sources must agree before a verdict is taken."""
+    verdict = _verdict(finished_by_deadline=True, recorded=None, cancelled=False, timeout=1.0)
+    assert isinstance(verdict, Unreached)
+
+
+@pytest.mark.parametrize(
+    ("cancelled", "still_running"),
+    [(True, False), (False, True)],
+)
+def test_only_a_job_that_never_started_is_reported_as_not_running(
+    cancelled: bool, still_running: bool
+) -> None:
+    verdict = _verdict(finished_by_deadline=False, recorded=None, cancelled=cancelled, timeout=1.0)
+    assert isinstance(verdict, Unreached)
+    assert verdict.still_running is still_running
+
+
+def test_the_deadline_rule_holds_for_every_combination() -> None:
+    """A verdict is taken in exactly one of the four cases."""
+    migration = green()
+    taken = {
+        (by_deadline, recorded is not None): _verdict(
+            finished_by_deadline=by_deadline,
+            recorded=recorded,
+            cancelled=False,
+            timeout=1.0,
+        )
+        is migration
+        for by_deadline in (True, False)
+        for recorded in (migration, None)
+    }
+    assert taken == {
+        (True, True): True,
+        (True, False): False,
+        (False, True): False,
+        (False, False): False,
+    }
+
+
+# -- the call site's half of the same rule ---------------------------------
+
+
+def _future() -> "concurrent.futures.Future[None]":
+    return concurrent.futures.Future()
+
+
+def test_a_late_result_is_refused_even_though_the_pool_recorded_it() -> None:
+    """`_verdict` states the rule; this checks it is handed the right arguments.
+
+    Built from futures a test made itself, because the window is microseconds
+    wide in a real run and cannot be provoked from outside. The second job
+    finished -- its migration is sitting in the recorded results -- but it was
+    not in the `done` set the deadline produced, so its verdict arrived too
+    late to count.
+
+    Without this, a call site ignoring `done` entirely passes every other test
+    in this file: the deadline tests use a job that is still blocked, so it
+    never records anything and the flag never decides anything.
+    """
+    on_time, late = _future(), _future()
+    result = _assemble(
+        [Fake("on-time"), Fake("late")],
+        [on_time, late],
+        {on_time},
+        {0: green(), 1: green()},
+        30.0,
+    )
+    assert result.attempts[0].ran is True
+    assert result.attempts[1].ran is False
+    assert result.complete is False
+
+
+def test_assemble_keeps_job_order() -> None:
+    a, b, c = _future(), _future(), _future()
+    result = _assemble(
+        [Fake("first"), Fake("second"), Fake("third")],
+        [a, b, c],
+        {a, b, c},
+        {0: green(), 1: green(), 2: green()},
+        30.0,
+    )
+    assert [x.subject for x in result.attempts] == ["first", "second", "third"]
+
+
+def test_assemble_reports_a_cancelled_future_as_not_running() -> None:
+    queued = _future()
+    assert queued.cancel()
+    result = _assemble([Fake("queued")], [queued], set(), {}, 30.0)
+    (attempt,) = result.attempts
+    assert isinstance(attempt.result, Unreached)
+    assert attempt.result.still_running is False
 
 
 # -- refusals --------------------------------------------------------------

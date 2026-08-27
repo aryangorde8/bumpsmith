@@ -42,7 +42,8 @@ from __future__ import annotations
 
 import concurrent.futures
 import threading
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from typing import Protocol, final, runtime_checkable
 
@@ -247,6 +248,73 @@ def _labelled(jobs: Sequence[Job]) -> None:
         seen.add(name)
 
 
+def _verdict(
+    *,
+    finished_by_deadline: bool,
+    recorded: Migration | Unreached | None,
+    cancelled: bool,
+    timeout: float,
+) -> Migration | Unreached:
+    """What one job's attempt holds, decided at the deadline and not after it.
+
+    ``finished_by_deadline`` is membership of the ``done`` set
+    :func:`concurrent.futures.wait` returned -- a fact about the instant the
+    deadline passed. ``recorded`` is what the shared results hold *now*, which
+    for a job that finished late is a genuine migration that nobody waited for.
+
+    The first decides; the second only supplies the value. Reading ``recorded``
+    first was the original, and it accepted a verdict that arrived after the
+    deadline whenever the bookkeeping between the two took long enough -- which
+    makes the timeout nondeterministic exactly at its boundary, in a module
+    whose report is supposed to be the same for the same subjects twice.
+
+    Pulled out as a function because the window it is about is microseconds
+    wide and cannot be provoked reliably from outside. A rule that cannot be
+    raced can still be stated and checked, and this is that rule.
+    """
+    if finished_by_deadline and recorded is not None:
+        return recorded
+    return Unreached(
+        reason=f"did not finish within {timeout:g}s",
+        # A future that was cancelled never began, so nothing is left running
+        # for it. One that is merely unfinished is still going.
+        still_running=not cancelled,
+    )
+
+
+def _assemble(
+    jobs: Sequence[Job],
+    futures: Sequence[concurrent.futures.Future[None]],
+    done: AbstractSet[concurrent.futures.Future[None]],
+    recorded: Mapping[int, Migration | Unreached],
+    timeout: float,
+) -> Fanout:
+    """Turn what the pool did into one report, in the order the jobs were given.
+
+    Separate from :func:`fan_out` so that the wiring can be checked with futures
+    a test built itself. :func:`_verdict` states the rule; this is the half that
+    has to hand it the right arguments, and getting *that* wrong looks identical
+    from outside -- the deadline tests never populate a recorded result for a
+    job that missed the deadline, so a call site ignoring ``done`` entirely
+    passed all of them. A guarantee spelled across two places needs both halves
+    tested, which is the shape finding 55 named.
+    """
+    return Fanout(
+        attempts=tuple(
+            Attempt(
+                subject=job.subject,
+                result=_verdict(
+                    finished_by_deadline=futures[index] in done,
+                    recorded=recorded.get(index),
+                    cancelled=futures[index].cancelled(),
+                    timeout=timeout,
+                ),
+            )
+            for index, job in enumerate(jobs)
+        )
+    )
+
+
 def fan_out(
     jobs: Sequence[Job],
     *,
@@ -311,30 +379,18 @@ def fan_out(
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
     try:
         futures = [pool.submit(one, i, job) for i, job in enumerate(jobs)]
-        concurrent.futures.wait(futures, timeout=timeout)
+        # `done` is the deadline, and it is a set decided *by* `wait` at the
+        # moment it gave up -- not a question asked afterwards. Everything below
+        # reads membership of it rather than the shared results, because those
+        # keep being written to by threads nobody is waiting for any more.
+        done, _ = concurrent.futures.wait(futures, timeout=timeout)
     finally:
         # `cancel_futures` drops the ones that never started. A thread already
         # running cannot be cancelled and keeps going; that is what
         # `Unreached.still_running` is for.
         pool.shutdown(wait=False, cancel_futures=True)
 
-    # Snapshot once, under the lock. A job finishing between the deadline and
-    # this line would otherwise appear in some figures and not others. Reading
-    # it as unreached is the safe direction: nobody waited for that verdict, so
-    # nothing here claims it.
     with lock:
         recorded_by_index = dict(results)
 
-    attempts: list[Attempt] = []
-    for index, job in enumerate(jobs):
-        recorded = recorded_by_index.get(index)
-        if recorded is None:
-            started = futures[index].cancelled() is False
-            recorded = Unreached(
-                reason=f"did not finish within {timeout:g}s",
-                # A future that was cancelled never began, so nothing is left
-                # running for it. One that is merely unfinished is still going.
-                still_running=started,
-            )
-        attempts.append(Attempt(subject=job.subject, result=recorded))
-    return Fanout(attempts=tuple(attempts))
+    return _assemble(jobs, futures, done, recorded_by_index, timeout)

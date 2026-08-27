@@ -132,6 +132,9 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 111 | [#23](https://github.com/aryangorde8/bumpsmith/pull/23) | The guard written for 110 searched the whole log, so it failed on the log's own description of 110 — a check that cannot coexist with writing down what it checks — *self-found by running it* | **Fixed** — scoped to the prose between the index and the first section. `test_docs.py`'s module docstring already records this exact mistake being made and undone once before | this PR |
 | 112 | [#24](https://github.com/aryangorde8/bumpsmith/pull/24) | `fan_out`'s deadline was decorative. The pool was entered with `with`, whose `__exit__` calls `shutdown(wait=True)` — so after `wait(timeout=...)` gave up, the block still blocked until the abandoned job finished, and the timeout stopped nothing — *self-found by breaking the guard and watching the test take as long as the job it was meant to abandon* | **Fixed** — the shutdown is explicit and does not wait; queued jobs are cancelled, running ones are reported as possibly still running. The test went 20.27s → 0.62s, which is the only reason it was visible at all: it passed either way | this PR |
 | 113 | [#24](https://github.com/aryangorde8/bumpsmith/pull/24) | `test_workers_must_be_positive` passed with its guard deleted. It matched `ValueError` on the pattern `"workers"`, and `ThreadPoolExecutor` rejects the same values with *"max_workers must be greater than 0"* — so the test proved somebody's guard existed, not this module's — *self-found by breaking it* | **Fixed** — matched on this module's own wording, plus a case with **no jobs**, where the pool is never built and nothing else objects, so an impossible worker count would otherwise return an empty result as though asked to do nothing. **The fifth instance of this shape** after 96, 97, 103 and 107 | this PR |
+| 114 | [#24](https://github.com/aryangorde8/bumpsmith/pull/24) | `fan_out` read the shared results *after* the timed wait and the pool shutdown, so a job finishing after the deadline but before that read was reported as **reached** — a verdict accepted because the bookkeeping in between took long enough, making the timeout nondeterministic exactly at its boundary | **Fixed** — the `done` set `wait` returns *is* the deadline, decided at the instant it passed; the results only supply the value. 🔴 **The comment three lines above the defect stated the correct rule** — *"reading it as unreached is the safe direction"* — and the code did the opposite. Written while fixing 112, in the paragraph belonging to the timeout it broke | this PR |
+| 115 | [#24](https://github.com/aryangorde8/bumpsmith/pull/24) | `proofs/fanout.py` said it needed *"pydantic v2 and nothing else"* and probed only pydantic, but every subject is migrated by running `python -m pytest` through that same interpreter — so an interpreter meeting the documented requirement fails all four subjects, and the proof reports it as migrations that did not work rather than as a missing prerequisite | **Fixed** — both are probed before anything is built, and the failure exits 2 naming both. The docstring and `proofs/README.md` corrected. **A missing prerequisite is not a result** — shape 9's family, where not-knowing is reported as an outcome | this PR |
+| 116 | [#24](https://github.com/aryangorde8/bumpsmith/pull/24) | Fixing 114 put the rule in `_verdict` and left the *call site* untested: a `fan_out` passing `finished_by_deadline=True` unconditionally passed every test in the file, because the deadline tests use a job that is still blocked and therefore never records a result for the flag to decide about — *self-found by breaking the guard* | **Fixed** — assembly extracted to `_assemble` and checked with futures a test builds itself, one of them recorded but absent from `done`. **Finding 55's shape**: a guarantee spelled across two places needs both halves tested, and the dangerous half is the one that fails quietly | this PR |
 
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
@@ -2310,6 +2313,66 @@ class's behaviour — but labelled redundant instead of left looking load-bearin
 with the property it leans on now pinned by its own test. The sweep also carried a
 **no-op control**, so a guard scoped so tightly it matches nothing cannot pass as
 one that works.
+
+## 114–116 · The comment that was right and the code that was not
+
+Qodo raised two on the fan-out module. Both accepted after checking them, and
+the first is worse than the report says.
+
+**114 — a deadline that let late verdicts through.** `fan_out` waits on the
+futures with the caller's timeout, then shuts the pool down, then reads the
+shared results. A job finishing in the gap between the wait giving up and that
+read has written a real migration by the time anyone looks — and it was reported
+as **reached**. The verdict was genuine; it just arrived after the deadline and
+was accepted because the bookkeeping in between happened to take long enough.
+Two identical runs could report differently, in a class whose own docstring
+promises the same subjects produce the same report twice.
+
+🔴 **The comment three lines above the defect stated the correct rule.** It read:
+*"A job finishing between the deadline and this line would otherwise appear in
+some figures and not others. Reading it as unreached is the safe direction:
+nobody waited for that verdict, so nothing here claims it."* The code did the
+opposite of its own paragraph. Worse, that paragraph was written while fixing
+**112** — the timeout it belongs to — and the same rewrite dropped the
+`done, not_done =` capture that had made the boundary crisp. The fix for one
+half of the deadline removed the other half and wrote down that it had not.
+
+That is the third time in this project a defect has appeared inside its own
+recorded warning: **29 → 106** eleven pull requests apart, **108 → 110** two
+lines apart, and now a comment and the statement below it. *Prose stating a
+property is not the property* (60, 69), with the prose written by the person who
+knew.
+
+The fix makes the `done` set `wait` returns the deadline itself — a fact decided
+at the instant it passed, not a question asked afterwards. The results only
+supply the value.
+
+**115 — a prerequisite reported as a result.** `proofs/fanout.py` advertised that
+it needed *"pydantic v2 and nothing else"*, and probed exactly that. Every
+subject is then migrated by running `python -m pytest` through the same
+interpreter. So an interpreter satisfying the documented requirement fails all
+four subjects, and the proof reports them as migrations that did not work rather
+than as a prerequisite that was never there. Shape 9's family: *"I could not
+tell"* arriving as an outcome. Both are now probed before anything is built and
+the refusal exits 2 naming both.
+
+**116 — the fix's own untested half.** Fixing 114 put the rule in `_verdict`, a
+pure function, and tested it thoroughly. Nothing tested whether `fan_out` handed
+it the right arguments. A call site passing `finished_by_deadline=True`
+unconditionally passed every test in the file — because the deadline tests use a
+job that is still blocked, so it never records a result for the flag to decide
+about. The rule was right and the wiring was unchecked, which looks identical
+from outside.
+
+Found by breaking it. **Finding 55's shape**: a guarantee spelled across a setup
+site and a use site needs both halves tested, and the dangerous version is the
+one that fails quietly. Assembly is now `_assemble`, checked with futures a test
+builds itself — one of them recorded but absent from `done`, which is the case
+no real run can be made to produce on demand.
+
+**17 of 17 real guards caught** on the re-run, plus the no-op control. The
+eighteenth remains `counting()`'s redundant filter, unchanged and still
+labelled.
 
 ## How this stays honest
 

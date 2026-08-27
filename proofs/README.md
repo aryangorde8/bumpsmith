@@ -43,8 +43,9 @@ could do it. Findings 35 and 39 both said so. What is left is four lines of
 Install the package first (`pip install -e .`) so the imports resolve.
 `sandbox.py` and `deny.py` need a TrueForge on `http://localhost:8790`; pass
 `--base-url` for anywhere else. `pull_request.py`, `validator.py` and `fanout.py`
-need no harness at all — those are the ones a reader without one can run, and the
-last two want an interpreter with pydantic v2 on it.
+need no harness at all — those are the ones a reader without one can run.
+`validator.py` wants an interpreter with pydantic v2; `fanout.py` wants pydantic
+v2 and pytest, and says so before it starts.
 
 ### `sandbox.py` — the suite runs somewhere safe
 
@@ -201,8 +202,10 @@ rewriter is built on these answers, so a change here is a change there.
 python proofs/fanout.py --python /path/to/a/venv/bin/python
 ```
 
-Needs an interpreter with pydantic v2 and nothing else — no harness, no network,
-no credentials. It writes three small projects with real v1 breaks in them, plus
+Needs an interpreter with **pydantic v2 and pytest** on it — the subjects are
+migrated by running their own suites through it, so both are prerequisites and
+both are checked up front, before anything is built. No harness, no network, no
+credentials. It writes three small projects with real v1 breaks in them, plus
 a fourth subject that cannot be reached at all, and migrates them concurrently
 through `bumpsmith.fanout.fan_out`.
 
