@@ -130,6 +130,8 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 109 | [#23](https://github.com/aryangorde8/bumpsmith/pull/23) | This table skipped **20–31**: twelve findings with prose sections and no row — a *documented* choice, with a note under the table saying so, not a silent omission — *self-found the same way* | **Fixed** — twelve rows written from the prose, index contiguous 1..N, and a test fails on the next gap. The note was a fair defence of a weaker thing: a group section explains a finding, and only a row makes it findable by number | this PR |
 | 110 | [#23](https://github.com/aryangorde8/bumpsmith/pull/23) | Adding rows 20–31 made the note two lines under the table — *"described in the sections below rather than listed here"* — false, so the log told a reader both that those findings are indexed and that they are not | **Fixed** — the note now describes the arrangement that exists. **Raised by Qodo on the pull request whose subject is a stale sentence left standing beside the thing it described**; 108's own shape, inside 108's fix | this PR |
 | 111 | [#23](https://github.com/aryangorde8/bumpsmith/pull/23) | The guard written for 110 searched the whole log, so it failed on the log's own description of 110 — a check that cannot coexist with writing down what it checks — *self-found by running it* | **Fixed** — scoped to the prose between the index and the first section. `test_docs.py`'s module docstring already records this exact mistake being made and undone once before | this PR |
+| 112 | [#24](https://github.com/aryangorde8/bumpsmith/pull/24) | `fan_out`'s deadline was decorative. The pool was entered with `with`, whose `__exit__` calls `shutdown(wait=True)` — so after `wait(timeout=...)` gave up, the block still blocked until the abandoned job finished, and the timeout stopped nothing — *self-found by breaking the guard and watching the test take as long as the job it was meant to abandon* | **Fixed** — the shutdown is explicit and does not wait; queued jobs are cancelled, running ones are reported as possibly still running. The test went 20.27s → 0.62s, which is the only reason it was visible at all: it passed either way | this PR |
+| 113 | [#24](https://github.com/aryangorde8/bumpsmith/pull/24) | `test_workers_must_be_positive` passed with its guard deleted. It matched `ValueError` on the pattern `"workers"`, and `ThreadPoolExecutor` rejects the same values with *"max_workers must be greater than 0"* — so the test proved somebody's guard existed, not this module's — *self-found by breaking it* | **Fixed** — matched on this module's own wording, plus a case with **no jobs**, where the pool is never built and nothing else objects, so an impossible worker count would otherwise return an empty result as though asked to do nothing. **The fifth instance of this shape** after 96, 97, 103 and 107 | this PR |
 
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
@@ -2261,6 +2263,53 @@ shapes: 64/65 (*a summary restating a number the table already owns*) and 60/69
 (*prose stating a property is not the property*).
 
 ---
+
+## 112–113 · Concurrency, where a wrong figure is quiet
+
+Two findings from one module, both found the same way — by breaking each guard
+and checking something failed — and both the same family: **a guard not doing the
+job its name claimed.**
+
+**112 — a deadline that stopped nothing.** `fan_out` takes a timeout, waits on
+the futures with it, and records anything unfinished as `Unreached`. All correct,
+and all defeated by the line above it: the pool was entered with `with`, and
+`ThreadPoolExecutor.__exit__` calls `shutdown(wait=True)`. The timeout expired,
+the code moved on, and the *exit from the block* then blocked until the abandoned
+job finished anyway. A caller asking for a thirty-minute ceiling would have waited
+as long as the slowest sandbox took.
+
+Nothing failed. The test asserted the right things and got them, because by the
+time it looked, the hung job had completed and recorded a real result. What gave
+it away was the clock: 20.27s, in a file whose other twenty-nine tests take under
+a second together, on a test whose entire subject is *not waiting*. A timeout that
+stops waiting has to stop waiting everywhere, including in cleanup nobody wrote.
+
+**113 — a guard whose test was satisfied by somebody else's guard.**
+`test_workers_must_be_positive` asked for a `ValueError` matching `"workers"`.
+Deleting the check under test still passed, because `ThreadPoolExecutor` rejects
+`max_workers < 1` with *"max_workers must be greater than 0"* — which also
+contains the word. The test was true of the standard library.
+
+This is **the fifth instance** of the shape named at 96, 97, 103 and 107: *the
+test provokes a different failure from the one it names, and passes either way.*
+Four of the five were found by breaking the guard rather than by reading the
+test, which is now the only method this project trusts for the question.
+
+The guard turned out to be real, and the case that proves it is the empty one.
+With no jobs, `fan_out` returns before the pool is ever built — so nothing else is
+there to object, and `fan_out([], workers=0)` would have returned an empty result
+as though it had been asked to do nothing. The fix is both halves: match on this
+module's own wording, and test at zero jobs.
+
+**One guard was broken and correctly changed nothing.** `counting()` filters to
+attempts that ran, and iterating every attempt gives the same answer today,
+because an unreached attempt's `outcome` is `None` and `None` is never an
+`Outcome` member. Finding 95's question again, answered as 105 was: kept, because
+it states the rule where the rule matters rather than inheriting it from another
+class's behaviour — but labelled redundant instead of left looking load-bearing,
+with the property it leans on now pinned by its own test. The sweep also carried a
+**no-op control**, so a guard scoped so tightly it matches nothing cannot pass as
+one that works.
 
 ## How this stays honest
 
