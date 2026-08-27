@@ -164,6 +164,19 @@ def _logged_ids() -> list[int]:
     return [int(match.group(1)) for match in _ROW.finditer(_review_log())]
 
 
+def _index_note(text: str) -> str:
+    """The prose between the index table and the first finding section.
+
+    Scoped for the reason this module's docstring gives. The first version read
+    the whole file and failed immediately -- on the log's own description of
+    finding 110, which necessarily quotes the sentence being banned. A check
+    that cannot coexist with writing down what it checks is not usable here.
+    """
+    after = text.split("| 110 |", 1)[-1]
+    body = after.split("\n", 1)[1] if "\n" in after else ""
+    return body.split("\n## ", 1)[0]
+
+
 def test_the_log_index_numbers_every_finding_from_one_with_no_gaps() -> None:
     """A table presenting itself as the index has to be one.
 
@@ -219,4 +232,26 @@ def test_the_readme_finding_breakdown_adds_up_to_its_own_total() -> None:
     assert review + harness + author == total, (
         f"the README's breakdown does not sum to its own total: "
         f"{review} + {harness} + {author} = {review + harness + author}, stated as {total}."
+    )
+
+
+def test_the_log_does_not_claim_findings_are_unindexed_while_indexing_them() -> None:
+    """Finding 110: the note under the table outlived the arrangement it described.
+
+    Adding rows 20-31 made "described in the sections below rather than listed
+    here" false, so the log said both things at once. Raised by review, on the
+    pull request whose subject was stale sentences, two lines below the table
+    being edited.
+
+    Written as the inverted pattern rather than a positive assertion about the
+    note's wording, for the reason `test_the_readme_does_not_restate_the_number_
+    of_stop_reasons` gives: pin the sentence that regressed, not every way of
+    writing a true one.
+    """
+    note = _index_note(_review_log())
+    match = re.search(r"rather than listed here|are not listed (?:here|in the table)", note)
+    assert match is None, (
+        f"the note under the index again says findings are not listed there "
+        f"({match.group(0)!r}), while the index is contiguous 1..{len(_logged_ids())}. "
+        f"One of the two is wrong."
     )

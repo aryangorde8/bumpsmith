@@ -127,10 +127,13 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 106 | [#22](https://github.com/aryangorde8/bumpsmith/pull/22) | `_removed_symbol_sites` put imports from every lexical scope into one file-wide set, so a parameter, a local, or a comprehension target sharing the spelling was reported as a line that would break — and the refusal asserts a `NameError` at each line it names, which for those is a specific, checkable, **false** statement about somebody's code. False matches could also fill the five listed slots ahead of the real use | **Fixed** — scope is followed: `_uses_in_scope` subtracts what a scope binds itself before adding what its own import binds, and comprehensions are scopes with their targets as bindings. Verified before accepting: three of Qodo's four sub-claims reproduced; attribute access was already correct. 🔴 **`calls_in_scope` documents this exact failure one function above the one that had it** | this PR |
 | 107 | [#22](https://github.com/aryangorde8/bumpsmith/pull/22) | The unpacking-target test used `[a for (a, X) in pairs]`, where the only occurrence of `X` is a **store** — never a use whether unpacking shadows or not, so it passed with the guard removed — *self-found by breaking it* | **Fixed** — the element now reads the name. **The fourth instance of this shape** after 96, 97 and 103 | this PR |
 | 108 | [#23](https://github.com/aryangorde8/bumpsmith/pull/23) | The README said the log holds **65 findings**; it held 107 — and the paragraph carrying that number is the one ending *"a stale number was corrected in one file and left standing in two others a `grep` away"* — *self-found by reading the README cold, as a stranger would* | **Fixed** — the sentence is now checked against the log's own table by `tests/test_docs.py`, both the total and the three parts summing to it. Findings 64/65's shape, inside the paragraph that describes it | this PR |
-| 109 | [#23](https://github.com/aryangorde8/bumpsmith/pull/23) | This table skipped **20–31**: twelve findings with prose sections and no row, in the file the README calls *"every finding raised and what happened to it"* — *self-found the same way* | **Fixed** — twelve rows written from the prose, index now contiguous 1..N, and a test fails on the next gap. A finding in prose but absent from the index is indistinguishable from one nobody recorded | this PR |
+| 109 | [#23](https://github.com/aryangorde8/bumpsmith/pull/23) | This table skipped **20–31**: twelve findings with prose sections and no row — a *documented* choice, with a note under the table saying so, not a silent omission — *self-found the same way* | **Fixed** — twelve rows written from the prose, index contiguous 1..N, and a test fails on the next gap. The note was a fair defence of a weaker thing: a group section explains a finding, and only a row makes it findable by number | this PR |
+| 110 | [#23](https://github.com/aryangorde8/bumpsmith/pull/23) | Adding rows 20–31 made the note two lines under the table — *"described in the sections below rather than listed here"* — false, so the log told a reader both that those findings are indexed and that they are not | **Fixed** — the note now describes the arrangement that exists. **Raised by Qodo on the pull request whose subject is a stale sentence left standing beside the thing it described**; 108's own shape, inside 108's fix | this PR |
+| 111 | [#23](https://github.com/aryangorde8/bumpsmith/pull/23) | The guard written for 110 searched the whole log, so it failed on the log's own description of 110 — a check that cannot coexist with writing down what it checks — *self-found by running it* | **Fixed** — scoped to the prose between the index and the first section. `test_docs.py`'s module docstring already records this exact mistake being made and undone once before | this PR |
 
-Rows 20–31 are described in the sections below rather than listed here; they
-arrived in groups and the group is the unit that makes sense of them.
+Every finding has a row here and a fuller account below. Findings that arrived
+in groups keep a shared section, because the group is often the unit that makes
+sense of them -- but the group is not a substitute for the row.
 
 ---
 
@@ -2216,10 +2219,32 @@ it.
 
 **109.** The log's index table skipped **20 through 31**. Twelve findings, all
 three of that round's pull requests (#10, #11, #12), had prose sections and no
-row. They were explained and unindexed, in the file whose own promise is that
-nothing closes silently. Prose is where a finding is explained; the table is
-where a reader learns it exists at all. The twelve rows are written from the
-prose, the index is contiguous, and a test fails on the next gap.
+row.
+
+This was a *documented* choice, not a silent omission -- a note two lines under
+the table said those rows are described below because they arrived in groups.
+The first draft of this entry called them "indistinguishable from one nobody
+recorded", which was too strong, and the note is why. What the note defends is
+still the weaker arrangement: a group section explains a finding, and only a row
+makes it findable by the number everything else in this project refers to it by.
+The twelve rows are written from the prose, the index is contiguous, and a test
+fails on the next gap.
+
+**110, from Qodo, on this pull request.** Adding those rows made the note false.
+The log then told a reader both that 20-31 are indexed and that they are not.
+
+That is 108's shape -- a sentence left standing beside the thing it described --
+occurring inside 108's own fix, two lines below the table being edited, in a
+pull request whose entire subject is stale sentences. It was found by review and
+not by me, and the reason is plain: I read the rows I was inserting and not the
+line under them.
+
+**111**, immediately after: the guard written for 110 searched the whole file and
+failed on this very section, which has to quote the sentence it bans. That
+mistake is already recorded in `test_docs.py`'s module docstring -- made once,
+undone, written down, and made again by the test added to prevent a repeat. It is
+now scoped to the prose between the index and the first section, and a no-op
+control confirms the scoping holds rather than merely passing.
 
 **Finding 29 is worth the detour.** It is one of the twelve that had no row, and
 it reads: *a function parameter named `constr` was treated as pydantic's, because
@@ -2230,7 +2255,8 @@ directly beneath the docstring that `calls_in_scope` carries *because of finding
 reintroduced it eleven pull requests later.
 
 → **The lesson, named: a defect the project has already fixed and documented is
-not thereby prevented.** 29 → 106 is that in its clearest form. Neighbouring
+not thereby prevented.** 29 → 106 is that in its clearest form, and 108 → 110 is
+it happening within a single pull request. Neighbouring
 shapes: 64/65 (*a summary restating a number the table already owns*) and 60/69
 (*prose stating a property is not the property*).
 
