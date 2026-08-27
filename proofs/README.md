@@ -225,6 +225,48 @@ the report calls it `already-green`, and that its file on disk is still the byte
 that were written. `ALREADY_GREEN` is a claim about a tree, so the tree is what
 settles it.
 
+### `sandbox_fanout.py` — several real repositories, each in a sandbox of its own
+
+```
+python proofs/sandbox_fanout.py --subjects B,C
+```
+
+Needs a sandbox provider **and** this repository to be public: each sandbox
+installs the package from it. This is the one that costs something to run.
+
+`fanout.py` proves the orchestration with projects it writes itself. This proves
+the thing that cannot be faked — several *real* third-party repositories being
+migrated at the same time, each in its own Daytona sandbox, by a `bumpsmith`
+that was installed there and does not know it is in a sandbox. The whole loop
+goes across: clone, read the failure, write the rule, edit, re-run the suite,
+keep it only if green.
+
+That is possible because nothing is split. `python -m bumpsmith --sandbox` still
+refuses, and is still right to — it would edit a checkout here and test it
+there. Installing the package *into* the sandbox puts editing and testing back
+on one filesystem, just not this one.
+
+Three things make it a proof rather than a demonstration, and the third is the
+one that is hard:
+
+- **A negative control.** Fixture C is already on pydantic v2. It has to come
+  back `already-green` *and* with `git status` clean **in the sandbox that ran
+  it** — a report and a filesystem are two claims, and a loop that edited it and
+  reverted perfectly would produce the same report as one that never touched it.
+- **An unreachable subject.** One job points at a port nobody is listening on.
+  "Four subjects, none migrated" and "four sandboxes, none reached" are the same
+  number and opposite facts; the only way to show the report keeps them apart is
+  to make one happen.
+- **A count nobody accumulated.** Every figure it prints is derived by
+  `bumpsmith.fanout` from the attempts. There is no counter in the script that
+  could disagree with the report.
+
+Each subject's environment is recorded in the script rather than guessed, and
+the script refuses a fixture it has no measured environment for. A plausible
+environment produces a red suite about the environment, and the loop classifies
+it as a migration break with total sincerity — which is a convincing-looking run
+that proves nothing.
+
 ## The recorded runs
 
 `recorded/` holds the output of every script, verbatim — the two harness ones

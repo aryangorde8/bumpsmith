@@ -135,6 +135,8 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 114 | [#24](https://github.com/aryangorde8/bumpsmith/pull/24) | `fan_out` read the shared results *after* the timed wait and the pool shutdown, so a job finishing after the deadline but before that read was reported as **reached** — a verdict accepted because the bookkeeping in between took long enough, making the timeout nondeterministic exactly at its boundary | **Fixed** — the `done` set `wait` returns *is* the deadline, decided at the instant it passed; the results only supply the value. 🔴 **The comment three lines above the defect stated the correct rule** — *"reading it as unreached is the safe direction"* — and the code did the opposite. Written while fixing 112, in the paragraph belonging to the timeout it broke | this PR |
 | 115 | [#24](https://github.com/aryangorde8/bumpsmith/pull/24) | `proofs/fanout.py` said it needed *"pydantic v2 and nothing else"* and probed only pydantic, but every subject is migrated by running `python -m pytest` through that same interpreter — so an interpreter meeting the documented requirement fails all four subjects, and the proof reports it as migrations that did not work rather than as a missing prerequisite | **Fixed** — both are probed before anything is built, and the failure exits 2 naming both. The docstring and `proofs/README.md` corrected. **A missing prerequisite is not a result** — shape 9's family, where not-knowing is reported as an outcome | this PR |
 | 116 | [#24](https://github.com/aryangorde8/bumpsmith/pull/24) | Fixing 114 put the rule in `_verdict` and left the *call site* untested: a `fan_out` passing `finished_by_deadline=True` unconditionally passed every test in the file, because the deadline tests use a job that is still blocked and therefore never records a result for the flag to decide about — *self-found by breaking the guard* | **Fixed** — assembly extracted to `_assemble` and checked with futures a test builds itself, one of them recorded but absent from `done`. **Finding 55's shape**: a guarantee spelled across two places needs both halves tested, and the dangerous half is the one that fails quietly | this PR |
+| 117 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | `Attempt.ran` asked whether a result *is a verdict* rather than whether it is `Unreached`. Both answers agree for the two types that exist, so swapping one for the other passed all 713 tests — and they disagree for anything else, where the protocol version answers *"nobody reached this subject"* about a subject that was reached. The module's own docstring stated the correct rule; nothing tested it — *self-found by breaking the guard* | **Fixed** — the discriminator is `Unreached`, the type this module owns, and a test now hands `fan_out` a result of a kind it has never met. **Prose stating a property is not the property** (60, 69), and the fourth defect found sitting inside its own recorded warning | this PR |
+| 118 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | `_read_exec_result` refused a real harness failure by naming the missing field and discarding the sentence beside it. TrueForge sends `error` as a model turn's **content blocks**, not a string, so the `success is False` branch reported *"no reason given"* while holding the explanation — and the branch for a result with no `success` at all never consulted `error`, which is precisely the shape a sandbox that never came up produces. A live Daytona disk-quota failure surfaced as *"`success` is None"* | **Fixed** — both branches read the reason in either form. Nothing about which results are *accepted* changes; only what a rejected one can say for itself. **Raised by running it, not by reading it**: the string-only shape had been assumed since the module was written and no test could have contradicted it | this PR |
 
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
@@ -2373,6 +2375,58 @@ no real run can be made to produce on demand.
 **17 of 17 real guards caught** on the re-run, plus the no-op control. The
 eighteenth remains `counting()`'s redundant filter, unchanged and still
 labelled.
+
+## 117–118 · Two refusals that were right and said the wrong thing
+
+Both findings here are the same mistake in two places, and neither changes what
+the code *accepts*. They change what it says when it refuses — which is the half
+nobody tests, because a refusal that fires looks like a success from the test's
+point of view.
+
+**117 — the discriminator that was documented and not tested.** `fanout` was
+widened to take a `Verdict` protocol so that a report read back from a sandbox
+could be one without pretending to be a `Migration`. That left a choice: ask
+whether a result *is* a verdict, or ask whether it is an `Unreached`. The module
+already had a paragraph explaining why the second is correct — testing for the
+protocol means a result of an unfamiliar kind reads as a subject nobody reached,
+which is a fact nobody established, in the one direction the module exists to
+refuse.
+
+The paragraph was there. The test was not. Swapping the two passed **all 713
+tests**, because the two answers are identical for both types that exist today;
+they differ only for a third, and no test had ever produced one. Writing the
+reason down had felt like doing the work.
+
+That is the fourth time in this project a defect has been found inside its own
+recorded warning — 29 → 106 eleven PRs apart, 108 → 110 two lines apart, 114's
+comment contradicting the statement below it, and now a rule explained in prose
+and left unchecked. It is worth naming as a pattern rather than as four
+coincidences: **the act of writing down why something matters reliably feels
+like having handled it.**
+
+**118 — the refusal that threw away its reason.** A fan-out of four sandboxes
+came back with every subject unreached and this explanation: `` `success` is
+None, which is neither true nor false ``. True, unhelpful, and hiding the actual
+answer, which was sitting in the same payload — Daytona's disk quota was
+exhausted, and it said so in a sentence.
+
+Two bugs, one shape. The `success is False` branch read `error` as a string; the
+harness sends it as a model turn's content blocks, so a genuine failure with a
+genuine explanation reported *"no reason given"*. And the branch for a payload
+with no `success` field at all never looked at `error` — which is exactly the
+shape a sandbox that failed to *start* produces, so the case with the most to
+say was the case that said the least.
+
+Neither could have been found by reading. The string form is what the API
+documents, the tests used the documented form, and every one of them passed. It
+took a real quota failure in a real harness. That makes this the fourth finding
+in the log raised by running the thing rather than reviewing it, and it is the
+clearest of them: **a rejection is a diagnostic, and a diagnostic that discards
+the diagnosis is a correct answer to the wrong question.**
+
+**18 of 18 real guards caught** on the run that found 117, plus the no-op
+control — a "break" scoped so tightly it changes nothing, which looks exactly
+like a guard that works.
 
 ## How this stays honest
 
