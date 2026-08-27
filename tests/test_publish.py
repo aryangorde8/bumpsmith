@@ -70,6 +70,7 @@ class _Git:
         staged: Sequence[str] = (),
         modified: Sequence[str] = ("emnify/models.py",),
         committed: Mapping[str, str] | None = None,
+        modes: Mapping[str, str] | None = None,
         pr: Completed | None = None,
     ) -> None:
         self.calls: list[list[str]] = []
@@ -79,7 +80,13 @@ class _Git:
         self.branch_exists = branch_exists
         self.staged = list(staged)
         self.modified = list(modified)
-        self.committed = dict(committed or {"emnify/models.py": self.ORIGINAL})
+        # `is not None`, not `or`: an empty mapping is a repository where the
+        # target is untracked, which is a case this suite has to be able to
+        # express. `or` quietly substituted the default for it.
+        self.committed = dict(
+            {"emnify/models.py": self.ORIGINAL} if committed is None else committed
+        )
+        self.modes = dict(modes or {})
         self.pr = pr or _ok("https://github.com/aryangorde8/emnify-fork/pull/7\n")
 
     def run(self, command: Sequence[str], cwd: Path) -> Completed:  # noqa: ARG002
@@ -105,12 +112,17 @@ class _Git:
         if rest[:1] == ["show"]:
             name = rest[1].removeprefix("HEAD:")
             return _ok(self.committed[name]) if name in self.committed else _fail(128)
+        if rest[:2] == ["ls-tree", "HEAD"]:
+            name = rest[-1]
+            if name not in self.committed:
+                return _ok("")
+            return _ok(f"{self.modes.get(name, '100644')} blob 0123456789abcdef\t{name}")
         return _ok()
 
     @property
     def written(self) -> list[list[str]]:
         """Only the calls that could change something."""
-        reads = {"remote", "symbolic-ref", "rev-parse", "status", "diff", "show"}
+        reads = {"remote", "symbolic-ref", "rev-parse", "status", "diff", "show", "ls-tree"}
         return [call for call in self.calls if not reads & set(call[1:2])]
 
 
@@ -144,12 +156,20 @@ class _Answering:
         return self.git.run(command, cwd)
 
 
-def _git_that_resolves() -> _Git:
-    return _Git()
+def _git_that_resolves(**kwargs: object) -> _Git:
+    return _Git(**kwargs)  # type: ignore[arg-type]
 
 
 def _step(root: Path, *, applied: bool = True, skipped: bool = False) -> Step:
     path = root / "emnify" / "models.py"
+    # On disk, because a migration that applied its edits wrote them there, and
+    # the publishability check reads the file rather than the plan's idea of it.
+    # Only when the root is real: the body-rendering tests pass a notional path
+    # and never reach a check that looks at a filesystem.
+    if root.is_dir():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_text("pattern=", encoding="utf-8")
     rule = Rule(
         break_class=BreakClass.REGEX_KEYWORD,
         kind=RuleKind.SOURCE,
@@ -397,7 +417,10 @@ def test_the_push_happens_before_the_pull_request_is_asked_for(tmp_path: Path) -
     git = _git_that_resolves()
     open_pull_request(_allowed(proposal), proposal, git)
 
-    order = [call[0] if call[0] == "gh" else call[1] for call in git.calls]
+    # The writes, in order. Reads are excluded deliberately: `_do_open` asks the
+    # publishability questions again before it touches anything, so the sequence
+    # of *reads* is not what this test is about -- the sequence of changes is.
+    order = [call[0] if call[0] == "gh" else call[1] for call in git.written]
     assert order == ["checkout", "add", "commit", "push", "gh"]
 
 
@@ -656,3 +679,122 @@ def test_the_commit_is_only_the_migrations_paths(tmp_path: Path) -> None:
     commit = next(call for call in git.calls if call[:2] == ["git", "commit"])
     assert commit[2] == "--only"
     assert commit[-2:] == ["--", "emnify/models.py"]
+
+
+# --------------------------------------------------------------------------
+# 124-127 -- what the follow-up review found, and what now catches it
+# --------------------------------------------------------------------------
+
+
+def test_a_target_git_has_never_seen_is_refused(tmp_path: Path) -> None:
+    """Finding 124.
+
+    The scan walks Python files, not *tracked* Python files, so a migration
+    reaches an untracked one -- and `git add` on it stages the whole body. The
+    old check read `git show HEAD:path`, got nothing, and treated the absence of
+    a committed version as the absence of anything to check.
+    """
+    git = _git_that_resolves(committed={})
+    with pytest.raises(NothingToPublishError, match="never seen it"):
+        propose(_migrated(tmp_path), tmp_path, remote="fork", runner=git)
+    assert git.written == [], git.written
+
+
+def test_a_trailing_newline_change_is_not_called_no_change(tmp_path: Path) -> None:
+    """Finding 125.
+
+    The comparison stripped trailing newlines from both sides, so a newline a
+    user added or removed before the run was "unchanged" and went out with the
+    migration. Contents are a format whose whitespace is the content -- the same
+    lesson as finding 91, one function along.
+    """
+    git = _git_that_resolves(committed={"emnify/models.py": _Git.ORIGINAL + "\n"})
+    with pytest.raises(NothingToPublishError, match="already differed"):
+        propose(_migrated(tmp_path), tmp_path, remote="fork", runner=git)
+    assert git.written == [], git.written
+
+
+def test_a_mode_change_is_refused_even_when_the_text_matches(tmp_path: Path) -> None:
+    """Finding 126.
+
+    The check compared blob text and never the mode, so a pre-existing
+    executable bit rode out with the migration -- from a rewriter that goes out
+    of its way to preserve permissions rather than set them.
+    """
+    git = _git_that_resolves(modes={"emnify/models.py": "100755"})
+    with pytest.raises(NothingToPublishError, match="non-executable"):
+        propose(_migrated(tmp_path), tmp_path, remote="fork", runner=git)
+    assert git.written == [], git.written
+
+
+def test_a_target_removed_after_the_run_is_refused(tmp_path: Path) -> None:
+    """The migration wrote it, so its absence is somebody else's doing."""
+    migration = _migrated(tmp_path)
+    (tmp_path / "emnify" / "models.py").unlink()
+    git = _git_that_resolves()
+    with pytest.raises(NothingToPublishError, match="not there any more"):
+        propose(migration, tmp_path, remote="fork", runner=git)
+    assert git.written == [], git.written
+
+
+class _SaysAndMovesTheTree:
+    """Approves, and changes the repository on the way out.
+
+    This is the only way to exercise the window: the checks run, a human is
+    asked, and the world moves while they are deciding. Nothing else in the
+    suite holds the prompt open.
+    """
+
+    def __init__(self, decision: Decision, git: "_Git", committed: str) -> None:
+        self.decision = decision
+        self.git = git
+        self.committed = committed
+
+    def decide(self, request: Request) -> Decision:  # noqa: ARG002
+        self.git.committed["emnify/models.py"] = self.committed
+        return self.decision
+
+
+def test_the_tree_moving_while_a_human_decides_is_refused(tmp_path: Path) -> None:
+    """Finding 127, and the reason this module runs its checks twice.
+
+    `propose` validated HEAD, the index and every target, and then the program
+    blocked on somebody typing `yes`. Nothing revalidated afterwards, so every
+    guarantee the gate offered was about a repository that had since had the
+    longest interval in the program to change.
+    """
+    proposal = _proposal(tmp_path)
+    git = _git_that_resolves()
+    gate = Gate(
+        _SaysAndMovesTheTree(
+            Allow(fingerprint=request_for(proposal).fingerprint()),
+            git,
+            "somebody else's work",
+        )
+    )
+
+    with pytest.raises(NothingToPublishError, match="already differed"):
+        open_pull_request(gate, proposal, git)
+    # The point is not the exception. It is that the approval was granted and
+    # still nothing was branched, staged, committed or pushed.
+    assert git.written == [], git.written
+
+
+def test_an_unmoved_tree_still_publishes_after_the_approval(tmp_path: Path) -> None:
+    """The no-op control for the test above.
+
+    Revalidation that refused everything would pass that test just as well.
+    """
+    proposal = _proposal(tmp_path)
+    git = _git_that_resolves()
+    opened = open_pull_request(_allowed(proposal), proposal, git)
+    assert opened.branch == proposal.branch
+    written = [call[1] for call in git.written if call[0] == "git"]
+    assert written == ["checkout", "add", "commit", "push"], written
+
+
+def test_the_proposals_paths_come_from_its_originals(tmp_path: Path) -> None:
+    """Derived, not stored beside them: two copies is two chances to disagree."""
+    proposal = _proposal(tmp_path)
+    assert proposal.paths == tuple(path for path, _ in proposal.originals)
+    assert proposal.paths == ("emnify/models.py",)

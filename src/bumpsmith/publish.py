@@ -148,9 +148,24 @@ class Proposal:
     base: str
     title: str
     body: str
-    paths: tuple[str, ...]
-    """Repository-relative, sorted. Exactly what the migration wrote, and the
-    only thing the commit will stage."""
+    originals: tuple[tuple[str, str], ...]
+    """Every path the migration wrote, sorted, paired with what that file held
+    when the migration first found it.
+
+    Carried rather than discarded because the checks have to be answerable
+    *again* after the approval, and the contents are what they are answered
+    against. See :func:`_do_open`."""
+
+    @property
+    def paths(self) -> tuple[str, ...]:
+        """Repository-relative, sorted. Exactly what the migration wrote, and the
+        only thing the commit will stage.
+
+        Derived from :attr:`originals` rather than stored beside it: two copies
+        of one fact is two chances to disagree, and this one decides what gets
+        staged.
+        """
+        return tuple(path for path, _ in self.originals)
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +216,27 @@ def _git_or_none(runner: Runner, root: Path, *args: str) -> str | None:
     except RunError as exc:
         raise GitError(f"`git {' '.join(args)}` did not run: {exc}") from exc
     return result.output.strip() if result.returncode == 0 else None
+
+
+def _git_verbatim_or_none(runner: Runner, root: Path, *args: str) -> str | None:
+    """:func:`_git_or_none` for output where whitespace is the content.
+
+    Finding 91 was ``_git`` stripping ``status --porcelain``, whose leading
+    space means something. A file's *contents* are the same kind of thing and
+    more obviously so: stripping them turns "this differs only in its trailing
+    newline" into "this is unchanged", which is precisely the difference the
+    caller is asking about.
+    """
+    try:
+        result: Completed = runner.run(["git", *args], root)
+    except RunError as exc:
+        raise GitError(f"`git {' '.join(args)}` did not run: {exc}") from exc
+    return result.output if result.returncode == 0 else None
+
+
+def _is_executable(path: Path) -> bool:
+    """Whether the file carries any execute bit, which is all git records."""
+    return bool(path.stat().st_mode & 0o111)
 
 
 def body_for(migration: Migration) -> str:
@@ -355,8 +391,6 @@ def propose(
             "the run reports edits were kept, but none of them changed a file. "
             "There is nothing to put in a pull request."
         )
-    paths = tuple(sorted(originals))
-
     url = _push_url(runner, root, remote)
     if not base:
         base = _default_base(runner, root, remote)
@@ -370,7 +404,7 @@ def propose(
         base=base,
         title=_title_for(migration),
         body=body_for(migration),
-        paths=paths,
+        originals=tuple(sorted(originals.items())),
     )
 
 
@@ -491,12 +525,47 @@ def _require_a_publishable_tree(
         )
 
     for path, first_read in originals.items():
-        committed = _git_or_none(runner, root, "show", f"HEAD:{path}")
-        if committed is not None and committed.rstrip("\n") != first_read.rstrip("\n"):
+        # `show HEAD:path` fails for a path that is not in the commit, which is
+        # what an untracked file is. The scan walks Python files, not *tracked*
+        # Python files, so the migration reaches them -- and `git add` on one
+        # stages its whole body, not the edit. The absence of a committed
+        # version is the answer here, not the absence of a question.
+        committed = _git_verbatim_or_none(runner, root, "show", f"HEAD:{path}")
+        if committed is None:
+            raise NothingToPublishError(
+                f"{path} is not in the last commit -- git has never seen it. Publishing it "
+                "would put the entire file in the pull request as this migration's work, "
+                "when only some lines of it are. Commit it first, then migrate."
+            )
+        if committed != first_read:
             raise NothingToPublishError(
                 f"{path} already differed from the last commit before the migration touched it. "
                 "Those changes are not ours to publish. Commit or stash them first."
             )
+        # Text is not the whole file. The rewriter preserves permissions rather
+        # than setting them, so a mode that disagrees with the commit was
+        # somebody else's change and staging the path would publish it.
+        # A target that is gone is not a mode question, and it is not nothing
+        # either: the migration wrote this file, so its absence means somebody
+        # removed it since -- which is the window this function is called twice
+        # to watch.
+        on_disk = root / path
+        if not on_disk.is_file():
+            raise NothingToPublishError(
+                f"{path} is not there any more, though the migration wrote it. Something "
+                "removed it after the run. Nothing here is safe to publish."
+            )
+        entry = _git(runner, root, "ls-tree", "HEAD", "--", path).split()
+        committed_mode = entry[0] if entry else ""
+        if committed_mode in {"100644", "100755"}:
+            was_executable = committed_mode == "100755"
+            if was_executable != _is_executable(on_disk):
+                became = "executable" if not was_executable else "non-executable"
+                raise NothingToPublishError(
+                    f"{path} was made {became} before the migration touched it, and the "
+                    "migration does not change permissions. Staging it would publish that "
+                    "change too. Commit or restore the mode first."
+                )
 
 
 def _why_nothing(outcome: Outcome) -> str:
@@ -575,7 +644,31 @@ def open_pull_request(gate: Gate, proposal: Proposal, runner: Runner) -> Opened:
 
 
 def _do_open(proposal: Proposal, runner: Runner) -> Opened:
+    """Everything after the yes -- starting by asking the same questions again.
+
+    :func:`propose` answered them before anybody was asked, and then the program
+    stopped and waited for a person. That pause is the longest interval this
+    tool ever has, because its length is somebody's attention, and every check
+    made before it is a statement about a repository that may since have moved:
+    another shell, another process, or the same person opening an editor while
+    deciding.
+
+    The module already knew this about one thing -- the push goes to the
+    approved *URL* rather than the remote's name, because `git remote set-url`
+    could land in that window. The tree can move in exactly the same window and
+    nothing looked. So the whole check runs again here, against the same
+    contents the approval was granted for, and a repository that changed under
+    the prompt is refused rather than published.
+    """
     root = proposal.root
+    _require_a_publishable_tree(
+        runner,
+        root,
+        proposal.remote,
+        proposal.base,
+        proposal.branch,
+        dict(proposal.originals),
+    )
     _git(runner, root, "checkout", "-b", proposal.branch)
     # `--` and one path at a time. Not `-A`, not `-a`, and not a glob: the tree
     # this runs in may hold work that is not ours, and a pathspec that could
