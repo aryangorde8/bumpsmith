@@ -206,6 +206,25 @@ class Outcome(Enum):
     """The suite was red and nothing was ever applied."""
 
 
+def outcome_of(stop: Stop, applied: int) -> Outcome:
+    """What became of a repository, from why the loop stopped and how much it wrote.
+
+    A free function rather than only a property because two different things
+    derive this now, from two different kinds of evidence. The loop derives it
+    from :class:`Step` objects it still holds. A verdict read back out of a
+    report -- see :mod:`bumpsmith.remote` -- derives it from a summary of steps
+    that ran on a filesystem which no longer exists.
+
+    Writing the rule twice would have been shorter than this paragraph and is
+    the reason for it: the two copies would agree today and there is no test
+    that could notice the day they stopped. The mapping from a stop reason to a
+    disk state is one rule, so it is written once and both callers ask it.
+    """
+    if stop is Stop.GREEN:
+        return Outcome.MIGRATED if applied else Outcome.ALREADY_GREEN
+    return Outcome.REVERTED if applied else Outcome.UNTOUCHED
+
+
 @dataclass(frozen=True, slots=True)
 class Step:
     """One pass of the loop: a run, and what was decided about it.
@@ -308,9 +327,7 @@ class Migration:
     @property
     def outcome(self) -> Outcome:
         """What became of the repository."""
-        if self.stop is Stop.GREEN:
-            return Outcome.MIGRATED if self.applied else Outcome.ALREADY_GREEN
-        return Outcome.REVERTED if self.applied else Outcome.UNTOUCHED
+        return outcome_of(self.stop, self.applied)
 
     @property
     def complete(self) -> bool:

@@ -28,7 +28,7 @@ migrate.** These are the same number and opposite facts. "Four subjects, none
 migrated" is a fine outcome when four suites were already green, and a total
 failure when four sandboxes never came up -- and the two collapse the instant
 anything counts outcomes rather than attempts. So an attempt holds either a
-:class:`~bumpsmith.migrate.Migration` or an :class:`Unreached`, never both and
+:class:`Verdict` or an :class:`Unreached`, never both and
 never neither, and every figure this module reports is derived from that union
 rather than accumulated while the run goes.
 
@@ -47,7 +47,7 @@ from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from typing import Protocol, final, runtime_checkable
 
-from bumpsmith.migrate import Migration, Outcome
+from bumpsmith.migrate import Outcome
 
 # Four concurrent sandboxes measured 3.57x against the sum of their individual
 # times on 27 Aug 2026 -- four distinct TrueForge sessions, each returning its
@@ -61,6 +61,34 @@ DEFAULT_WORKERS = 4
 # seconds and the chain is three breaks deep; the margin is for the sandbox
 # coming up and the installs, not for a slow suite.
 DEFAULT_TIMEOUT = 1800.0
+
+
+@runtime_checkable
+class Verdict(Protocol):
+    """What a job produced: a migration's result, wherever it was reached.
+
+    A protocol rather than :class:`~bumpsmith.migrate.Migration` itself, because
+    two different things are legitimately a verdict about a repository and only
+    one of them is a ``Migration``. The loop running here produces one of those.
+    A loop running in a sandbox produces a report, and
+    :class:`bumpsmith.remote.Reported` is what that report may honestly be read
+    as -- a summary whose evidence is gone, which is a different object and says
+    so in its type.
+
+    One attribute, because this module wants exactly one thing from a verdict:
+    what became of the repository. It does not read steps, does not look at a
+    stop reason, and does not care which kind it was handed. Widening it later
+    would be widening what the orchestrator is allowed to have an opinion about.
+    """
+
+    @property
+    def outcome(self) -> Outcome:
+        """What became of the repository this verdict is about."""
+        ...
+
+    def as_dict(self) -> dict[str, object]:
+        """A form that survives :func:`json.dumps`, for the review trail."""
+        ...
 
 
 @runtime_checkable
@@ -78,7 +106,7 @@ class Job(Protocol):
         """What this job migrates. Used only to label the result."""
         ...
 
-    def __call__(self) -> Migration:
+    def __call__(self) -> Verdict:
         """Run it. Raising is how a job says the migration did not happen."""
         ...
 
@@ -90,8 +118,8 @@ class Unreached:
 
     Not an error type and not a failed migration -- the distinction this whole
     module exists to keep. A migration that ran and left the tree red is a
-    :class:`~bumpsmith.migrate.Migration` with a stop reason. This is the other
-    thing: no run, no verdict, nothing learned about the subject.
+    :class:`Verdict` with a stop reason. This is the other thing: no run, no
+    verdict, nothing learned about the subject.
     """
 
     reason: str
@@ -123,17 +151,26 @@ class Attempt:
     """
 
     subject: str
-    result: Migration | Unreached
+    result: Verdict | Unreached
 
     @property
     def ran(self) -> bool:
-        """Whether a migration happened at all."""
-        return isinstance(self.result, Migration)
+        """Whether a migration happened at all.
+
+        Asks whether the result is an :class:`Unreached` rather than whether it
+        is a verdict, and the direction is deliberate. ``Unreached`` is this
+        module's own type and has exactly one meaning; "a verdict" is anything
+        satisfying a protocol, and testing for *that* means a result of a kind
+        this module has not met yet reads as a subject nobody reached. The
+        failure would be silent and in the safe-looking direction, which is the
+        one thing this module exists to refuse.
+        """
+        return not isinstance(self.result, Unreached)
 
     @property
-    def migration(self) -> Migration | None:
-        """The migration, or ``None`` if the subject was never reached."""
-        return self.result if isinstance(self.result, Migration) else None
+    def verdict(self) -> Verdict | None:
+        """What the migration concluded, or ``None`` if nobody reached the subject."""
+        return None if isinstance(self.result, Unreached) else self.result
 
     @property
     def outcome(self) -> Outcome | None:
@@ -144,8 +181,8 @@ class Attempt:
         repository", and for a subject nobody reached the answer is not a
         state of the repository at all.
         """
-        migration = self.migration
-        return None if migration is None else migration.outcome
+        verdict = self.verdict
+        return None if verdict is None else verdict.outcome
 
     def as_dict(self) -> dict[str, object]:
         """A form that survives :func:`json.dumps`, for the review trail."""
@@ -251,10 +288,10 @@ def _labelled(jobs: Sequence[Job]) -> None:
 def _verdict(
     *,
     finished_by_deadline: bool,
-    recorded: Migration | Unreached | None,
+    recorded: Verdict | Unreached | None,
     cancelled: bool,
     timeout: float,
-) -> Migration | Unreached:
+) -> Verdict | Unreached:
     """What one job's attempt holds, decided at the deadline and not after it.
 
     ``finished_by_deadline`` is membership of the ``done`` set
@@ -286,7 +323,7 @@ def _assemble(
     jobs: Sequence[Job],
     futures: Sequence[concurrent.futures.Future[None]],
     done: AbstractSet[concurrent.futures.Future[None]],
-    recorded: Mapping[int, Migration | Unreached],
+    recorded: Mapping[int, Verdict | Unreached],
     timeout: float,
 ) -> Fanout:
     """Turn what the pool did into one report, in the order the jobs were given.
@@ -350,7 +387,7 @@ def fan_out(
     if not jobs:
         return Fanout(attempts=())
 
-    results: dict[int, Migration | Unreached] = {}
+    results: dict[int, Verdict | Unreached] = {}
     lock = threading.Lock()
 
     def one(index: int, job: Job) -> None:
@@ -364,7 +401,7 @@ def fan_out(
             # all, which reads as a bug in the orchestrator rather than as the
             # subject having failed. `Unreached` is the safe direction: it
             # claims nothing about the tree.
-            outcome: Migration | Unreached = Unreached(reason=f"{type(exc).__name__}: {exc}")
+            outcome: Verdict | Unreached = Unreached(reason=f"{type(exc).__name__}: {exc}")
         else:
             outcome = migration
         with lock:
