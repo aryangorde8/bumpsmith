@@ -141,6 +141,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 120 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | The control check filtered every `??` line out of `git status --porcelain`, so an agent that *added* a file passed a check whose entire claim is that the files are unchanged | **Fixed** — nothing is dropped. Tracked changes fail; an untracked `.py` fails outright; every untracked path is recorded as evidence either way. The filter had a real reason — C's own suite writes `htmlcov/` and `coverage.xml`, so a naive check never passes — but *"the artefacts of running the suite"* and *"anything untracked"* are different sets, and only one of them was safe to ignore | this PR |
 | 121 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | `_read_step` inferred that a scan or plan happened purely from `sites`/`rewritten` being non-null, without checking their types or forbidding `unreadable`/`skipped` entries beside them. A report with `sites: null` and a non-empty `unreadable` list parsed cleanly and derived **`complete = True`** — because completeness asks about a scan, and the step was claiming there was not one | **Fixed** — both counts are checked as int-or-null (`bool` is an `int` in Python, so an unchecked `true` arrives as a count of one), and a phase that never ran may not list what it left behind. The producer never writes that pair; this reader exists for text nobody here produced, which is the only reason it is worth hardening | this PR |
 | 122 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | `sandbox_fanout.py` opened *"Four subjects go out together"* and fans out **three** — and structurally cannot fan out four, because `EXTRAS` is the only place a measured environment exists and it holds two. The README repeated the figure. Nothing was wrong with the code; the paragraph describing it was wrong, in the module whose entire subject is reports that disagree with their evidence — *self-found when the recorded run printed its own subject count on line one* | **Fixed** — the docstring states the rule (`EXTRAS` decides) instead of a number that has to be maintained beside it, and the one figure kept is the one the run prints. **Prose stating a property is not the property** (60, 69, 117) — sixth instance, and the first found by the proof it describes | this PR |
+| 123 | [#26](https://github.com/aryangorde8/bumpsmith/pull/26) | The log entry for 122 said the count *"was contradicted the first time the thing ran"*. It was not. `proofs/sandbox_fanout.py` prints its subject count **before** it fans out, so the quota-failed run on 27 Aug — the one that reached nothing — printed `fanning out over 3 subjects` under a docstring already reading *"Four subjects go out together"*, and so did every run after it. The contradiction was on screen for over an hour before anyone read it; the entry recording that turned "I did not notice" into "it did not happen" — *self-found by checking the claim before repeating it in the write-up* | **Fixed** — the entry now says the line was printed on every run including the ones that reached nothing. **Shape 9** (*"I could not tell" reported as "it did not happen"*; 115), and the entry it corrects is the one about prose that states a property instead of having it | this PR |
 
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
@@ -2432,7 +2433,7 @@ the diagnosis is a correct answer to the wrong question.**
 control — a "break" scoped so tightly it changes nothing, which looks exactly
 like a guard that works.
 
-## 119–122 · The fifth time, in the paragraph that named the pattern
+## 119–123 · The fifth time, in the paragraph that named the pattern
 
 Finding 117, three sections up, is about writing down why something matters and
 mistaking that for having handled it. It was recorded as the *fourth* instance of
@@ -2485,7 +2486,9 @@ out together"*; the run's first line says `fanning out over 3 subjects`. There
 was never a fourth: `EXTRAS` is the only place a measured environment exists, the
 script refuses a fixture without one, and `EXTRAS` holds two. So the number could
 not have drifted — it was wrong when it was written, survived every test, every
-type check and every review, and was contradicted the first time the thing ran.
+type check and every review, and was contradicted by the script's own first line
+of output on every run it ever made — including the ones that died on a disk
+quota without reaching a single subject.
 
 It is worth recording for where it was rather than what it cost. This is the
 module built on the position that a report is not a migration and that a
@@ -2494,6 +2497,26 @@ its own summary paragraph asserted a figure beside evidence that said otherwise.
 The fix is not the corrected number. It is that the docstring now names `EXTRAS`
 as what decides, so there is no second copy of the count to be wrong; the only
 figure left is the one the run prints for itself.
+
+**123 — the entry about the wrong sentence had a wrong sentence in it.** The
+paragraph above originally closed *"and was contradicted the first time the thing
+ran."* That is a nicer story than the truth and it is not the truth. The script
+prints its subject count *before* it fans out, so the run that died on Daytona's
+disk quota — reaching nothing, migrating nothing — still printed `fanning out
+over 3 subjects`, an hour earlier, beneath a docstring already claiming four. So
+did every run after it. What actually happened is that the line was on screen and
+went unread until a run succeeded and there was finally something else on screen
+worth comparing it to.
+
+The distance between those two sentences is the whole of **shape 9**: *"I could
+not tell" reported as "it did not happen."* "Contradicted the first time it ran"
+describes a fact about the script. "I read past it several times" describes a
+fact about the reader. The first is flattering and unfalsifiable from the outside;
+the second is checkable, and checking it took one `git log` against one file
+timestamp. It was caught only because the sentence was about to be repeated in
+the submission write-up, and a claim worth putting in front of a judge is worth
+being sure of first — which is an uncomfortable thing to learn about a log whose
+entire purpose is to be the thing you can check.
 
 **4 of 4 guards caught** on the re-run, plus the no-op control.
 
