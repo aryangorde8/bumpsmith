@@ -77,13 +77,39 @@ class Rule:
     name: str | None = None
 
 
+class Role(Enum):
+    """What a matched line *is* to the rule that found it.
+
+    A rule points at the code to change, but that code is not always the only
+    code affected by changing it. Removing an import is the clearest case: the
+    import is the site, and every line that reads the name it bound is a place
+    that stops working the moment the site is deleted. Reporting only the site
+    is how "stop importing this" becomes a `NameError` in somebody's repository.
+
+    The distinction lives in the type rather than in the summary text, because a
+    reader who has to infer it from prose is a reader who can miss it.
+    """
+
+    SITE = "site"
+    """The place the rule applies -- what a rewriter would edit."""
+
+    USE = "use"
+    """A line that reads what the site binds, and breaks if the site alone goes.
+
+    Never edited. It exists so the count a person is shown is the number of
+    places they have to think about, not the number that happen to be easy.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class Match:
-    """One place a rule applies."""
+    """One place a rule applies, or one place that depends on such a place."""
 
     path: Path
     line: int
     excerpt: str
+    role: Role = Role.SITE
+    """Defaulted so that a rule which draws no distinction does not have to."""
 
     def __str__(self) -> str:
         return f"{self.path}:{self.line}  {self.excerpt}"
@@ -110,9 +136,28 @@ class ScanResult:
     unreadable: tuple[Unreadable, ...]
 
     @property
+    def sites(self) -> tuple[Match, ...]:
+        """The places the rule applies -- what a rewriter would edit."""
+        return tuple(match for match in self.matches if match.role is Role.SITE)
+
+    @property
+    def uses(self) -> tuple[Match, ...]:
+        """The places that break if the sites are removed and nothing else is.
+
+        Always in the same file as the site that bound the name: an import binds
+        a module-local name, so a use of it cannot be anywhere else.
+        """
+        return tuple(match for match in self.matches if match.role is Role.USE)
+
+    @property
     def count(self) -> int:
-        """How many sites the rule matched."""
-        return len(self.matches)
+        """How many sites the rule matched.
+
+        Sites only. A use is not a place the rule applies, and counting it as one
+        would inflate the number this project puts in front of a person right
+        before asking them to agree to an edit.
+        """
+        return len(self.sites)
 
     @property
     def is_complete(self) -> bool:
@@ -183,7 +228,11 @@ def write_rule(failure: Failure) -> Rule | None:
             rationale=(
                 f"`{module}.{name}` is a pydantic internal that v2 deleted. Importing it fails "
                 "at import time, so the break is not confined to the code that used it -- the "
-                "whole module stops loading."
+                "whole module stops loading. Removing the import is therefore necessary and "
+                "rarely sufficient: wherever the name was read, that code still expects a v1 "
+                "internal to exist, and deleting only the import turns an error at import time "
+                "into a `NameError` at call time. The scan lists those uses next to the import "
+                "for that reason."
             ),
             module=module,
             name=name,
@@ -518,27 +567,73 @@ def regex_keyword_sites(tree: ast.Module) -> Iterator[tuple[int, ast.keyword]]:
                 yield word.lineno, word
 
 
-def _removed_import_sites(tree: ast.Module, module: str, name: str) -> Iterator[int]:
-    """Yield the line of every ``from <module> import <name>``.
+def _removed_symbol_sites(tree: ast.Module, module: str, name: str) -> Iterator[tuple[int, Role]]:
+    """Yield every ``from <module> import <name>``, and every use of what it bound.
 
-    Only the import form. Attribute access on an imported module reaches the same
-    symbol, but no recorded run breaks that way, and `failures.py` already
+    Only the import form is a site. Attribute access on an imported module reaches
+    the same symbol, but no recorded run breaks that way, and `failures.py` already
     declines to write classifiers for signatures nobody has observed.
+
+    The uses are the reason this function is not called ``_removed_import_sites``
+    any more. `pydantic.utils:DUNDER_ATTRIBUTES` is deleted in v2, so the rule
+    says to stop importing it -- and in the fixture that actually carries this
+    break, the name is *used* two lines further down. Deleting the import on that
+    advice alone was measured: it turns a `PydanticImportError` at import time
+    into a `NameError` at call time. Reporting the import and staying quiet about
+    the use is how a correct rule produces a broken repository.
+
+    The bound name is `asname` when the import renames it, because that is the
+    name the rest of the file actually reads.
+
+    A use is any load of that name anywhere in the module. A local rebinding in
+    some inner scope could make one of them unrelated, and no attempt is made to
+    exclude it: this list is read, never edited, so naming one line too many
+    costs a moment's attention, and naming one too few costs the `NameError` this
+    exists to prevent.
     """
+    bound: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == module:
-            yield from (node.lineno for alias in node.names if alias.name == name)
+            for alias in node.names:
+                if alias.name == name:
+                    bound.add(alias.asname or alias.name)
+                    yield node.lineno, Role.SITE
+
+    # An optimisation, not a guard: the loop below tests `node.id in bound`, so an
+    # empty `bound` already yields nothing. It is here because most files in a
+    # scan do not import the symbol at all, and this skips a second full walk of
+    # every one of them -- measured at 12.6ms -> 5.9ms on a 400-function module.
+    if not bound:
+        return
+
+    # One line may read the name more than once (`X or default_for(X)`), and that
+    # is one line to go and look at, not two.
+    seen: set[int] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Name)
+            and isinstance(node.ctx, ast.Load)
+            and node.id in bound
+            and node.lineno not in seen
+        ):
+            seen.add(node.lineno)
+            yield node.lineno, Role.USE
 
 
-def _sites(rule: Rule, tree: ast.Module) -> Iterator[int]:
+def _sites(rule: Rule, tree: ast.Module) -> Iterator[tuple[int, Role]]:
+    """Yield every line this rule has something to say about, and in what role.
+
+    Most break classes report sites and nothing else, so they say so once here
+    rather than each threading a constant through its own finder.
+    """
     if rule.break_class is BreakClass.VALIDATOR_FIELD_CONFIG:
-        return _validator_sites(tree)
+        return ((line, Role.SITE) for line in _validator_sites(tree))
     if rule.break_class is BreakClass.ROOT_MODEL:
-        return _root_model_sites(tree)
+        return ((line, Role.SITE) for line in _root_model_sites(tree))
     if rule.break_class is BreakClass.REGEX_KEYWORD:
-        return (line for line, _ in regex_keyword_sites(tree))
+        return ((line, Role.SITE) for line, _ in regex_keyword_sites(tree))
     if rule.break_class is BreakClass.REMOVED_INTERNAL and rule.module and rule.name:
-        return _removed_import_sites(tree, rule.module, rule.name)
+        return _removed_symbol_sites(tree, rule.module, rule.name)
     return iter(())
 
 
@@ -586,11 +681,11 @@ def find_matches(rule: Rule, root: Path) -> ScanResult:
             continue
 
         lines = source.splitlines()
-        for line in _sites(rule, tree):
+        for line, role in _sites(rule, tree):
             excerpt = lines[line - 1].strip() if 0 < line <= len(lines) else ""
-            matches.append(Match(path=path, line=line, excerpt=excerpt))
+            matches.append(Match(path=path, line=line, excerpt=excerpt, role=role))
 
     # ast.walk is documented to yield "in no specified order". Sorting makes the
     # output of two runs comparable, which matters because it is read in a diff.
-    matches.sort(key=lambda match: (match.path.as_posix(), match.line))
+    matches.sort(key=lambda match: (match.path.as_posix(), match.line, match.role.value))
     return ScanResult(matches=tuple(matches), unreadable=tuple(unreadable))

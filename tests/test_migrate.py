@@ -36,6 +36,7 @@ from bumpsmith.migrate import (
     migrate,
 )
 from bumpsmith.rewrite import Plan, Skipped
+from bumpsmith.rules import Match, Role, ScanResult
 from bumpsmith.run import Completed, NeverRanError, TimedOutError
 
 DATA = Path(__file__).parent / "data"
@@ -973,3 +974,30 @@ def test_a_migration_with_no_steps_reads_as_untouched() -> None:
 def test_a_step_with_no_plan_has_not_applied() -> None:
     step = Step(number=1, run=GREEN)
     assert not step.applied
+
+
+def test_the_file_count_is_counted_over_sites_not_uses() -> None:
+    """`match_files` is shown beside `sites`, so it counts the same thing.
+
+    `find_matches` cannot currently produce a use outside the file that imported
+    the name, so no end-to-end run distinguishes these two. The scan is built by
+    hand here for that reason: without it, changing `sites` back to `matches`
+    passes every test in this repository.
+    """
+    step = Step(
+        number=1,
+        run=GREEN,
+        scan=ScanResult(
+            matches=(
+                Match(path=Path("a.py"), line=1, excerpt="from pydantic.utils import X"),
+                Match(path=Path("b.py"), line=9, excerpt="X", role=Role.USE),
+            ),
+            unreadable=(),
+        ),
+    )
+
+    payload = step.as_dict()
+
+    assert payload["sites"] == 1
+    assert payload["match_files"] == 1
+    assert payload["uses"] == [{"path": "b.py", "line": 9, "excerpt": "X"}]

@@ -13,7 +13,7 @@ import pytest
 
 from bumpsmith.failures import BreakClass
 from bumpsmith.rewrite import Plan, UnsupportedRuleError, plan
-from bumpsmith.rules import Match, Rule, RuleKind, ScanResult, find_matches
+from bumpsmith.rules import Match, Role, Rule, RuleKind, ScanResult, find_matches
 
 _ROOT_MODEL_RULE = Rule(
     break_class=BreakClass.ROOT_MODEL,
@@ -567,3 +567,86 @@ def test_a_same_line_site_that_vanished_is_not_covered_by_its_neighbour(
     assert len(result.skipped) == 1
     assert result.rewritten == 1
     assert result.edits[0].after.count("pattern=") == 1
+
+
+# --------------------------------------------------------------------------
+# The refusal for a class with no rewriter
+#
+# This is the sentence a person reads at the moment bumpsmith tells them to do
+# it by hand. "Stop importing X" acted on alone is what produces a NameError,
+# so the refusal names the lines that would break.
+# --------------------------------------------------------------------------
+
+
+def _scan(*matches: Match) -> ScanResult:
+    return ScanResult(matches=matches, unreadable=())
+
+
+def test_the_refusal_names_the_lines_that_would_break() -> None:
+    scan = _scan(
+        Match(path=Path("proto.py"), line=10, excerpt="from pydantic.utils import X"),
+        Match(path=Path("proto.py"), line=40, excerpt="k not in X", role=Role.USE),
+    )
+
+    with pytest.raises(UnsupportedRuleError) as caught:
+        plan(_NO_REWRITER_RULE, scan)
+
+    message = str(caught.value)
+    assert "proto.py:40" in message
+    assert "NameError" in message
+    assert "site alone" in message
+
+
+def test_the_refusal_says_nothing_about_uses_when_there_are_none() -> None:
+    """An import nobody reads really can just be deleted.
+
+    Claiming a NameError there would be a warning about a thing that cannot
+    happen, and warnings that are not true get ignored when they are.
+    """
+    scan = _scan(Match(path=Path("proto.py"), line=10, excerpt="from pydantic.utils import X"))
+
+    with pytest.raises(UnsupportedRuleError) as caught:
+        plan(_NO_REWRITER_RULE, scan)
+
+    assert "NameError" not in str(caught.value)
+
+
+def test_a_long_list_of_uses_is_summarised_rather_than_dumped() -> None:
+    scan = _scan(
+        Match(path=Path("m.py"), line=1, excerpt="from pydantic.utils import X"),
+        *[Match(path=Path("m.py"), line=n, excerpt="X", role=Role.USE) for n in range(2, 12)],
+    )
+
+    with pytest.raises(UnsupportedRuleError) as caught:
+        plan(_NO_REWRITER_RULE, scan)
+
+    message = str(caught.value)
+    assert "and 5 more" in message
+    assert "m.py:11" not in message
+
+
+def test_a_planner_is_never_handed_a_use_to_rewrite(tmp_path: Path) -> None:
+    """The guard that matters most in this change.
+
+    A use is a line that reads a deleted name; rewriting it as though it were a
+    site would edit working code on the strength of a report. No planner filters
+    this itself, so `_by_path` does it for all of them.
+    """
+    path = _write(
+        tmp_path,
+        "mine.py",
+        "from pydantic import BaseModel\n\n\nclass M(BaseModel):\n    __root__: list[int]\n",
+    )
+    scan = ScanResult(
+        matches=(
+            Match(path=path, line=5, excerpt="__root__: list[int]"),
+            Match(path=path, line=1, excerpt="from pydantic import BaseModel", role=Role.USE),
+        ),
+        unreadable=(),
+    )
+
+    planned = plan(_ROOT_MODEL_RULE, scan)
+
+    # One site rewritten. The use contributed nothing -- not an edit, not a skip.
+    assert planned.rewritten == 1
+    assert [s for s in planned.skipped if s.line == 1] == []
