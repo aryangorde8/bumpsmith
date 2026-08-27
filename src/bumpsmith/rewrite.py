@@ -32,6 +32,7 @@ from bumpsmith.apply import Edit
 from bumpsmith.failures import BreakClass
 from bumpsmith.rules import (
     Match,
+    Role,
     Rule,
     ScanResult,
     declares_root_field,
@@ -768,6 +769,14 @@ def _plan_regex_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, lis
     return (edit if edit.changes_anything else None), skipped
 
 
+_USES_LISTED = 5
+"""How many use sites the refusal names before it summarises the rest.
+
+A refusal a person cannot read is a refusal they will skip. The full list is in
+the scan either way.
+"""
+
+
 _PLANNERS = {
     BreakClass.VALIDATOR_FIELD_CONFIG: _plan_validator_file,
     BreakClass.ROOT_MODEL: _plan_root_model_file,
@@ -782,8 +791,17 @@ without asking.
 
 
 def _by_path(matches: Sequence[Match]) -> dict[Path, list[int]]:
+    """Group the lines to edit by file.
+
+    Sites only. A scan may also report *uses* -- lines that break if a site is
+    removed and nothing else is -- and those are for a person to read, never for
+    a planner to rewrite. Filtering here rather than in each planner means a
+    rewriter written later cannot forget to.
+    """
     grouped: dict[Path, list[int]] = {}
     for match in matches:
+        if match.role is not Role.SITE:
+            continue
         grouped.setdefault(match.path, []).append(match.line)
     return grouped
 
@@ -799,9 +817,26 @@ def plan(rule: Rule, scan: ScanResult) -> Plan:
     """
     planner = _PLANNERS.get(rule.break_class)
     if planner is None:
+        # The uses belong in this message and not only in the report. This is the
+        # sentence a person reads at the moment they are told to do it by hand,
+        # and "stop importing X" acted on alone is what produces a `NameError`.
+        where = ""
+        if scan.uses:
+            listed = ", ".join(
+                f"{use.path.as_posix()}:{use.line}" for use in scan.uses[:_USES_LISTED]
+            )
+            more = len(scan.uses) - _USES_LISTED
+            if more > 0:
+                listed += f", and {more} more"
+            where = (
+                f"; the name is still read at {listed}, so removing the "
+                f"{'sites' if len(scan.sites) != 1 else 'site'} alone would replace this "
+                f"error with a NameError"
+            )
         raise UnsupportedRuleError(
             f"no rewriter is written for {rule.break_class.name}; "
             f"the rule is still the useful output, but it cannot be applied automatically"
+            f"{where}"
         )
 
     edits: list[Edit] = []

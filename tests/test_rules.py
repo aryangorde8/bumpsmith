@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from bumpsmith.failures import BreakClass, Failure, RunShape, parse_failures
-from bumpsmith.rules import Rule, RuleKind, find_matches, write_rule
+from bumpsmith.rules import Role, Rule, RuleKind, find_matches, write_rule
 
 DATA = Path(__file__).parent / "data"
 
@@ -638,3 +638,351 @@ def test_a_name_shadowed_only_inside_a_function_still_matches_outside_it(
 
     scan = find_matches(rule, tmp_path)
     assert [m.line for m in scan.matches] == [3]
+
+
+# --------------------------------------------------------------------------
+# A removed internal that is still used
+#
+# `pydantic.utils:DUNDER_ATTRIBUTES` is deleted in v2, so the rule says to stop
+# importing it. In fixture F4 -- the real repository that carries this break --
+# the name is read two lines below the import. Acting on the rule alone was
+# measured against pydantic 2.13.4: deleting the import turns a
+# `PydanticImportError` at import time into a `NameError` at call time. These
+# tests exist so the scan cannot go back to reporting only half of that.
+# --------------------------------------------------------------------------
+
+
+def test_a_use_of_the_removed_name_is_reported_beside_the_import(tmp_path: Path) -> None:
+    """The shape of F4's `proto.py`, which is where this was found."""
+    root = _tree(
+        tmp_path,
+        {
+            "proto.py": """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            def repr_args(self):
+                return [k for k in self.__dict__ if k not in DUNDER_ATTRIBUTES]
+            """
+        },
+    )
+    rule = _rule(BreakClass.REMOVED_INTERNAL, symbol="pydantic.utils:DUNDER_ATTRIBUTES")
+
+    scan = find_matches(rule, root)
+
+    assert [(m.line, m.role) for m in scan.matches] == [(1, Role.SITE), (4, Role.USE)]
+    assert scan.uses[0].excerpt == "return [k for k in self.__dict__ if k not in DUNDER_ATTRIBUTES]"
+
+
+def test_a_use_is_not_counted_as_a_site(tmp_path: Path) -> None:
+    """`count` is shown to a person right before they agree to an edit.
+
+    A use is not a place the rule applies, and counting it as one would inflate
+    that number. One import that is read four times is still one site.
+    """
+    root = _tree(
+        tmp_path,
+        {
+            "mine.py": """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+            a = DUNDER_ATTRIBUTES
+            b = DUNDER_ATTRIBUTES
+            c = DUNDER_ATTRIBUTES
+            d = DUNDER_ATTRIBUTES
+            """
+        },
+    )
+    rule = _rule(BreakClass.REMOVED_INTERNAL, symbol="pydantic.utils:DUNDER_ATTRIBUTES")
+
+    scan = find_matches(rule, root)
+
+    assert scan.count == 1
+    assert len(scan.sites) == 1
+    assert len(scan.uses) == 4
+
+
+def test_the_bound_name_is_followed_through_a_rename(tmp_path: Path) -> None:
+    """`as` rebinds it, and the rest of the file reads the new name.
+
+    Following `alias.name` here would report the import and miss every use --
+    exactly the half-answer these tests exist to prevent, but harder to notice.
+    """
+    root = _tree(
+        tmp_path,
+        {
+            "mine.py": """
+            from pydantic.utils import DUNDER_ATTRIBUTES as DA
+            x = DA
+            """
+        },
+    )
+    rule = _rule(BreakClass.REMOVED_INTERNAL, symbol="pydantic.utils:DUNDER_ATTRIBUTES")
+
+    scan = find_matches(rule, root)
+
+    assert [(m.line, m.role) for m in scan.matches] == [(1, Role.SITE), (2, Role.USE)]
+
+
+def test_the_original_name_is_not_followed_after_a_rename(tmp_path: Path) -> None:
+    """After `as DA`, a bare `DUNDER_ATTRIBUTES` is some other name.
+
+    It is not what the import bound, so reporting it would send a person to a
+    line that has nothing to do with this break.
+    """
+    root = _tree(
+        tmp_path,
+        {
+            "mine.py": """
+            from pydantic.utils import DUNDER_ATTRIBUTES as DA
+            DUNDER_ATTRIBUTES = object()
+            y = DUNDER_ATTRIBUTES
+            """
+        },
+    )
+    rule = _rule(BreakClass.REMOVED_INTERNAL, symbol="pydantic.utils:DUNDER_ATTRIBUTES")
+
+    scan = find_matches(rule, root)
+
+    assert [m.line for m in scan.uses] == []
+
+
+def test_two_uses_on_one_line_are_one_line_to_go_and_look_at(tmp_path: Path) -> None:
+    root = _tree(
+        tmp_path,
+        {
+            "mine.py": """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+            z = DUNDER_ATTRIBUTES or set(DUNDER_ATTRIBUTES)
+            """
+        },
+    )
+    rule = _rule(BreakClass.REMOVED_INTERNAL, symbol="pydantic.utils:DUNDER_ATTRIBUTES")
+
+    assert [m.line for m in find_matches(rule, root).uses] == [2]
+
+
+def test_a_store_of_the_name_is_not_a_use(tmp_path: Path) -> None:
+    """Assigning to the name does not read the deleted internal.
+
+    A store survives the import being removed, so listing it would name a line
+    that is not a problem.
+    """
+    root = _tree(
+        tmp_path,
+        {
+            "mine.py": """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+            DUNDER_ATTRIBUTES = set()
+            """
+        },
+    )
+    rule = _rule(BreakClass.REMOVED_INTERNAL, symbol="pydantic.utils:DUNDER_ATTRIBUTES")
+
+    assert [m.line for m in find_matches(rule, root).uses] == []
+
+
+def test_a_name_matching_nothing_imported_is_not_a_use(tmp_path: Path) -> None:
+    """Without the import there is no binding, so there is nothing to report.
+
+    Otherwise every repository with a variable of that name would be told it
+    has a pydantic break.
+    """
+    root = _tree(
+        tmp_path,
+        {
+            "mine.py": """
+            DUNDER_ATTRIBUTES = set()
+            print(DUNDER_ATTRIBUTES)
+            """
+        },
+    )
+    rule = _rule(BreakClass.REMOVED_INTERNAL, symbol="pydantic.utils:DUNDER_ATTRIBUTES")
+
+    assert find_matches(rule, root).matches == ()
+
+
+def test_uses_are_found_only_in_the_file_that_imported_the_name(tmp_path: Path) -> None:
+    """An import binds a module-local name. Another file's `DUNDER_ATTRIBUTES`
+    is its own name, and reporting it would send a person to the wrong file."""
+    root = _tree(
+        tmp_path,
+        {
+            "imports_it.py": """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+            a = DUNDER_ATTRIBUTES
+            """,
+            "does_not.py": """
+            DUNDER_ATTRIBUTES = set()
+            b = DUNDER_ATTRIBUTES
+            """,
+        },
+    )
+    rule = _rule(BreakClass.REMOVED_INTERNAL, symbol="pydantic.utils:DUNDER_ATTRIBUTES")
+
+    scan = find_matches(rule, root)
+
+    assert {m.path.name for m in scan.matches} == {"imports_it.py"}
+
+
+def test_a_rule_that_draws_no_distinction_reports_every_match_as_a_site(
+    tmp_path: Path,
+) -> None:
+    """`role` defaults, so the classes with rewriters are untouched by it.
+
+    If this ever fails, a planner is about to be handed something to edit that
+    was never a site.
+    """
+    root = _tree(
+        tmp_path,
+        {
+            "mine.py": """
+            from pydantic import BaseModel
+
+            class M(BaseModel):
+                __root__: list[int]
+            """
+        },
+    )
+    rule = _rule(BreakClass.ROOT_MODEL)
+
+    scan = find_matches(rule, root)
+
+    assert scan.matches
+    assert all(m.role is Role.SITE for m in scan.matches)
+    assert scan.uses == ()
+    assert scan.count == len(scan.matches)
+
+
+# --------------------------------------------------------------------------
+# Scope
+#
+# Qodo raised this on #22: one file-wide set of bound names reports unrelated
+# locals and parameters as lines that would break. It was verified before it was
+# accepted -- a parameter sharing the spelling really was reported. The refusal
+# says "removing the site alone would replace this error with a NameError" about
+# each line it names, and for a parameter that is a specific, checkable, false
+# statement about somebody's code.
+#
+# `calls_in_scope` documents this exact failure one function above the one that
+# had it. Over-reporting is the safe direction for a list that is read rather
+# than edited, but only while what is said about each line is true.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("label", "body", "expected"),
+    [
+        (
+            "a parameter that happens to share the spelling",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            def unrelated(DUNDER_ATTRIBUTES):
+                return DUNDER_ATTRIBUTES + 1
+            """,
+            [],
+        ),
+        (
+            "a lambda parameter that shares the spelling",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            f = lambda DUNDER_ATTRIBUTES: DUNDER_ATTRIBUTES
+            """,
+            [],
+        ),
+        (
+            "a local assignment shadowing the module-level import",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            def f():
+                DUNDER_ATTRIBUTES = set()
+                return DUNDER_ATTRIBUTES
+            """,
+            [],
+        ),
+        (
+            "a function-local import leaves the module-level name alone",
+            """
+            def inner():
+                from pydantic.utils import DUNDER_ATTRIBUTES
+                return DUNDER_ATTRIBUTES
+
+            DUNDER_ATTRIBUTES = "mine"
+            print(DUNDER_ATTRIBUTES)
+            """,
+            [3],
+        ),
+        (
+            "a comprehension target shadows for the whole comprehension",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            xs = [DUNDER_ATTRIBUTES for DUNDER_ATTRIBUTES in range(3)]
+            """,
+            [],
+        ),
+        (
+            "a comprehension that really reads it",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            xs = [k for k in DUNDER_ATTRIBUTES]
+            """,
+            [3],
+        ),
+        (
+            "the outermost iterable is evaluated before the target binds",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            xs = [x for DUNDER_ATTRIBUTES in DUNDER_ATTRIBUTES for x in DUNDER_ATTRIBUTES]
+            """,
+            [3],
+        ),
+        (
+            "an unpacking target shadows too",
+            # The element must *read* the name. With `[a for (a, X) in pairs]` the
+            # only occurrence of X on that line is a store, which is never a use
+            # whether unpacking shadows or not -- the test would pass either way.
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            xs = [DUNDER_ATTRIBUTES for (a, DUNDER_ATTRIBUTES) in pairs]
+            """,
+            [],
+        ),
+        (
+            "a real use two scopes down is still inherited",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            def outer():
+                def inner():
+                    return DUNDER_ATTRIBUTES
+                return inner
+            """,
+            [5],
+        ),
+        (
+            "a real use inside a method, which is F4's own shape",
+            """
+            from pydantic.utils import DUNDER_ATTRIBUTES
+
+            class M:
+                def __repr_args__(self):
+                    return [k for k in self.__dict__ if k not in DUNDER_ATTRIBUTES]
+            """,
+            [5],
+        ),
+    ],
+)
+def test_a_use_is_a_use_only_where_the_import_is_what_binds_the_name(
+    tmp_path: Path, label: str, body: str, expected: list[int]
+) -> None:
+    root = _tree(tmp_path, {"mine.py": body})
+    rule = _rule(BreakClass.REMOVED_INTERNAL, symbol="pydantic.utils:DUNDER_ATTRIBUTES")
+
+    uses = sorted(match.line for match in find_matches(rule, root).uses)
+
+    assert uses == expected, label

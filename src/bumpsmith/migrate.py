@@ -261,9 +261,19 @@ class Step:
             else str(self.failure.culprit),
             "rule": None if self.rule is None else self.rule.summary,
             "sites": None if self.scan is None else self.scan.count,
+            # Paired with `sites`, so counted over the same thing. A use lives in
+            # the file that imported the name, so this never differs today -- it
+            # is written this way so it still cannot differ later.
             "match_files": None
             if self.scan is None
-            else len({match.path for match in self.scan.matches}),
+            else len({match.path for match in self.scan.sites}),
+            # Reported separately because they are not sites: nothing rewrites
+            # them, and a person still has to deal with every one.
+            "uses": []
+            if self.scan is None
+            else [
+                {"path": str(u.path), "line": u.line, "excerpt": u.excerpt} for u in self.scan.uses
+            ],
             "scan_complete": None if self.scan is None else self.scan.is_complete,
             "unreadable": []
             if self.scan is None
