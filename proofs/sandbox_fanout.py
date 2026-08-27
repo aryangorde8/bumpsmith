@@ -2,10 +2,13 @@
 
 This is the third of the hackathon's harness surfaces and the one that is
 hardest to fake: not "the agent can call a model", but *how many agents are
-running right now, against what, and how do you know*. Four subjects go out
-together, each one gets its own TrueForge session and therefore its own Daytona
-sandbox, and each sandbox runs an entire ``bumpsmith`` migration -- clone, read
-the failure, write the rule, edit, re-run the suite, keep it only if green.
+running right now, against what, and how do you know*. Every subject goes out
+at the same time, each one gets its own TrueForge session and therefore its own
+Daytona sandbox, and each sandbox runs an entire ``bumpsmith`` migration --
+clone, read the failure, write the rule, edit, re-run the suite, keep it only if
+green. How many subjects there are is a question for ``EXTRAS``, which is the
+only place a measured environment exists; today that is two real ones and the
+unreachable one below.
 
 Nothing about the loop changes when it runs there. It is the same package,
 installed from this repository, and it does not know it is in a sandbox.
@@ -15,14 +18,14 @@ What makes this a proof rather than a demonstration
 Three things, and the third is the only one that is hard.
 
 *A negative control.* Fixture C is already on pydantic v2. An agent that
-"migrates" it is broken, and an orchestrator that reports four green subjects
+"migrates" it is broken, and an orchestrator that reports every subject green
 without noticing that one of them was green on arrival is reporting a number
 rather than a result. C has to come back ``already-green`` **and** with its
 files byte-for-byte unchanged, and both are checked -- the report and the disk
 are separate claims, and a report is not a filesystem.
 
 *An unreachable subject.* One job is pointed at a port nobody is listening on.
-It exists because "four subjects, none migrated" and "four sandboxes, none
+It exists because "three subjects, none migrated" and "three sandboxes, none
 reached" are the same number and opposite facts, and the only way to show a
 report keeps them apart is to make one happen.
 

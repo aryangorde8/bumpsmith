@@ -254,8 +254,8 @@ one that is hard:
   it** — a report and a filesystem are two claims, and a loop that edited it and
   reverted perfectly would produce the same report as one that never touched it.
 - **An unreachable subject.** One job points at a port nobody is listening on.
-  "Four subjects, none migrated" and "four sandboxes, none reached" are the same
-  number and opposite facts; the only way to show the report keeps them apart is
+  "Three subjects, none migrated" and "three sandboxes, none reached" are the
+  same number and opposite facts; the only way to show the report keeps them apart is
   to make one happen.
 - **A count nobody accumulated.** Every figure it prints is derived by
   `bumpsmith.fanout` from the attempts. There is no counter in the script that
@@ -288,19 +288,20 @@ a proof that costs an afternoon the first time it fails.
 
 `recorded/` holds the output of every script, verbatim — the two harness ones
 against TrueForge 0.1.4 with `bedrock-mantle/qwen-3-coder-480b` and `validator.py`
-against pydantic 2.12.5, all from 26 August 2026, and `fanout.py` against pydantic
-2.12.5 from 27 August. They are committed because a judge
-without a harness cannot run the first two, and a claim nobody can check is worth
-what it costs to make.
+against pydantic 2.12.5, all from 26 August 2026, and `fanout.py` and
+`sandbox_fanout.py` against pydantic 2.12.5 from 27 August. They are committed
+because a judge without a harness cannot run any of the ones that need one, and a
+claim nobody can check is worth what it costs to make.
 
 | file | what it shows |
 |---|---|
 | `sandbox.log` / `sandbox.json` | pytest ran in Daytona and came back `rc=2`; `bumpsmith.failures` read it as `[REGEX_KEYWORD] \`regex\` is removed. use \`pattern\` instead` |
 | `validator.log` / `validator.json` | pydantic 2.12.5, eight signatures, all eight as documented — `field`/`config` raise, `values` survives, and `info` is refused under `@validator` |
 | `fanout.log` / `fanout.json` | four subjects migrated at once against pydantic 2.12.5 — two migrated, one already green and unedited, and one never reached, reported as `unreached` with the reason rather than folded into the zero |
+| `sandbox_fanout.log` / `sandbox_fanout.json` | two real third-party repositories put through the whole loop at the same time, each in its own Daytona sandbox by a `bumpsmith` installed there — **44.3s wall clock**; B reverted after peeling three breaks and reaching one it could not classify, C came back `already-green` with `git status` clean **in the sandbox that ran it**, and the third subject was never reached |
 | `deny.log` / `deny.json` | a real `tool.approval_required` on thread `main`, denied through `TurnChannel`; the session then run to rest — 2 turns, both `done` — and the harness's own MCP server reports **0 tool calls served during the run** |
 
-Neither file was edited. They contain no credentials. The repository and branch
+None of them was edited. They contain no credentials. The repository and branch
 names in them are this project's own and are public — the same policy applied to
 `tests/data/approval-call-tool.json`.
 

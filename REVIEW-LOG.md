@@ -140,6 +140,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 119 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | **High.** `_control_is_untouched` built its own `SandboxExec`, which opens a *new session* and therefore a new, empty sandbox — so the negative control's `git status` ran against a filesystem that had never held the control checkout. Normally the subject is simply absent and the proof fails; with unrelated state present it would certify the wrong filesystem as clean | **Fixed** — `SandboxJob` keeps the session it used and exposes `exec_in_its_sandbox`, which refuses before the job has run rather than opening one on the spot. 🔴 **The function's own docstring stated the requirement** — *"a fresh one would have a clean checkout for reasons that say nothing"* — and the code created a fresh one. **Fifth instance**, in the same pull request that named the pattern | this PR |
 | 120 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | The control check filtered every `??` line out of `git status --porcelain`, so an agent that *added* a file passed a check whose entire claim is that the files are unchanged | **Fixed** — nothing is dropped. Tracked changes fail; an untracked `.py` fails outright; every untracked path is recorded as evidence either way. The filter had a real reason — C's own suite writes `htmlcov/` and `coverage.xml`, so a naive check never passes — but *"the artefacts of running the suite"* and *"anything untracked"* are different sets, and only one of them was safe to ignore | this PR |
 | 121 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | `_read_step` inferred that a scan or plan happened purely from `sites`/`rewritten` being non-null, without checking their types or forbidding `unreadable`/`skipped` entries beside them. A report with `sites: null` and a non-empty `unreadable` list parsed cleanly and derived **`complete = True`** — because completeness asks about a scan, and the step was claiming there was not one | **Fixed** — both counts are checked as int-or-null (`bool` is an `int` in Python, so an unchecked `true` arrives as a count of one), and a phase that never ran may not list what it left behind. The producer never writes that pair; this reader exists for text nobody here produced, which is the only reason it is worth hardening | this PR |
+| 122 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | `sandbox_fanout.py` opened *"Four subjects go out together"* and fans out **three** — and structurally cannot fan out four, because `EXTRAS` is the only place a measured environment exists and it holds two. The README repeated the figure. Nothing was wrong with the code; the paragraph describing it was wrong, in the module whose entire subject is reports that disagree with their evidence — *self-found when the recorded run printed its own subject count on line one* | **Fixed** — the docstring states the rule (`EXTRAS` decides) instead of a number that has to be maintained beside it, and the one figure kept is the one the run prints. **Prose stating a property is not the property** (60, 69, 117) — sixth instance, and the first found by the proof it describes | this PR |
 
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
@@ -2431,7 +2432,7 @@ the diagnosis is a correct answer to the wrong question.**
 control — a "break" scoped so tightly it changes nothing, which looks exactly
 like a guard that works.
 
-## 119–121 · The fifth time, in the paragraph that named the pattern
+## 119–122 · The fifth time, in the paragraph that named the pattern
 
 Finding 117, three sections up, is about writing down why something matters and
 mistaking that for having handled it. It was recorded as the *fourth* instance of
@@ -2478,6 +2479,21 @@ was claiming there had not been one. The producer never writes that pair. That i
 exactly why it was worth fixing: `read_report` exists to read text this project
 did not produce, and a reader that only survives well-formed input is a reader
 whose strictness is decorative.
+
+**122 — the count in the first paragraph.** The module opens *"Four subjects go
+out together"*; the run's first line says `fanning out over 3 subjects`. There
+was never a fourth: `EXTRAS` is the only place a measured environment exists, the
+script refuses a fixture without one, and `EXTRAS` holds two. So the number could
+not have drifted — it was wrong when it was written, survived every test, every
+type check and every review, and was contradicted the first time the thing ran.
+
+It is worth recording for where it was rather than what it cost. This is the
+module built on the position that a report is not a migration and that a
+conclusion must be derived from its evidence rather than asserted beside it — and
+its own summary paragraph asserted a figure beside evidence that said otherwise.
+The fix is not the corrected number. It is that the docstring now names `EXTRAS`
+as what decides, so there is no second copy of the count to be wrong; the only
+figure left is the one the run prints for itself.
 
 **4 of 4 guards caught** on the re-run, plus the no-op control.
 

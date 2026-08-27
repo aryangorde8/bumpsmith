@@ -606,8 +606,8 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 27 August 2026 it holds **121 findings**: 84 raised by automated review, 4
-that only a live run against the harness could have raised, and 33 the author
+As of 27 August 2026 it holds **122 findings**: 84 raised by automated review, 4
+that only a live run against the harness could have raised, and 34 the author
 found rather than review. The count is not maintained by hand -- `tests/test_docs.py`
 reads the log's own table and fails if this sentence and that table disagree,
 because this paragraph has been the stale number twice already. The log also names the recurring *shapes* those
