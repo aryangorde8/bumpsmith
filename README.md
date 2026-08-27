@@ -606,7 +606,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 27 August 2026 it holds **123 findings**: 84 raised by automated review, 4
+As of 27 August 2026 it holds **127 findings**: 88 raised by automated review, 4
 that only a live run against the harness could have raised, and 35 the author
 found rather than review. The count is not maintained by hand -- `tests/test_docs.py`
 reads the log's own table and fails if this sentence and that table disagree,
@@ -621,6 +621,58 @@ Merges are `--merge`, never `--squash`. Each pull request carries a "here is the
 work" commit and a separate "here is what review changed" commit, and squashing
 would destroy the evidence that review changed the code.
 
+## Qodo Code Review Evidence
+
+Every substantive change here went through a pull request that Qodo reviewed
+before it merged. Nothing was pushed to `main` directly, and no branch was
+squashed, so the review and the response to it both survive in the history.
+
+**Representative pull request:
+[#20 — *The pull request the pitch promises, and only where somebody said*](https://github.com/aryangorde8/bumpsmith/pull/20).**
+Qodo raised **eleven findings** on it in its first pass, every one in `publish.py` — the module whose
+opening paragraphs argue for never inferring where a pull request is sent, and
+which then inferred it in three separate places. It found that `git remote get-url`
+returns the **fetch** URL while `git push` uses `pushurl`, so the approval named a
+destination the push would not use; that the gate fingerprinted the URL while the
+push used the mutable remote *name*; and that `gh pr create` was passed no `--repo`,
+so it would have opened the pull request against the repository the migration was
+cloned from — somebody else's. All eleven were fixed in a second commit on the same
+branch, which is what the `--merge` policy exists to preserve.
+
+**The follow-up review, and what it cost.** Qodo posts one review per pull request
+and does not re-review after a push, so a follow-up has to be asked for:
+`/agentic_review`, commented on the pull request. Run against #20 on 27 August it
+re-reviewed the final commit `c7f5d75` — and raised **four more findings**, on code
+that had been merged for a day. Three of them are the same shape as the original
+eleven: the publishability check compares blob *text*, so an untracked file, a
+trailing-newline change and a mode change each pass a guard whose whole claim is
+that nothing but the migration goes out. The fourth is worse and is about the gate:
+`propose()` validates HEAD, the index and the targets *before* the blocking
+approval prompt, and nothing revalidates them after it. That is a window with a
+human in it.
+
+They are recorded and being worked, and this paragraph will say what happened to
+them rather than being quietly deleted. The point of putting it here is that the
+follow-up review is not a formality — it found real defects in merged code, which
+is the argument for requiring one.
+
+**The whole trail.** Twenty-seven pull requests; Qodo reviewed every one;
+twenty-three raised at least one finding, **88 in total**. Every finding is in
+[`REVIEW-LOG.md`](REVIEW-LOG.md) with what happened to it and why.
+
+**What was intentionally dismissed.** Three findings were rejected rather than
+fixed, each with the measurement that rejected it rather than an opinion. The
+substantive one is
+[finding 20](https://github.com/aryangorde8/bumpsmith/pull/10#discussion_r3846315678) (High): Qodo held
+that `cast("Approver", ...)` would fail CI because mypy type-checks `tests/`.
+`typing.cast` takes a string as a forward reference by design, mypy flags only an
+*undefined* one, and CI had already passed on the commit under review — so the
+claim was tested rather than argued, and declined. The other two were a citation Qodo
+could not see in the file it was reading, and an unbounded-growth claim answered
+with the arithmetic — 460 bytes a decision, a million records for 439 MiB, at a
+rate bounded by human attention — where the remedy was worse than the condition,
+because trimming an audit trail drops the oldest denial first.
+
 ## Hackathon
 
 Entry for the **TrueForge Agent Harness Hackathon** (WeMakeDevs × TrueFoundry ×
@@ -628,16 +680,20 @@ Qodo), 24–30 August 2026. The build window opened at 08:00 London on 24 August
 and closes at 20:00 London on 30 August.
 
 Everything committed before the window is tooling only — licence, code-review
-integration, and CI plumbing, committed 19–21 August. Per rule 7, no project code
-or design work predates the start. The commit history is the record.
+integration, and CI plumbing, committed 19–21 August. The rules require that "the
+coding and design work itself has to happen between the 8:00 AM London start on
+August 24 and the deadline"; no project code or design work predates the start,
+and the commit history is the record.
 
 ## AI assistant disclosure
 
-Per rule 11 — "AI coding assistants are allowed, but their use must be disclosed"
-— this project is built with the assistance of AI coding tools.
+"AI coding assistants are allowed, but their use must be disclosed" — this
+project is built with the assistance of AI coding tools.
 
-Per rules 12 and 13, the architecture, technical decisions, and review of all
-generated code are the author's own. Every part of the submitted system is
+The rules also require that participants "understand the submitted code and be
+able to explain the agent, the project architecture, and the technical decisions
+behind it". The architecture, the technical decisions, and the review of all
+generated code are the author's own; every part of the submitted system is
 something the author can explain and defend.
 
 ## Licence

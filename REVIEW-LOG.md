@@ -142,6 +142,10 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 121 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | `_read_step` inferred that a scan or plan happened purely from `sites`/`rewritten` being non-null, without checking their types or forbidding `unreadable`/`skipped` entries beside them. A report with `sites: null` and a non-empty `unreadable` list parsed cleanly and derived **`complete = True`** — because completeness asks about a scan, and the step was claiming there was not one | **Fixed** — both counts are checked as int-or-null (`bool` is an `int` in Python, so an unchecked `true` arrives as a count of one), and a phase that never ran may not list what it left behind. The producer never writes that pair; this reader exists for text nobody here produced, which is the only reason it is worth hardening | this PR |
 | 122 | [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | `sandbox_fanout.py` opened *"Four subjects go out together"* and fans out **three** — and structurally cannot fan out four, because `EXTRAS` is the only place a measured environment exists and it holds two. The README repeated the figure. Nothing was wrong with the code; the paragraph describing it was wrong, in the module whose entire subject is reports that disagree with their evidence — *self-found when the recorded run printed its own subject count on line one* | **Fixed** — the docstring states the rule (`EXTRAS` decides) instead of a number that has to be maintained beside it, and the one figure kept is the one the run prints. **Prose stating a property is not the property** (60, 69, 117) — sixth instance, and the first found by the proof it describes | this PR |
 | 123 | [#26](https://github.com/aryangorde8/bumpsmith/pull/26) | The log entry for 122 said the count *"was contradicted the first time the thing ran"*. It was not. `proofs/sandbox_fanout.py` prints its subject count **before** it fans out, so the quota-failed run on 27 Aug — the one that reached nothing — printed `fanning out over 3 subjects` under a docstring already reading *"Four subjects go out together"*, and so did every run after it. The contradiction was on screen for over an hour before anyone read it; the entry recording that turned "I did not notice" into "it did not happen" — *self-found by checking the claim before repeating it in the write-up* | **Fixed** — the entry now says the line was printed on every run including the ones that reached nothing. **Shape 9** (*"I could not tell" reported as "it did not happen"*; 115), and the entry it corrects is the one about prose that states a property instead of having it | this PR |
+| 124 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | **High.** `_refuse_unpublishable` reads each target with `git show HEAD:path` and skips its check entirely when that returns nothing — which is exactly what an **untracked** file returns. The scanner walks Python files, not tracked files, so a migrated untracked file passes a guard whose whole claim is that nothing but the migration goes out, and `git add` then publishes the file's entire pre-existing content as bumpsmith's change | **Raised 27 Aug by the follow-up review, open** — recorded when raised, not when resolved. **Seventh instance of the shape**: `publish.py` opens by arguing that nothing but the migration leaves, and this is the fourth separate way it did not have that property | this PR |
+| 125 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | The same check compares `committed.rstrip("\n")` against `first_read.rstrip("\n")`, so a pre-existing trailing-newline change on a target is treated as no change at all and is staged with the migration | **Raised 27 Aug by the follow-up review, open** | this PR |
+| 126 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | The check compares blob **text** and never the file mode, so a pre-existing executable-bit change on a target passes whenever the contents match. Staging the path records the mode change — in a writer that goes out of its way to preserve permissions rather than set them | **Raised 27 Aug by the follow-up review, open** | this PR |
+| 127 | [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | **The gate one.** `propose()` validates HEAD, the index and the target contents *before* the blocking approval prompt, and `_do_open()` revalidates none of them after it. Anything that changes while a human is deciding — another process, another shell, the person themselves — is inside the approval and outside the checks. The window is bounded by human attention, which is to say it is the longest window in the program | **Raised 27 Aug by the follow-up review, open** — this one is on criterion 05's own ground: a gate that checks before the pause and not after has not checked | this PR |
 
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
@@ -2519,6 +2523,35 @@ being sure of first — which is an uncomfortable thing to learn about a log who
 entire purpose is to be the thing you can check.
 
 **4 of 4 guards caught** on the re-run, plus the no-op control.
+
+## 124–127 · What asking for a second review cost
+
+The rules page was edited mid-week and grew a requirement: the README must show
+*"a follow-up review against the final code."* Qodo posts one review per pull
+request and does not re-review after a push — verified across #20, #21 and #23 —
+so the only way to produce one is to ask, by commenting `/agentic_review`.
+
+Asked on #20 on 27 August, against a branch merged the day before, it raised
+**four more findings**. Not stylistic ones. Three are further ways the
+publishability check fails to mean what it says: it reads `git show HEAD:path`
+and treats *nothing* as *nothing to check*, which is what an untracked file
+returns; it strips trailing newlines from both sides of the comparison; and it
+compares text while ignoring the file mode. Each is a different route to the same
+place — something that is not the migration going out under the migration's name.
+
+The fourth is the one worth stopping on. `propose()` validates HEAD, the index and
+every target, then blocks on a human typing `yes`. `_do_open()` validates nothing
+again. Every check the gate performs is therefore a statement about the moment
+*before* the pause, and the pause is the longest interval in the program because
+its length is a person's attention. This project's answer to *"does the agent stop
+before anything irreversible"* is its strongest claim, and the stop had a hole in
+it that nothing in 732 tests could see, because no test holds the prompt open and
+changes the tree underneath it.
+
+They are recorded here open, on the day they were raised, because that is the rule
+— *a finding is recorded when it is raised, not when it is resolved* — and because
+a log that only gains entries it can immediately mark **Fixed** is a log that is
+being managed rather than kept.
 
 ## How this stays honest
 
