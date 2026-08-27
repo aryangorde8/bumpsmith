@@ -149,6 +149,10 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 128 | [#28](https://github.com/aryangorde8/bumpsmith/pull/28) | The publish test fake built its committed-blobs map with `dict(committed or {...})`, so passing `{}` — a repository where the target is **untracked**, the exact state finding 124 is about — silently got the default map with the file present. The case could not be expressed in the suite that was supposed to check it — *self-found while writing 124's guard* | **Fixed** — `is not None`, not `or`. The same shape as the defect it was blocking: an absence read as *nothing was specified* rather than as *the answer* | this PR |
 | 129 | [#28](https://github.com/aryangorde8/bumpsmith/pull/28) | Revalidating after the approval — the fix for 127, in this same pull request — checked the target against its **pre-migration** contents and never against what the migration actually wrote. HEAD is unchanged either way, so a target edited while the prompt waits passes every question being asked and is staged as this migration's output. Replacing it with a **symlink** passes too, because `is_file()` follows the link and answers about a different file | **Fixed** — `Proposal` carries `(path, before, after, encoding)` and the check asks both questions: *is somebody else's work in the way* against `before`, *is ours still there* against `after`, read back with the encoding and `newline=""` it was written with. Symlinks refused outright. 🔴 **Eighth instance of the shape, and the sharpest**: the fix for a window left the window open for the one thing the window is about | this PR |
 | 130 | [#28](https://github.com/aryangorde8/bumpsmith/pull/28) | The contents check added for 129 reads the target with `open(encoding=...)`. Neither `OSError` nor `UnicodeError` is a `PublishError`, and `__main__` catches only the latter — so a target made unreadable, or rewritten with bytes that are not its encoding, during the approval window left the module past the one handler written for it, as a traceback | **Fixed** — both are translated into `NothingToPublishError` naming the file and the encoding. 🔴 **Shape 1 for the fifth time** (*an exception escaping the path meant to handle it*), introduced by the fix for 129, which was itself the fix for 127 | this PR |
+| 131 | [#29](https://github.com/aryangorde8/bumpsmith/pull/29) | `_no_sandbox()` — the only text a user of this package ever sees about the sandbox — ended *"carrying the edits across is the missing piece; until it is written and reviewed, this refuses"*. It had been written, eight pull requests earlier, by moving the **agent** instead of the edits: `bumpsmith.remote` installs the package into the sandbox and runs the whole loop there. `remote.py`'s own docstring cites this refusal approvingly, so the two modules agreed about the design and only the sentence a reader is shown still described the hole — *self-found while verifying a deferral before answering it in a review thread* | **Fixed** — the refusal and every line of its reasoning stay, because the refusal is still right. What changes is the ending: the mechanism exists, it is named (`bumpsmith.remote`, `proofs/sandbox_fanout.py`), and the missing piece is narrowed to the command-line route it actually is. **Prose stating a property is not the property** (60, 69, 117, 122) — seventh instance, and the first where the prose described a gap the code had already closed rather than a property the code lacked | this PR |
+
+| 132 | [#29](https://github.com/aryangorde8/bumpsmith/pull/29) | The README dated its finding snapshot *"As of 28 August 2026"*, and every timestamp this repository carries said otherwise: the commit (`2026-08-27T19:54:20Z`), the pull request, and the review comment that caught it (`2026-08-27T19:56:32Z`). The date was read off a clock at UTC+05:30; git and GitHub keep time in UTC. The documentation guards check the total and the arithmetic and had nothing to say about the date, which Qodo noted in the same breath | **Fixed** — the snapshot reads 27 August, and `test_the_readme_finding_snapshot_is_not_future_dated` now fails on any snapshot dated after today in UTC. It can pass and never spuriously fail later, because a date in the past stays in the past. 🔴 **Raised on the pull request whose entire subject is prose drifting from what the code does** — the correction to one stale sentence shipped a fresh one, dated a day into the future | this PR |
+
 
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
@@ -2599,6 +2603,84 @@ argument for the rule that made us ask for a second review at all.
 
 **8 of 8 guards caught** when broken one at a time, plus a no-op control on each
 round.
+
+## 131 · The gap that had already closed
+
+`--sandbox` refuses, and the refusal is correct: the flag would edit a checkout
+on this filesystem and run the suite on the sandbox's, so the suite would answer
+a question about code the edits never reached. That is the defect
+`bumpsmith.run` exists to prevent, one level up, and the refusal has been the
+right call since the day it was written.
+
+The last sentence was not. It read:
+
+> Carrying the edits across is the missing piece; until it is written and
+> reviewed, this refuses.
+
+By the time anyone read that, the piece was written. Not the way the sentence
+imagined — nothing carries edits across — but by removing the split it was
+about. `bumpsmith.remote.SandboxJob` installs this package into the sandbox from
+its own public repository and runs the entire loop there, so editing and testing
+happen on one filesystem again, just not this one.
+`proofs/sandbox_fanout.py` does it to two real third-party repositories at once
+and the output is committed.
+
+**The two modules already agreed.** `remote.py` opens by citing this very
+refusal and endorsing it: *"`python -m bumpsmith --sandbox` refuses, and the
+refusal is right ... The way past that is not to relax the rule but to stop
+splitting."* The design was coherent in both directions. What was stale was the
+one paragraph a person running the command actually sees — the only place where
+being out of date costs a reader anything.
+
+That is **the seventh instance of prose stating a property the code does not
+have** (60, 69, 117, 122), and it is the first of a different sub-kind. The
+earlier six were prose claiming a property that was absent. This is prose
+claiming an *absence* that had been filled. Both are the same failure of
+maintenance and only one of them looks like a bug, which is presumably why this
+one survived eight pull requests: a paragraph confessing a limitation reads as
+humility, and nobody re-checks humility.
+
+Found while verifying a deferral in order to answer it in a Qodo thread, which
+is the second time this week that preparing to say something in public has
+turned up the thing that made it untrue. Recorded as self-found, because the
+review did not raise it — but it would not have been looked for without the
+review.
+
+**1 of 1 guard caught** when broken, plus a no-op control:
+`test_the_refusal_names_where_the_loop_does_run_in_a_sandbox` fails against the
+old text and passes against the new, and `__main__.py` was restored byte-for-byte
+after the break.
+
+### 132 · and the correction was dated a day early
+
+Qodo reviewed the above and raised one thing: the README's snapshot said *"As of
+28 August 2026"*, and nothing in the repository agreed. The commit was
+`2026-08-27T19:54:20Z`, the pull request `2026-08-27T19:54:53Z`, and Qodo's own
+comment `2026-08-27T19:56:32Z`. The date came off a local clock at UTC+05:30,
+where it was already the 28th; git and GitHub both keep time in UTC, where it was
+not.
+
+Accepted without argument, after checking all three timestamps rather than
+taking the finding's word for it. The value of the finding is not the day — it is
+that a **dated accounting claim disagreed with the commit that made it**, in a
+file whose whole purpose is that its numbers can be checked.
+
+The review also named why nothing caught it: the documentation guards validate
+the total and the breakdown and say nothing about the date.
+`test_the_readme_finding_snapshot_is_not_future_dated` closes that. It asserts
+the snapshot is not after today in UTC — which permits a snapshot to age, because
+ageing is what a snapshot does, and forbids the one direction only a misread
+clock can produce.
+
+**The shape is worth stating.** This pull request exists to correct a sentence
+that had drifted from the code. Its own correction shipped a fresh sentence that
+disagreed with its own commit. That is not the same defect twice — 131 was prose
+describing an absence that had been filled, 132 is prose asserting a fact the
+artifact contradicts — but it is the same *cause*, which is that prose is not
+executed and therefore is not checked unless something is written to check it.
+Two guards now do, in the one file where the numbers are the argument.
+
+**1 of 1 guard caught** when broken, plus a no-op control.
 
 ## How this stays honest
 
