@@ -28,6 +28,7 @@ not police wording anywhere else.
 """
 
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 
 from bumpsmith.migrate import Outcome, Stop
@@ -148,6 +149,24 @@ def test_readme_lists_every_outcome() -> None:
 REVIEW_LOG = Path(__file__).resolve().parent.parent / "REVIEW-LOG.md"
 
 _ROW = re.compile(r"^\|\s*(\d+)\s*\|", re.MULTILINE)
+_README_SNAPSHOT_DATE = re.compile(
+    r"As of (\d{1,2}) (January|February|March|April|May|June|July|August|September"
+    r"|October|November|December) (\d{4}) it holds"
+)
+_MONTHS = {
+    "January": 1,
+    "February": 2,
+    "March": 3,
+    "April": 4,
+    "May": 5,
+    "June": 6,
+    "July": 7,
+    "August": 8,
+    "September": 9,
+    "October": 10,
+    "November": 11,
+    "December": 12,
+}
 _README_TOTAL = re.compile(r"it holds \*\*(\d+) findings\*\*")
 _README_SPLIT = re.compile(
     r"\*\*(\d+) findings\*\*: (\d+) raised by automated review, (\d+)\b.*?and (\d+)\b",
@@ -214,6 +233,32 @@ def test_the_readme_finding_count_matches_the_log_it_describes() -> None:
     actual = len(_logged_ids())
     assert claimed == actual, (
         f"the README says the log holds {claimed} findings; its table has {actual} rows."
+    )
+
+
+def test_the_readme_finding_snapshot_is_not_future_dated() -> None:
+    """The snapshot cannot be dated after the moment it is read.
+
+    Finding 132. The date was written as 28 August from a clock at UTC+05:30
+    while every timestamp the repository actually carries -- the commit, the
+    pull request, the review that caught it -- said 27 August. A snapshot may
+    be older than now, because that is what a snapshot is. It may never be
+    newer, and a date read off the wrong clock is the only way it gets there.
+
+    This can pass and then never spuriously fail: a date in the past stays in
+    the past.
+    """
+    stated = _README_SNAPSHOT_DATE.search(_readme())
+    assert stated is not None, (
+        "the README no longer says 'As of <D> <Month> <YYYY> it holds'. "
+        "If the wording changed, update this anchor."
+    )
+    day, month, year = stated.group(1), stated.group(2), stated.group(3)
+    claimed = datetime(int(year), _MONTHS[month], int(day), tzinfo=UTC)
+    today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    assert claimed <= today, (
+        f"the README dates its finding snapshot {day} {month} {year}, which is "
+        f"after today in UTC ({today:%d %B %Y}). Check the clock's timezone."
     )
 
 
