@@ -158,6 +158,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 136 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | The completeness guard written for 134 filtered `__*.py` out of the package before comparing, while the sentence it defends says *"Everything is in `src/bumpsmith/`"*. So the test enforced *everything except dunders* — a claim the README does not make — and `__main__.py`, the command line, could have been dropped from the table without failing anything. **This is the pull request's own subject occurring inside its own fix**, which is the third time in three pull requests that a correction for stale prose has carried the defect it was correcting | **Fixed** — nothing is filtered; `_shipped_modules()` returns every `.py` file the package ships, and `__main__.py` and `__init__.py` were given rows, because on reflection both are things a reader wants to find. The deeper problem was the *pattern*: `startswith("__")` silently adopts files that do not exist yet, so a `__version__.py` added next month would have been out of scope by nobody's decision. Where an exemption is genuinely right — the `__init__` table of 138 — each one is now named individually with its reason | this PR |
 | 137 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | `_tabled_modules()` returned a **set**, so both checks written for 134 compared sets and neither could see multiplicity. A table that had drifted into two rows for one module — one of them stale, which is how it happens — satisfied "nothing missing" and "nothing invented" while the one-row-per-module mapping it advertises was gone. The stale row is the one nobody updates, so this is the failure mode that actually occurs | **Fixed** — the helper returns a list, in order and with repeats, and `test_the_readme_module_table_names_each_module_once` is the third check. The two set-difference tests take `set(...)` explicitly at the call site rather than hiding it in the helper, so what each one is blind to is visible where it is used | this PR |
 | 138 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | **A third map, found while fixing 136.** `src/bumpsmith/__init__.py` — the docstring `help(bumpsmith)` prints — carries its own table of the package and listed **nine of eighteen** files, missing the same four the README's table missed plus `rootdir` and `sources`. Three hand-written maps of one package, and until this pull request not one of them was checked against the package. The reader it fails is the one at a REPL who never opens the repository — *self-found* | **Fixed** — the table is complete, and `test_the_package_docstring_maps_every_module_it_claims_to` derives the expectation from `src/bumpsmith/*.py`. Its three exemptions (`migrate`, `__main__`, `__init__`) are **named one at a time with the sentence in the docstring that covers each**, rather than matched by pattern, which is 136's lesson applied on the same afternoon it was learned | this PR |
+| 139 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | **Raised by the follow-up review**, on the fix for 137. The uniqueness check written for 137 was added to the README's table and not to the `__init__` table, which makes the same one-row-per-module claim. Worse, `_init_table_modules()` was written to preserve repeats and its docstring says so — and then all three of its callers took `set(...)` of it, so the multiplicity it was careful to keep was discarded by every reader it had. **Shape 11 — a guarantee enforced at one entrance of a building with two** | **Fixed** — `test_the_package_docstring_names_each_module_once` is the fourth check on that table. The lesson is not "add the test": 137 was fixed *where it was raised* rather than *wherever it applied*, and the second site was in the same file, added in the same commit, twenty lines below. A promise nothing consumes is not a guarantee | this PR |
 
 
 Every finding has a row here and a fuller account below. Findings that arrived
@@ -2856,6 +2857,32 @@ Verified by breaking, one at a time, with a no-op control — **5 of 5**:
 | touch neither table | ✅ green |
 
 `README.md` and `src/bumpsmith/__init__.py` both restored byte-identical.
+
+### 139 · fixed where it was raised, not where it applied
+
+The follow-up `/agentic_review` against `21aea24` raised one more, and it is the
+same defect as 137 at the other end of the same file.
+
+137's fix added a uniqueness check to the README's table. The `__init__` table
+makes the identical one-row-per-module claim and did not get one — so duplicating
+a `:mod:` row left both of its assertions green. And `_init_table_modules()` was
+written to return repeats **on purpose**; its docstring says "in order, with
+repeats". All three of its callers then took `set(...)` of it. The multiplicity
+it went out of its way to preserve was discarded by every reader it had.
+
+**Shape 11 again** — *a guarantee enforced at one entrance of a building with two.*
+The previous instance was `--sandbox`, refused on the command line and only
+documented on `migrate()`. This one is narrower and more embarrassing: the second
+entrance was in the same file, added in the same commit, twenty lines below the
+first.
+
+The general lesson is not "add the missing test". It is that **137 was fixed
+where it was raised rather than wherever it applied**, and that reading the
+finding is not the same as reading for the finding's shape. Verified by breaking:
+duplicating the `gate` row fails with `modules with more than one row in
+src/bumpsmith/__init__.py: gate.py`; no-op control green; file restored
+byte-identical.
+
 
 ## How this stays honest
 

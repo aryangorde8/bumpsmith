@@ -271,6 +271,23 @@ def test_the_package_docstring_invents_no_module() -> None:
     )
 
 
+def test_the_package_docstring_names_each_module_once() -> None:
+    """The same check the README's table has, on the other table that makes the claim.
+
+    Finding 137 was fixed where it was raised and not where it also applied.
+    `_init_table_modules` was written to return repeats -- its docstring says so --
+    and then every caller took `set(...)` of it, so the multiplicity it was
+    careful to preserve was thrown away by all three readers. A promise nothing
+    consumes is not a guarantee, and this table makes the same one-row-per-module
+    claim the README's does.
+    """
+    named = _init_table_modules()
+    repeated = sorted({name for name in named if named.count(name) > 1})
+    assert not repeated, (
+        f"modules with more than one row in src/bumpsmith/__init__.py: {', '.join(repeated)}"
+    )
+
+
 def test_the_readme_module_table_names_each_module_once() -> None:
     """One row per module, which neither of the two checks above can see.
 
