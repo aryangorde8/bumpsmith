@@ -405,6 +405,30 @@ def _import_replacement(tree: ast.Module) -> _Replacement | None:
     return None
 
 
+_GONE = "the site the scan reported is not there any more"
+
+_MOVED = (
+    "the line holds more sites than the scan reported, so which of them it "
+    "meant cannot be told apart from the ones that arrived since"
+)
+"""Why a line that *gained* sites is left alone entirely.
+
+A line that lost one was already handled: the survivors are rewritten and the
+difference is reported skipped. A line that gained one was not, and review found
+the gap -- the planner took the first `wanted` of whatever the fresh parse
+returned, which on a line whose new site sorts first means rewriting a keyword
+the scan never saw and calling the plan complete.
+
+The remaining case is a site replaced by another at the same count, and nothing
+in `(path, line)` can tell those apart: the scan would have to carry the column,
+which is a wider change than the window it closes. That window needs a writer
+editing the tree between the scan and the plan of one run, and inside one run
+the file does not move. Both leftovers stay honest for the same reason: the
+finder re-ran, so anything rewritten is a real site, and a suite that goes red
+reverts the edit byte-for-byte regardless.
+"""
+
+
 def _plan_root_model_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, list[Skipped]]:
     """Build one file's edit from the sites the scan reported in it."""
     try:
@@ -762,6 +786,9 @@ def _plan_keyword_rename(
     for line in sorted(set(lines)):
         wanted = lines.count(line)
         words = by_line.get(line, [])
+        if len(words) > wanted:
+            skipped.extend(Skipped(path, line, _MOVED) for _ in range(wanted))
+            continue
         for word in words[:wanted]:
             # `arg` is None for `**kwargs`, which has no name to rename. The
             # finders never yield one -- they match on the name -- so this
@@ -773,8 +800,8 @@ def _plan_keyword_rename(
             replacements[(word.lineno, word.col_offset)] = _Replacement(
                 word.lineno, word.col_offset, name, rename[name]
             )
-        for _ in range(wanted - len(words[:wanted])):
-            skipped.append(Skipped(path, line, "the site the scan reported is not there any more"))
+        for _ in range(wanted - len(words)):
+            skipped.append(Skipped(path, line, _GONE))
 
     if not replacements:
         return None, skipped

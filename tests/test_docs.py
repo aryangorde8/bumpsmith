@@ -520,11 +520,23 @@ class added next month would fall out of scope by nobody's decision.
 """
 
 
+_ABSENT_CELL = "*(absent)*"
+"""The one spelling a class cell may take without naming a `BreakClass`.
+
+Matched exactly. Mapping *every* un-backticked cell to "deliberately absent" is
+how an arbitrary word like `ABSENT` slipped past the invented-class, numbering
+and rewriter guards at once -- each of them skips the rows this returns `None`
+for, so a cell that is merely malformed inherited the one intentional exemption.
+"""
+
+
 def _taxonomy_rows(text: str) -> list[tuple[int, str | None, bool]]:
     """Each row of the break-taxonomy table as ``(number, class name, has rewriter)``.
 
-    The name is ``None`` for the row that records a *deliberately absent* class,
-    which is a fact about the taxonomy rather than about the enum.
+    The name is ``None`` only for the row that records a *deliberately absent*
+    class, which is a fact about the taxonomy rather than about the enum. Any
+    other cell that does not name a class is an error here rather than a row the
+    checks below quietly pass over.
     """
     lines = text.splitlines()
     starts = [i for i, line in enumerate(lines) if line.startswith(_TAXONOMY_TABLE_HEADER)]
@@ -536,10 +548,41 @@ def _taxonomy_rows(text: str) -> list[tuple[int, str | None, bool]]:
         cells = [cell.strip() for cell in line.strip("|").split("|")]
         assert len(cells) == 4, f"taxonomy row does not have four cells: {line}"
         number, name, _what, rewriter = cells
-        named = name.strip("`") if name.startswith("`") else None
+        if name == _ABSENT_CELL:
+            named = None
+        else:
+            assert len(name) > 2 and name.startswith("`") and name.endswith("`"), (
+                f"taxonomy class cell is neither `a name` nor {_ABSENT_CELL}: {line}"
+            )
+            named = name.strip("`")
         rows.append((int(number), named, rewriter == "✅"))
     assert rows, "the taxonomy table header is not followed by any rows"
     return rows
+
+
+def test_the_readme_taxonomy_gives_each_class_exactly_one_row() -> None:
+    """One row per class, one number per row, and exactly one absent row.
+
+    The fourth time this shape has been found: a table gets per-row checks and
+    nothing checks that the rows are *distinct*. Completeness collapses the names
+    into a dict, every other check validates each repeated row happily on its
+    own, and the prose count reads the physical rows -- so duplicating a real row
+    lets the README claim a class it does not have, with all five guards green.
+    """
+    rows = _taxonomy_rows(_readme())
+
+    named = [name for _, name, _ in rows if name is not None]
+    repeated = sorted({name for name in named if named.count(name) > 1})
+    assert not repeated, f"break classes with more than one taxonomy row: {repeated}"
+
+    numbers = [number for number, _, _ in rows]
+    reused = sorted({number for number in numbers if numbers.count(number) > 1})
+    assert not reused, f"taxonomy numbers used by more than one row: {reused}"
+
+    absent = [name for _, name, _ in rows if name is None]
+    assert len(absent) == 1, (
+        f"expected exactly one {_ABSENT_CELL} row in the taxonomy, found {len(absent)}"
+    )
 
 
 def test_the_readme_taxonomy_lists_every_break_class() -> None:
