@@ -89,6 +89,12 @@ id — "the file is there" is not evidence about the session until something
 establishes that it is *not* there for everyone. Without leg 3, leg 2 is an
 observation; with it, leg 2 is a measurement.
 
+On the recorded run the marker was `5ec90b7fb9ddcffd`. Session
+`01m14qmf52117zchr5g5z2n7vc` wrote it and read it back after the client was
+discarded, and the control session `01m14qmv5racxqtf6v71c7bdrc` read `absent` —
+so the marker was reachable from the session that wrote it, and from nowhere
+else. Both ids are in `recorded/session_reconnect.json`.
+
 The script exits non-zero on each of those failing separately, and says which,
 because "leg 1 never wrote its marker" and "the session did not hold" are
 different facts and only the second is about the harness.
@@ -334,10 +340,11 @@ a proof that costs an afternoon the first time it fails.
 
 ## The recorded runs
 
-`recorded/` holds the output of every script, verbatim — the two harness ones
-against TrueForge 0.1.4 with `bedrock-mantle/qwen-3-coder-480b` and `validator.py`
-against pydantic 2.12.5, all from 26 August 2026, and `fanout.py` and
-`sandbox_fanout.py` against pydantic 2.12.5 from 27 August. They are committed
+`recorded/` holds the output of every script, verbatim — `sandbox.py` and
+`deny.py` against TrueForge 0.1.4 with `bedrock-mantle/qwen-3-coder-480b`, and
+`validator.py` against pydantic 2.12.5, all from 26 August 2026; `fanout.py` and
+`sandbox_fanout.py` against pydantic 2.12.5 from 27 August; and
+`session_reconnect.py`, against the harness again, from 28 August. They are committed
 because a judge without a harness cannot run any of the ones that need one, and a
 claim nobody can check is worth what it costs to make.
 
@@ -348,6 +355,7 @@ claim nobody can check is worth what it costs to make.
 | `fanout.log` / `fanout.json` | four subjects migrated at once against pydantic 2.12.5 — two migrated, one already green and unedited, and one never reached, reported as `unreached` with the reason rather than folded into the zero |
 | `sandbox_fanout.log` / `sandbox_fanout.json` | two real third-party repositories put through the whole loop at the same time, each in its own Daytona sandbox by a `bumpsmith` installed there — **44.3s wall clock**; B reverted after peeling three breaks and reaching one it could not classify, C came back `already-green` with `git status` clean **in the sandbox that ran it**, and the third subject was never reached |
 | `deny.log` / `deny.json` | a real `tool.approval_required` on thread `main`, denied through `TurnChannel`; the session then run to rest — 2 turns, both `done` — and the harness's own MCP server reports **0 tool calls served during the run** |
+| `session_reconnect.log` / `session_reconnect.json` | session `01m14qmf52117zchr5g5z2n7vc` wrote a marker, and read the same nonce back after the client that opened it was discarded; the control session `01m14qmv5racxqtf6v71c7bdrc` read `absent` — so the marker was reachable from the session that wrote it and from nowhere else |
 
 None of them was edited. They contain no credentials. The repository and branch
 names in them are this project's own and are public — the same policy applied to

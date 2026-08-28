@@ -1,0 +1,22 @@
+{
+  "transport": "bumpsmith.trueforge.Client + SandboxExec",
+  "runner": "bumpsmith.run.SandboxRunner",
+  "model": "bedrock-mantle/qwen-3-coder-480b",
+  "nonce": "5ec90b7fb9ddcffd",
+  "marker": "/tmp/bumpsmith-session/marker",
+  "established": {
+    "session": "01m14qmf52117zchr5g5z2n7vc",
+    "present": true,
+    "read": "5ec90b7fb9ddcffd"
+  },
+  "reconnected": {
+    "session": "01m14qmf52117zchr5g5z2n7vc",
+    "present": true,
+    "read": "5ec90b7fb9ddcffd"
+  },
+  "control": {
+    "session": "01m14qmv5racxqtf6v71c7bdrc",
+    "present": false,
+    "read": null
+  }
+}
