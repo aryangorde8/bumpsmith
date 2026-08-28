@@ -1552,3 +1552,74 @@ def test_a_type_parameter_shadows_everything_the_statement_covers(
     migration. The last two cases are the controls.
     """
     assert _sites(source, items_keyword_sites) == expected, label
+
+
+@pytest.mark.parametrize(
+    ("label", "source", "expected"),
+    [
+        (
+            "global reaches past a type parameter to the module",
+            """
+            from pydantic import conlist
+
+            class C[conlist]:
+                def m(self):
+                    global conlist
+                    return conlist(str, min_items=1)
+            """,
+            [6],
+        ),
+        (
+            "and past an ordinary class-body shadow",
+            """
+            from pydantic import conlist
+
+            class C:
+                conlist = ours
+                def m(self):
+                    global conlist
+                    return conlist(str, min_items=1)
+            """,
+            [7],
+        ),
+        (
+            "a global naming something the module never imported stays absent",
+            """
+            class C[conlist]:
+                def m(self):
+                    global conlist
+                    return conlist(str, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "without the declaration the type parameter still shadows",
+            """
+            from pydantic import conlist
+
+            class C[conlist]:
+                def m(self):
+                    return conlist(str, min_items=1)
+            """,
+            [],
+        ),
+    ],
+)
+def test_global_resolves_in_the_module_whatever_shadowed_it(
+    label: str, source: str, expected: list[int]
+) -> None:
+    """Third round on the type parameter work, and finding 163's rule again.
+
+    163 stopped the assignment beside a `global` from counting as a local
+    binding. This is the other half of the same sentence: a name can be missing
+    from the inherited map because something further out removed it, and
+    `global` reaches past all of that to the module. Restoring from the module
+    namespace is the only reading right in both cases -- which is why the second
+    case, an ordinary class-body shadow with no type parameter anywhere, was
+    also wrong before this and is fixed by the same change.
+
+    `nonlocal` has no equivalent case to test: Python refuses it outright for a
+    type parameter name, so the code the report imagined cannot be written.
+    The last two cases are the controls.
+    """
+    assert _sites(source, items_keyword_sites) == expected, label

@@ -847,6 +847,49 @@ def _comprehension_elements(node: ast.AST) -> Iterator[ast.AST]:
         yield node.elt
 
 
+def _declared_global(node: ast.AST) -> set[str]:
+    """Names a body declares `global`, not counting the scopes nested in it."""
+    body = getattr(node, "body", [])
+    pending: list[ast.AST] = list(body) if isinstance(body, list) else [body]
+    found: set[str] = set()
+    while pending:
+        child = pending.pop()
+        if isinstance(child, _OWN_SCOPE):
+            continue
+        if isinstance(child, ast.Global):
+            found.update(child.names)
+        pending.extend(ast.iter_child_nodes(child))
+    return found
+
+
+def _restored(names: PydanticNames, module: PydanticNames, declared: set[str]) -> PydanticNames:
+    """`global x` resolves `x` in the module namespace, whatever shadowed it here.
+
+    `_bindings_of` already stops the assignment beside such a declaration from
+    counting as a local binding. This is the other half: a name can be missing
+    from the inherited map because something *further out* removed it -- a PEP
+    695 type parameter heading the class, say -- and `global` reaches past all
+    of it to the module. Restoring from the module map is therefore the only
+    reading that is right in both cases.
+
+    `nonlocal` needs no equivalent. It names an enclosing *function* binding,
+    which inheritance already models, and Python refuses it outright for a type
+    parameter name -- `nonlocal binding not allowed for type parameter`.
+    """
+    if not declared:
+        return names
+    direct = dict(names.direct)
+    modules = set(names.modules)
+    for name in declared:
+        direct.pop(name, None)
+        modules.discard(name)
+        if name in module.direct:
+            direct[name] = module.direct[name]
+        elif name in module.modules:
+            modules.add(name)
+    return PydanticNames(direct=direct, modules=frozenset(modules))
+
+
 def _outside_type_params(
     node: ast.AST, names: PydanticNames, inherited: PydanticNames
 ) -> tuple[PydanticNames, PydanticNames]:
@@ -858,7 +901,10 @@ def _outside_type_params(
 
 
 def nodes_in_scope(
-    node: ast.AST, names: PydanticNames, functions_see: PydanticNames | None = None
+    node: ast.AST,
+    names: PydanticNames,
+    functions_see: PydanticNames | None = None,
+    module: PydanticNames | None = None,
 ) -> Iterator[tuple[ast.AST, PydanticNames]]:
     """Every node in the tree, paired with the pydantic names visible where it sits.
 
@@ -875,14 +921,17 @@ def nodes_in_scope(
     treating it as visible at module level.
     """
     inherited = names if functions_see is None else functions_see
+    # The first call establishes the module namespace; every one below is
+    # handed the same one, because that is what `global` means.
+    outermost = names if module is None else module
     yield node, names
 
     if isinstance(node, ast.ClassDef):
         for part in _decorators(node):
-            yield from nodes_in_scope(part, names, inherited)
+            yield from nodes_in_scope(part, names, inherited, outermost)
         outer, outer_functions = _outside_type_params(node, names, inherited)
         for part in _evaluated_outside(node):
-            yield from nodes_in_scope(part, outer, outer_functions)
+            yield from nodes_in_scope(part, outer, outer_functions, outermost)
         # Two things a class body does that a function body does not, both found
         # by review on the first version of this walk. It does not see an
         # enclosing *class* namespace -- so it starts from `inherited`, the same
@@ -892,9 +941,9 @@ def nodes_in_scope(
         # `outer_functions`, not `inherited`: a type parameter is bound for the
         # whole statement, so `class C[conlist]` shadows the import inside the
         # body and inside every method of it, not only in the bases above.
-        body = outer_functions
+        body = _restored(outer_functions, outermost, _declared_global(node))
         for statement in node.body:
-            yield from nodes_in_scope(statement, body, outer_functions)
+            yield from nodes_in_scope(statement, body, outer_functions, outermost)
             body = _advanced(body, statement)
         return
 
@@ -904,21 +953,21 @@ def nodes_in_scope(
         # generic walk would otherwise read under the module's names.
         outer, outer_functions = _outside_type_params(node, names, inherited)
         for part in _evaluated_outside(node):
-            yield from nodes_in_scope(part, outer, outer_functions)
-        yield from nodes_in_scope(node.value, outer, outer_functions)
+            yield from nodes_in_scope(part, outer, outer_functions, outermost)
+        yield from nodes_in_scope(node.value, outer, outer_functions, outermost)
         return
 
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
         for part in _decorators(node):
-            yield from nodes_in_scope(part, names, inherited)
+            yield from nodes_in_scope(part, names, inherited, outermost)
         outer, outer_functions = _outside_type_params(node, names, inherited)
         for part in _evaluated_outside(node):
-            yield from nodes_in_scope(part, outer, outer_functions)
-        body = _inside(outer_functions, node)
+            yield from nodes_in_scope(part, outer, outer_functions, outermost)
+        body = _restored(_inside(outer_functions, node), outermost, _declared_global(node))
         # A lambda's body is a single expression, not a list of statements.
         statements: list[ast.AST] = list(node.body) if isinstance(node.body, list) else [node.body]
         for piece in statements:
-            yield from nodes_in_scope(piece, body)
+            yield from nodes_in_scope(piece, body, None, outermost)
         return
 
     if isinstance(node, _COMPREHENSIONS):
@@ -927,16 +976,16 @@ def nodes_in_scope(
             # The outermost iterable is evaluated before the comprehension scope
             # exists, out where the comprehension is written. Every later one is
             # not, because the targets before it are bound by then.
-            yield from nodes_in_scope(generator.iter, names if index == 0 else own)
-            yield from nodes_in_scope(generator.target, own)
+            yield from nodes_in_scope(generator.iter, names if index == 0 else own, None, outermost)
+            yield from nodes_in_scope(generator.target, own, None, outermost)
             for condition in generator.ifs:
-                yield from nodes_in_scope(condition, own)
+                yield from nodes_in_scope(condition, own, None, outermost)
         for element in _comprehension_elements(node):
-            yield from nodes_in_scope(element, own)
+            yield from nodes_in_scope(element, own, None, outermost)
         return
 
     for child in ast.iter_child_nodes(node):
-        yield from nodes_in_scope(child, names, functions_see)
+        yield from nodes_in_scope(child, names, functions_see, outermost)
 
 
 def calls_in_scope(node: ast.AST, names: PydanticNames) -> Iterator[tuple[ast.Call, PydanticNames]]:
