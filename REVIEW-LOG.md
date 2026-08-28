@@ -152,6 +152,13 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 131 | [#29](https://github.com/aryangorde8/bumpsmith/pull/29) | `_no_sandbox()` — the only text a user of this package ever sees about the sandbox — ended *"carrying the edits across is the missing piece; until it is written and reviewed, this refuses"*. It had been written, eight pull requests earlier, by moving the **agent** instead of the edits: `bumpsmith.remote` installs the package into the sandbox and runs the whole loop there. `remote.py`'s own docstring cites this refusal approvingly, so the two modules agreed about the design and only the sentence a reader is shown still described the hole — *self-found while verifying a deferral before answering it in a review thread* | **Fixed** — the refusal and every line of its reasoning stay, because the refusal is still right. What changes is the ending: the mechanism exists, it is named (`bumpsmith.remote`, `proofs/sandbox_fanout.py`), and the missing piece is narrowed to the command-line route it actually is. **Prose stating a property is not the property** (60, 69, 117, 122) — seventh instance, and the first where the prose described a gap the code had already closed rather than a property the code lacked | this PR |
 
 | 132 | [#29](https://github.com/aryangorde8/bumpsmith/pull/29) | The README dated its finding snapshot *"As of 28 August 2026"*, and every timestamp this repository carries said otherwise: the commit (`2026-08-27T19:54:20Z`), the pull request, and the review comment that caught it (`2026-08-27T19:56:32Z`). The date was read off a clock at UTC+05:30; git and GitHub keep time in UTC. The documentation guards check the total and the arithmetic and had nothing to say about the date, which Qodo noted in the same breath | **Fixed** — the snapshot reads 27 August, and `test_the_readme_finding_snapshot_is_not_future_dated` now fails on any snapshot dated after today in UTC. It can pass and never spuriously fail later, because a date in the past stays in the past. 🔴 **Raised on the pull request whose entire subject is prose drifting from what the code does** — the correction to one stale sentence shipped a fresh one, dated a day into the future | this PR |
+| 133 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | The README's *Where the suite runs* section ended with the same sentence finding 131 removed from `_no_sandbox()` — *"carrying the edits across is the missing piece; until it is written and reviewed, a flag that quietly did it would be worse than no flag at all"*. 131 corrected the command-line text and left the README's copy of it standing, in the section a reader arriving for the harness reads first. `proofs/README.md` had described `remote.py` correctly since #23, so **three documents disagreed and only the least-read one was right** — *self-found while auditing the README against the Best Use of TrueForge criteria* | **Fixed** — the refusal paragraph stays; the ending is replaced with what actually happened, naming `remote.py` and `proofs/sandbox_fanout.py` and narrowing the gap to the command-line route. **Prose stating a property is not the property** (60, 69, 117, 122, 131) — eighth instance, and the second in two pull requests where the fix for a stale sentence did not reach every copy of it. Findings 64/65's shape — *a stale number corrected in one file and left standing in another a `grep` away* — applied to a claim rather than a number | this PR |
+| 134 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | The module table under *How it is put together* opens "Everything is in `src/bumpsmith/`" and lists **twelve of the sixteen** modules the package ships. The four with no row — `fanout.py`, `remote.py`, `publish.py`, `report.py` — are the parallel fan-out, the sandbox-resident loop, the only irreversible effect the tool has, and the HTML report: four of the project's strongest claims, absent from the map a reader navigates by. Counted, not noticed | **Fixed** — four rows added, and `test_the_readme_maps_every_module_the_package_ships` now derives the expected set from `src/bumpsmith/*.py` so the table cannot fall behind the package again. A second test catches the other direction, a row naming a file that no longer exists. Scoped to the table's first column for the reason `_stop_table` already documents: nearly every module is named elsewhere in the README, so a file-wide search would have reported a complete map | this PR |
+| 135 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | *"Twenty-eight pull requests; Qodo reviewed every one; twenty-four raised at least one finding, **90 in total**"* — in the `## Qodo Code Review Evidence` section, which the rules require by name. Live counts at the time of reading: **29** pull requests, **25** with at least one inline finding, **91** findings. #29 merged and none of the three numbers followed. Unlike the finding total two paragraphs above it, this sentence has no test behind it, because the numbers live on GitHub rather than in the repository | **Fixed** — all three corrected against `gh api`, recounted rather than incremented. Left deliberately unguarded, and the reason is worth stating: a test that queried GitHub would fail on a network outage and pass on a stale cache, which is a guard that is wrong in the reassuring direction. The check belongs in the pre-submission pass, and it is written down there instead. **Findings 64/65 for the third time**, now in the one section a rule names | this PR |
+| 136 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | The completeness guard written for 134 filtered `__*.py` out of the package before comparing, while the sentence it defends says *"Everything is in `src/bumpsmith/`"*. So the test enforced *everything except dunders* — a claim the README does not make — and `__main__.py`, the command line, could have been dropped from the table without failing anything. **This is the pull request's own subject occurring inside its own fix**, which is the third time in three pull requests that a correction for stale prose has carried the defect it was correcting | **Fixed** — nothing is filtered; `_shipped_modules()` returns every `.py` file the package ships, and `__main__.py` and `__init__.py` were given rows, because on reflection both are things a reader wants to find. The deeper problem was the *pattern*: `startswith("__")` silently adopts files that do not exist yet, so a `__version__.py` added next month would have been out of scope by nobody's decision. Where an exemption is genuinely right — the `__init__` table of 138 — each one is now named individually with its reason | this PR |
+| 137 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | `_tabled_modules()` returned a **set**, so both checks written for 134 compared sets and neither could see multiplicity. A table that had drifted into two rows for one module — one of them stale, which is how it happens — satisfied "nothing missing" and "nothing invented" while the one-row-per-module mapping it advertises was gone. The stale row is the one nobody updates, so this is the failure mode that actually occurs | **Fixed** — the helper returns a list, in order and with repeats, and `test_the_readme_module_table_names_each_module_once` is the third check. The two set-difference tests take `set(...)` explicitly at the call site rather than hiding it in the helper, so what each one is blind to is visible where it is used | this PR |
+| 138 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | **A third map, found while fixing 136.** `src/bumpsmith/__init__.py` — the docstring `help(bumpsmith)` prints — carries its own table of the package and listed **nine of eighteen** files, missing the same four the README's table missed plus `rootdir` and `sources`. Three hand-written maps of one package, and until this pull request not one of them was checked against the package. The reader it fails is the one at a REPL who never opens the repository — *self-found* | **Fixed** — the table is complete, and `test_the_package_docstring_maps_every_module_it_claims_to` derives the expectation from `src/bumpsmith/*.py`. Its three exemptions (`migrate`, `__main__`, `__init__`) are **named one at a time with the sentence in the docstring that covers each**, rather than matched by pattern, which is 136's lesson applied on the same afternoon it was learned | this PR |
+| 139 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | **Raised by the follow-up review**, on the fix for 137. The uniqueness check written for 137 was added to the README's table and not to the `__init__` table, which makes the same one-row-per-module claim. Worse, `_init_table_modules()` was written to preserve repeats and its docstring says so — and then all three of its callers took `set(...)` of it, so the multiplicity it was careful to keep was discarded by every reader it had. **Shape 11 — a guarantee enforced at one entrance of a building with two** | **Fixed** — `test_the_package_docstring_names_each_module_once` is the fourth check on that table. The lesson is not "add the test": 137 was fixed *where it was raised* rather than *wherever it applied*, and the second site was in the same file, added in the same commit, twenty lines below. A promise nothing consumes is not a guarantee | this PR |
 
 
 Every finding has a row here and a fuller account below. Findings that arrived
@@ -2681,6 +2688,201 @@ executed and therefore is not checked unless something is written to check it.
 Two guards now do, in the one file where the numbers are the argument.
 
 **1 of 1 guard caught** when broken, plus a no-op control.
+
+## 133–135 · The README understated the project
+
+Read cold, against the two tracks it is being judged on, rather than for
+correctness. That is a different pass and it found a different class of thing:
+not a claim that is false about the code, but a document that is **behind** it.
+
+### 133 · the same stale sentence, in the room with more visitors
+
+Finding 131 removed a sentence from `_no_sandbox()` that said carrying the edits
+into the sandbox was the missing piece. It had stopped being true eight pull
+requests earlier, when `bumpsmith.remote` started moving the *agent* instead of
+the edits. What #29 did not do was look for other copies of it. There was one, in
+`README.md` under *Where the suite runs* — which is the section a reader arriving
+for the harness reads first, and the one a hackathon judge scoring *use of
+sponsor tools* reads at all.
+
+So three documents described the same design and the ranking was backwards:
+
+| document | what it said | right? |
+|---|---|---|
+| `proofs/README.md` | `remote.py` installs the package into the sandbox and runs the whole loop there | ✅ since #23 |
+| `src/bumpsmith/__main__.py` | the same, after #29 | ✅ since yesterday |
+| `README.md` | carrying the edits across is the missing piece | ❌ since #23 |
+
+**The least-read document was the accurate one.** That is the part worth keeping.
+131 was recorded as *"prose stating a property is not the property"*, and the fix
+for it was itself prose — so it inherited the defect it was fixing, and inherited
+it in the direction that costs most. Findings 64 and 65 named this exact
+mechanism for numbers: a stale value corrected in one file and left standing in
+another a `grep` away. It applies to claims, and nothing about a claim makes it
+easier to grep for.
+
+### 134 · a map missing a quarter of its territory
+
+The module table says "Everything is in `src/bumpsmith/`" and then lists twelve
+of sixteen files. This was found by counting rather than by reading, which is the
+only way it *could* be found: every row present is correct, the prose around it is
+correct, and nothing about the table looks short. A reader has no way to know what
+is not on a list.
+
+The four absent were `fanout.py`, `remote.py`, `publish.py` and `report.py` — the
+parallel fan-out, the loop that lives in the sandbox, the one irreversible effect
+the tool has, and the report a person reads. Four of the project's five strongest
+claims, and the table that maps the package to a stranger did not mention them.
+
+The fix is a test, not four rows. `test_the_readme_maps_every_module_the_package_ships`
+derives the expected set from `src/bumpsmith/*.py`, so a module added tomorrow
+fails the suite until the table follows. It is scoped to the table's **first
+column** for the reason `_stop_table` already gives: `remote` and `report` and
+`publish` all appear in the README's prose, so a search of the whole file would
+have found every one of them and reported a complete map.
+
+Verified by breaking, one at a time, with a no-op control:
+
+| break | result |
+|---|---|
+| delete the `fanout.py` row | ❌ `modules in src/bumpsmith/ with no row: fanout.py` |
+| delete the `remote.py`, `publish.py`, `report.py` rows | ❌ all three named |
+| rename a row's module to `fanout2.py` | ❌ both directions fire — one missing, one invented |
+| reword the table header | ❌ the anchor assertion, naming itself as the thing to update |
+| touch the README without changing the table | ✅ green |
+
+### 135 · the numbers in the section the rules name
+
+*"Twenty-eight pull requests; Qodo reviewed every one; twenty-four raised at
+least one finding, 90 in total."* Live: twenty-nine, twenty-five, ninety-one.
+#29 merged, Qodo reviewed it, raised finding 132, and none of the three numbers
+in `## Qodo Code Review Evidence` moved.
+
+Two paragraphs above it sits a finding total that **cannot** go stale, because
+`test_the_readme_finding_count_matches_the_log_it_describes` reads the log's own
+table and fails when the sentence disagrees with it. The difference is where the
+truth lives. The finding total is checkable from the repository; the pull request
+counts are only checkable from GitHub.
+
+That is the reason this one is left unguarded, and it is a decision rather than
+an omission. A test that queried the API would fail when the network is down and
+pass when a cache is stale — wrong in both directions, and in the second one it
+is wrong *reassuringly*, which finding 9's shape says is the expensive kind. So
+the recount is a step in the pre-submission pass with the command written beside
+it, where a human is already looking, rather than a green tick that means nothing.
+
+**This is findings 64/65 for the third time.** Twice is a coincidence; three
+times is the shape asserting itself. Every instance has been the same: a number
+that is derived somewhere, written down somewhere else, and true on the day it
+was typed.
+
+### 136–138 · and the fix carried the defect it was fixing
+
+Qodo reviewed #30 in under a minute and raised two Medium findings on the guard
+written for 134. Both are right, and the first one is this pull request's own
+subject happening inside its own fix.
+
+**136 — the guard enforced a claim the README does not make.** `_shipped_modules()`
+filtered `__*.py` out of the package before comparing. The sentence it defends
+says *"Everything is in `src/bumpsmith/`"*. So the test meant *everything except
+dunders*, and `__main__.py` — the command line, the file a reader is most likely
+to open second — could have been dropped from the table without failing anything.
+
+The docstring even argued for it: the column is "what it guarantees", and a
+dunder is not a guarantee. That was a reasonable position and it was still wrong,
+because **it was a position about the table and the README had made a promise
+about the directory.** Prose stating a property is not the property, ninth
+instance, and the third pull request running in which a correction for stale
+prose has shipped carrying the thing it was correcting:
+
+| PR | the fix | what it carried |
+|---|---|---|
+| #29 | 131, a stale sentence in `_no_sandbox()` | 132 — the correction was dated a day into the future |
+| #30 | 133, the same stale sentence in the README | 136 — the guard for it enforced a narrower claim than the sentence |
+
+The deeper problem is not the exclusion, it is that the exclusion was a
+**pattern**. `startswith("__")` silently adopts every file that has not been
+written yet: a `__version__.py` added next month would have been outside the
+guard's scope, and nobody would have decided that. Where an exemption is
+genuinely right — 138's table below — each one is now named individually with the
+sentence that justifies it, so a new module fails the suite until somebody
+chooses.
+
+**137 — set-difference cannot see a duplicate.** `_tabled_modules()` returned a
+set, so both checks compared sets: one for names present in the package and
+absent from the table, one for the reverse. Neither can see the same name twice.
+A table with two rows for one module passes both while being precisely the thing
+the table promises not to be — and the second row is the stale one, because the
+person editing finds the first.
+
+The helper now returns a list, in order and with repeats, and the two
+set-difference tests take `set(...)` **at the call site** rather than in the
+helper, so what each check is blind to is visible where it is used.
+
+### 138 · a third map, found by fixing the second
+
+Fixing 136 meant reading `src/bumpsmith/__init__.py` to decide whether it
+deserved a row. It has a table of its own — the one `help(bumpsmith)` prints —
+listing **nine of the eighteen** files the package ships. The same four the
+README omitted, plus `rootdir` and `sources`.
+
+So there were three hand-written maps of one package:
+
+| map | its reader | listed |
+|---|---|---|
+| `README.md` | somebody arriving at the repository | 12 of 18 |
+| `src/bumpsmith/__init__.py` | somebody at a REPL who never opens it | 9 of 18 |
+| `proofs/README.md` | somebody checking a claim | (proofs, not modules — and complete) |
+
+and until this pull request not one of them was checked against the package.
+Every one was correct about the rows it had; each was wrong only about the rows
+it did not have, which is the one error a reader cannot detect.
+
+The guard for it derives the expectation from `src/bumpsmith/*.py` and names its
+three exemptions one at a time — `migrate`, because the sentence above the table
+says "Start at `bumpsmith.migrate` … every other module is a part it uses";
+`__main__`, because the sentence below it says `python -m bumpsmith` runs the
+loop; `__init__`, because it is the file the docstring is in. That is 136's
+lesson applied the same afternoon it was learned.
+
+Verified by breaking, one at a time, with a no-op control — **5 of 5**:
+
+| break | result |
+|---|---|
+| drop the `__main__.py` row from the README | ❌ named (this is 136's fix; it passed before) |
+| drop the `__init__.py` row from the README | ❌ named |
+| duplicate the `gate.py` row | ❌ `modules with more than one row: gate.py` (137's fix) |
+| drop the `remote` row from the `__init__` table | ❌ `modules absent from the table in src/bumpsmith/__init__.py: remote.py` |
+| rename an `__init__` row to `bumpsmith.nowhere` | ❌ both directions fire |
+| touch neither table | ✅ green |
+
+`README.md` and `src/bumpsmith/__init__.py` both restored byte-identical.
+
+### 139 · fixed where it was raised, not where it applied
+
+The follow-up `/agentic_review` against `21aea24` raised one more, and it is the
+same defect as 137 at the other end of the same file.
+
+137's fix added a uniqueness check to the README's table. The `__init__` table
+makes the identical one-row-per-module claim and did not get one — so duplicating
+a `:mod:` row left both of its assertions green. And `_init_table_modules()` was
+written to return repeats **on purpose**; its docstring says "in order, with
+repeats". All three of its callers then took `set(...)` of it. The multiplicity
+it went out of its way to preserve was discarded by every reader it had.
+
+**Shape 11 again** — *a guarantee enforced at one entrance of a building with two.*
+The previous instance was `--sandbox`, refused on the command line and only
+documented on `migrate()`. This one is narrower and more embarrassing: the second
+entrance was in the same file, added in the same commit, twenty lines below the
+first.
+
+The general lesson is not "add the missing test". It is that **137 was fixed
+where it was raised rather than wherever it applied**, and that reading the
+finding is not the same as reading for the finding's shape. Verified by breaking:
+duplicating the `gate` row fails with `modules with more than one row in
+src/bumpsmith/__init__.py: gate.py`; no-op control green; file restored
+byte-identical.
+
 
 ## How this stays honest
 

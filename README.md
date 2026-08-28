@@ -309,12 +309,18 @@ implementation.
 | [`rewrite.py`](src/bumpsmith/rewrite.py) | `Rule` + sites → `Edit`s. **Text replacement at AST positions, never `ast.unparse`** — a file comes back byte-identical apart from the matched sites. Refuses rather than guesses; every match ends as an edit or a `Skipped` carrying a reason |
 | [`apply.py`](src/bumpsmith/apply.py) | `attempt(edits, root)` — all of them land or none do, the originals come back byte for byte, and nothing outside the root is touched. **Reverting is the default**; a caller earns a change by saying `keep()` |
 | [`gate.py`](src/bumpsmith/gate.py) | nothing irreversible happens except through here. Fail-closed, no bypass, approval bound to a request fingerprint |
+| [`publish.py`](src/bumpsmith/publish.py) | the one irreversible effect the tool has — opening a pull request — and the destination is **never inferred**. The remote is named by the caller, resolved to a *push* URL before anybody is asked, and that URL is what the approval shows and what the fingerprint binds. A migration runs against a clone of somebody else's repository, so every convenience here points the irreversible action at the one destination it must never reach |
 | [`run.py`](src/bumpsmith/run.py) | where the suite runs. `LocalRunner` and `SandboxRunner` behind one protocol. Refuses to turn "the command never ran" into a test result |
+| [`remote.py`](src/bumpsmith/remote.py) | runs the **whole loop** inside the harness's sandbox — clone, edit, re-run, revert — by installing this package there, so editing and testing land on one filesystem again. Hands back a `Reported`, not a `Migration`, because a summary that survived the sandbox is not the run and should not be typed as one |
+| [`fanout.py`](src/bumpsmith/fanout.py) | several subjects migrated at once, each in a tree of its own. **A subject it could not reach is never counted as a subject with nothing to migrate** — the same number, opposite facts. Every figure is derived from the attempts rather than accumulated as the run goes |
 | [`harness.py`](src/bumpsmith/harness.py) | TrueForge's `tool.approval_required` → the same `Gate`. The event carries only ids, so the asking message is read back; **a call that cannot be read is denied** |
 | [`trueforge.py`](src/bumpsmith/trueforge.py) | the transport, and the only place in the package that opens a socket. Decides nothing about what an event means |
+| [`report.py`](src/bumpsmith/report.py) | one run, two renderings. `--html` is built from the same payload `--json` writes and from nothing else, so the page a person reads and the file a machine parses cannot drift into two descriptions of one run |
 | [`sources.py`](src/bumpsmith/sources.py) | one byte-exact reader honouring PEP 263, shared so encoding handling cannot drift between modules |
 | [`rootdir.py`](src/bumpsmith/rootdir.py) | which configuration would govern the subject's suite. pytest walks *upward* for it, so a repository that configures nothing inherits whatever it sits beneath — and a verdict from the right tree can still not be about it |
 | [`fixtures.py`](src/bumpsmith/fixtures.py) | clones the four fixtures from upstream at pinned SHAs and verifies `HEAD`. No vendored code in this repository |
+| [`__main__.py`](src/bumpsmith/__main__.py) | the command line — `python -m bumpsmith PATH -- <suite>`. It parses, refuses `--sandbox` with the reason above, and renders what came back. It holds no migration logic at all, which is what lets `migrate()` be driven by a caller that never touches `argparse` — and is why the guarantees that matter are enforced there rather than here |
+| [`__init__.py`](src/bumpsmith/__init__.py) | the package's public surface, deliberately almost empty. **Nothing is re-exported**: `bumpsmith.migrate` is both a module and the function inside it, and binding one name to both would make `from bumpsmith import migrate` mean different things depending on import order |
 
 Two design choices carry more weight than the rest.
 
@@ -345,9 +351,22 @@ Daytona through nothing but package code.
 `--sandbox` on the command line is parsed and **refused**, with the reason. The
 sandbox is a different filesystem, so the loop would write its edits here and
 verify them there, against code the edits never reached — and a green result
-would keep a change that nothing had tested. Carrying the edits across is the
-missing piece; until it is written and reviewed, a flag that quietly did it would
-be worse than no flag at all.
+would keep a change that nothing had tested.
+
+The way past that was not to carry the edits across. It was to stop splitting.
+[`remote.py`](src/bumpsmith/remote.py) installs this package *into* the sandbox
+and runs the entire loop there — clone, read the failure, write the rule, edit,
+re-run the suite, keep it only if green — so editing and testing land on one
+filesystem again, just not this one. The loop does not know it is in a sandbox,
+and `LocalRunner` is the correct runner there, because the tree really is local
+to the process running it.
+[`proofs/sandbox_fanout.py`](proofs/sandbox_fanout.py) does that to two real
+third-party repositories at once, each in a Daytona sandbox of its own, and its
+output is recorded in [`proofs/recorded/`](proofs/recorded).
+
+So the missing piece is no longer the mechanism. It is a command-line route to
+it, and until that exists the flag refuses rather than quietly doing the split
+version.
 
 The refusal is not only in the command. `migrate()` is a public function taking
 any `Runner`, so it checks where each run actually happened and stops at
@@ -471,6 +490,39 @@ The harness's own `tool.approval_required` is answered by that same gate, and
 [`proofs/deny.py`](proofs/deny.py) proves the refusal against a live TrueForge —
 including that the MCP server it would have called reports zero tool calls
 served. The claim is about the effect, not the paperwork.
+
+## Where TrueForge fits
+
+The harness is not sitting underneath this project as a model call. Five things
+it does here, each with the code that does it and a run that was recorded:
+
+| what the harness does | where | the run |
+|---|---|---|
+| **Runs the suite somewhere safe.** `SandboxRunner` sends the pytest invocation to the harness's sandbox and reads the result back through the `Exec` protocol | [`run.py`](src/bumpsmith/run.py), [`trueforge.py`](src/bumpsmith/trueforge.py) | [`sandbox.py`](proofs/sandbox.py) — a real Daytona run, come back `rc=2` and classified by `failures.py` as `REGEX_KEYWORD` |
+| **Runs the whole agent there.** The package installs into the sandbox, so the loop clones, edits, re-runs and reverts on one filesystem | [`remote.py`](src/bumpsmith/remote.py) | [`sandbox_fanout.py`](proofs/sandbox_fanout.py) — two real third-party repositories, **44.3s wall clock** |
+| **Stops for a person.** `tool.approval_required` is answered by the same gate that guards this tool's own effects, and a call that cannot be read is denied | [`harness.py`](src/bumpsmith/harness.py), [`gate.py`](src/bumpsmith/gate.py) | [`deny.py`](proofs/deny.py) — paused, denied, and the MCP server reports **0 tool calls served** |
+| **Reaches a real tool over MCP.** The tool is registered with the harness and annotated `destructiveHint`; TrueForge's own default `require_approval_for_tools` selects it with no configuration from us at all | [`mcp_stub.py`](proofs/mcp_stub.py) | the same run, checked against the server the harness would have called rather than one this repository chose |
+| **Hands work out in parallel.** Several subjects migrated at once, each in a tree — or a sandbox — of its own | [`fanout.py`](src/bumpsmith/fanout.py) | [`fanout.py`](proofs/fanout.py) — 2.1s at one worker, 1.1s at four |
+
+Every one of those has its output committed verbatim in
+[`proofs/recorded/`](proofs/recorded), session and turn ids kept, because a judge
+without a harness cannot run the ones that need one and a claim nobody can check
+is worth what it costs to make. [`proofs/README.md`](proofs/README.md) says what
+each needs and what each costs.
+
+**What the harness is not doing here yet.** A README that lists only the wins is
+the document this project's review log exists to catch.
+
+- The MCP tool that has been exercised end to end is one whose entire purpose is
+  to be **refused**. Nothing here has yet had the harness call an MCP tool and
+  then use what came back.
+- The fan-out is this package's own concurrency over whole migrations. TrueForge
+  has subagent threads of its own — `harness.py` reads their `thread_id`s, and
+  learned to, because reading one as a session id produced a live 404 — but no
+  work is handed to them.
+- A session is created once per runner and reused, and `SandboxRunner` will
+  accept one that already exists. Nothing yet proves a session **surviving a
+  reconnect**; that is the one item here with a seam and no test behind it.
 
 ## Verifying it yourself
 
@@ -606,8 +658,8 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 27 August 2026 it holds **132 findings**: 91 raised by automated review, 4
-that only a live run against the harness could have raised, and 37 the author
+As of 28 August 2026 it holds **139 findings**: 94 raised by automated review, 4
+that only a live run against the harness could have raised, and 41 the author
 found rather than review. The count is not maintained by hand -- `tests/test_docs.py`
 reads the log's own table and fails if this sentence and that table disagree,
 because this paragraph has been the stale number twice already. The log also names the recurring *shapes* those
@@ -660,8 +712,8 @@ all. The point of keeping this paragraph is that the follow-up review is not a
 formality — it found real defects in merged code, which is the argument for
 requiring one.
 
-**The whole trail.** Twenty-eight pull requests; Qodo reviewed every one;
-twenty-four raised at least one finding, **90 in total**. Every finding is in
+**The whole trail.** Twenty-nine pull requests; Qodo reviewed every one;
+twenty-five raised at least one finding, **91 in total**. Every finding is in
 [`REVIEW-LOG.md`](REVIEW-LOG.md) with what happened to it and why.
 
 **What was intentionally dismissed.** Three findings were rejected rather than
