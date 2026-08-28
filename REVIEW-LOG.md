@@ -197,6 +197,9 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 174 | [#36](https://github.com/aryangorde8/bumpsmith/pull/36) | **A slug could climb out of the output directory.** Manifest keys became file names directly, and `[runs."../x"]` is valid TOML, so `out / "../x.html"` resolves above the directory the build was given. Confirmed by path arithmetic rather than by writing the file, since the payload lookup failed first | **Fixed** — a slug is checked against `[a-z0-9]+(?:-[a-z0-9]+)*` when the manifest is read, which is what a file name and a link can both carry, rather than what TOML permits. It raises at load rather than sanitising, because a slug that needs rewriting to be safe is a typo worth seeing | this PR |
 | 175 | [#36](https://github.com/aryangorde8/bumpsmith/pull/36) | **The manifest's claims were shallower than its prose.** `expected` checked only how a run ended, so the flagship blurb could keep saying "nineteen sites" and "five" after a regenerated payload stopped containing them, and the test asserting the manifest against the payload would still pass. The finding is against the honesty mechanism itself, which is the part of this PR that most needed one | **Fixed** — every run gained `expected_steps`, restating its per-step claims: break class, whether the edit was applied, how many sites. Verified by breaking rather than by inspection — dropping fixture B's first step from 19 rewrites to 18 now fails the suite, and the payload was restored and sha256-checked afterwards | this PR |
 
+| 176 | [#36](https://github.com/aryangorde8/bumpsmith/pull/36) | **Second round, on the fix for 174.** The slug pattern from 174 accepts `index`, and a run called that writes `index.html` — the gallery's own file. Reproduced: `build()` returned `index.html` twice and the run page won, leaving a site whose only entry point was the page that had replaced it | **Fixed** — `index` is reserved and rejected at manifest load. The marker deliberately gets no reservation: it begins with a dot and 174's own pattern already refuses those, so no slug can ever name it. A test asserts that second half too, so the reasoning is checked rather than trusted | this PR |
+| 177 | [#36](https://github.com/aryangorde8/bumpsmith/pull/36) | **Second round, on the fix for 172.** `Path.is_file()` follows symlinks, so a link named `.bumpsmith-site` pointing at any regular file anywhere satisfied the marker check — and the guard written to stop `rmtree` reaching a directory it did not create handed over exactly such a directory. Reproduced: a directory holding `source.py` and a symlinked marker lost `source.py` | **Fixed** — the marker must be a regular file *and* not a symlink, and `out` itself is refused if it is a symlink. Worth recording as the shape rather than the instance: 172's guard asked a question whose answer it did not control, which is the same defect as 174's, one layer down | this PR |
+
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
 sense of them -- but the group is not a substitute for the row.
@@ -3182,6 +3185,32 @@ All four fixes were verified by removing the fix and watching the test fail:
 
 `pages/build_site.py` and `pages/runs/fixture-b.json` were restored and
 sha256-checked afterwards.
+
+## The second round on the same PR — 176 and 177
+
+Both of these are findings on the fixes for 172 and 174, and they share a shape
+worth naming: each of the first-round guards asked a question whose answer it did
+not control.
+
+174 restricted slugs to what a file name can carry, and `index` passes that test
+while still colliding with the one file the build writes itself. 172 required a
+marker file, and `is_file()` answers yes to a symlink pointing anywhere at all.
+Neither original fix was wrong about the danger; both were checking a proxy for
+the property they wanted.
+
+The second round of fixes checks the property. `index` is reserved by name, and
+the marker must be a regular file that is not a link. The marker needed no entry
+in the reserved set — it begins with a dot, which the slug pattern already
+refuses — and that reasoning is asserted in a test rather than left in a comment,
+because a comment claiming something is impossible is how it becomes possible
+later.
+
+Both were reproduced before being accepted and verified by removal afterwards:
+
+| Fix removed | Test that failed |
+| --- | --- |
+| the reserved-name check | `test_a_run_cannot_claim_a_name_the_build_writes_itself` |
+| the symlink check | `test_a_symlinked_marker_does_not_unlock_the_guard` |
 
 ## How this stays honest
 

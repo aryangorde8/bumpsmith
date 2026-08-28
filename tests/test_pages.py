@@ -314,3 +314,51 @@ def test_a_manifest_outside_pages_resolves_its_own_payloads(tmp_path: Path) -> N
     rendered = (tmp_path / "out" / "index.html").read_text(encoding="utf-8")
     assert "Only" in rendered
     assert "migrated" in rendered
+
+
+def test_a_run_cannot_claim_a_name_the_build_writes_itself() -> None:
+    """`[runs.index]` is valid TOML, and its page lands on `index.html`.
+
+    The gallery is the only guaranteed way into the site, so a run that replaces
+    it leaves a site whose sole entry point is the page that ate it. Before this
+    was checked, `build()` returned `index.html` twice and the second write won.
+    """
+    with pytest.raises(ValueError, match="name the build writes itself"):
+        ordered_runs({"runs": {"index": {"order": 1}}})
+
+    # The marker needs no reservation and deliberately has none: it begins with a
+    # dot, which the slug pattern already refuses.
+    with pytest.raises(ValueError, match="not a usable run name"):
+        ordered_runs({"runs": {".bumpsmith-site": {"order": 1}}})
+
+
+def test_a_symlinked_marker_does_not_unlock_the_guard(tmp_path: Path) -> None:
+    """`is_file()` follows symlinks, and that is enough to lose a directory.
+
+    A link named `.bumpsmith-site` pointing at any regular file anywhere answers
+    yes to `is_file()`. That would hand an unrelated directory to `rmtree` while
+    satisfying the check written to prevent exactly that.
+    """
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "source.py").write_text("# not the site\n", encoding="utf-8")
+    decoy = tmp_path / "some-regular-file"
+    decoy.write_text("anything\n", encoding="utf-8")
+    (victim / ".bumpsmith-site").symlink_to(decoy)
+
+    with pytest.raises(FileExistsError, match="regular file"):
+        build(victim, MANIFEST)
+
+    assert (victim / "source.py").read_text(encoding="utf-8") == "# not the site\n"
+    assert decoy.read_text(encoding="utf-8") == "anything\n"
+
+
+def test_the_marker_a_build_writes_is_a_real_file(tmp_path: Path) -> None:
+    """The guard is only usable if an honest build still passes it."""
+    out = tmp_path / "out"
+    build(out, MANIFEST)
+    marker = out / ".bumpsmith-site"
+    assert marker.is_file()
+    assert not marker.is_symlink()
+    build(out, MANIFEST)
+    assert (out / "index.html").is_file()

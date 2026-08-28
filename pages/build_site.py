@@ -71,6 +71,13 @@ _SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 # from a directory it was merely pointed at. See `build`.
 _MARKER = ".bumpsmith-site"
 
+# File names the build writes itself. A run may not claim one: `[runs.index]` is
+# a perfectly good TOML key, and its page would land on `index.html` and replace
+# the gallery with itself -- leaving a site whose only way in was the page that
+# ate it. The marker needs no entry here: it begins with a dot, and `_SLUG`
+# already refuses those, so no slug can ever name it.
+_RESERVED = frozenset({"index"})
+
 
 def _text(mapping: Mapping[str, Any], key: str) -> str:
     """The value at *key* as text, or empty when it is absent or not a string."""
@@ -152,6 +159,11 @@ def ordered_runs(manifest: Mapping[str, Any]) -> list[tuple[str, Mapping[str, An
             raise ValueError(
                 f"{slug!r} is not a usable run name: a slug becomes a file name and a "
                 "link, so it is restricted to lowercase letters, digits and hyphens"
+            )
+        if slug in _RESERVED:
+            raise ValueError(
+                f"{slug!r} is a name the build writes itself, so a run cannot take it. "
+                f"Reserved: {', '.join(sorted(_RESERVED))}"
             )
         entries.append((slug, entry))
     return sorted(entries, key=lambda pair: (pair[1].get("order", 0), pair[0]))
@@ -285,17 +297,25 @@ def _clear(out: Path) -> None:
     directory that already has files but no marker is something this module did
     not create and will not remove.
 
+    The marker has to be a *regular file and not a symlink*. ``is_file()`` alone
+    follows symlinks, so a link named ``.bumpsmith-site`` pointing at any file
+    anywhere would answer yes and hand the whole directory to ``rmtree`` -- which
+    is the exact guarantee this function exists to make, defeated by a one-line
+    link. A marker this build wrote is never a symlink.
+
     Raises:
         FileExistsError: if *out* holds files that no build put there.
     """
     if not out.exists():
         return
-    if not out.is_dir():
-        raise FileExistsError(f"{out} is not a directory")
-    if any(out.iterdir()) and not (out / _MARKER).is_file():
+    if not out.is_dir() or out.is_symlink():
+        raise FileExistsError(f"{out} is not a directory this script may replace")
+    marker = out / _MARKER
+    if any(out.iterdir()) and not (marker.is_file() and not marker.is_symlink()):
         raise FileExistsError(
             f"{out} is not empty and was not written by this script -- it has no "
-            f"{_MARKER}. Refusing to delete it. Pass an empty or new directory."
+            f"{_MARKER} regular file. Refusing to delete it. Pass an empty or new "
+            "directory."
         )
     shutil.rmtree(out)
 
