@@ -674,10 +674,18 @@ def _bindings_of(statements: Sequence[ast.AST]) -> tuple[dict[str, str], set[str
 
     Split out of :func:`_locally_bound` so a class body can be advanced one
     statement at a time, which is how Python executes it.
+
+    A name declared `global` or `nonlocal` is **not** bound here. The assignment
+    beside such a declaration writes the outer binding rather than making a new
+    local one, so reading it as a shadow hides a decorator that still resolves to
+    the import at the top of the file. Review found exactly that, on a real
+    `@root_validator` the migration would then have left unmigrated -- the safe
+    direction of getting scope wrong, and still wrong.
     """
     direct: dict[str, str] = {}
     modules: set[str] = set()
     bound: set[str] = set()
+    declared: set[str] = set()
 
     pending: list[ast.AST] = list(statements)
     while pending:
@@ -709,8 +717,10 @@ def _bindings_of(statements: Sequence[ast.AST]) -> tuple[dict[str, str], set[str
             bound.update(_target_names(child.optional_vars))
         elif isinstance(child, ast.ExceptHandler) and child.name is not None:
             bound.add(child.name)
+        elif isinstance(child, (ast.Global, ast.Nonlocal)):
+            declared.update(child.names)
         pending.extend(ast.iter_child_nodes(child))
-    return direct, modules, bound
+    return direct, modules, bound - declared
 
 
 def _target_names(target: ast.expr) -> Iterator[str]:

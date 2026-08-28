@@ -1286,3 +1286,62 @@ def test_a_class_body_binds_in_order_and_inherits_like_a_function(
     shadow written below it was not in scope when the call ran.
     """
     assert _sites(source, items_keyword_sites) == expected, label
+
+
+@pytest.mark.parametrize(
+    ("label", "source", "expected"),
+    [
+        (
+            "a later class binding does not hide an earlier decorator",
+            """
+            from pydantic import root_validator
+
+            class M:
+                @root_validator
+                def v(cls, values): return values
+
+                root_validator = something_else
+            """,
+            [4],
+        ),
+        (
+            "`global` is a declaration about the outer name, not a local",
+            """
+            from pydantic import root_validator
+
+            def f():
+                global root_validator
+
+                class M:
+                    @root_validator
+                    def v(cls, values): return values
+
+                root_validator = None
+            """,
+            [7],
+        ),
+        (
+            "without the declaration the assignment really does shadow",
+            """
+            from pydantic import root_validator
+
+            def f():
+                class M:
+                    @root_validator
+                    def v(cls, values): return values
+
+                root_validator = None
+            """,
+            [],
+        ),
+    ],
+)
+def test_a_declaration_is_not_a_binding(label: str, source: str, expected: list[int]) -> None:
+    """`global x` means the assignment writes the module's `x`, not a new local.
+
+    Both of these lose a real site rather than inventing one, which is the safe
+    direction and still wrong: the repository keeps an import-time failure the
+    tool said it had looked for. The third case is the control -- take the
+    declaration away and the same assignment shadows exactly as before.
+    """
+    assert _sites(source, root_validator_sites) == expected, label
