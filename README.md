@@ -658,7 +658,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **140 findings**: 94 raised by automated review, 4
+As of 28 August 2026 it holds **142 findings**: 96 raised by automated review, 4
 that only a live run against the harness could have raised, and 42 the author
 found rather than review. The count is not maintained by hand -- `tests/test_docs.py`
 reads the log's own table and fails if this sentence and that table disagree,
@@ -721,18 +721,35 @@ paragraphs above cannot go stale — a test reads the log's own table and fails
 when the two disagree — but these numbers live on GitHub, not in the repository,
 and the first version of this sentence went stale the moment the next pull
 request merged. A count with no date is a claim about now, and it was wrong about
-now within a day, twice. Anchored, it ages instead of lying, and anyone can
-re-derive it:
+now within a day, twice. Anchored, it ages instead of lying.
+
+Re-deriving it takes **two** queries, and the reason is the point. Inline
+findings are one query:
 
 ```
-gh api --paginate repos/aryangorde8/bumpsmith/pulls/{N}/comments \
+gh api --paginate repos/aryangorde8/bumpsmith/pulls/N/comments \
   --jq '[.[] | select(.user.login | startswith("qodo")) | select(.in_reply_to_id == null)] | length'
 ```
 
-A test that did this in CI was considered and rejected: it would fail when the
-network is down and pass when a cache is stale — wrong in both directions, and
-reassuringly wrong in the second, which the log's ninth shape says is the
-expensive kind.
+But four of the thirty pull requests have **zero** of those, and zero from that
+query is ambiguous: it is the same answer for *Qodo reviewed this and found
+nothing* and for *Qodo never reviewed this*. Those are opposite facts, and the
+claim above asserts the first for all thirty. Coverage is therefore a separate
+query, against the summary Qodo posts whether or not it finds anything:
+
+```
+gh api repos/aryangorde8/bumpsmith/issues/N/comments \
+  --jq '[.[] | select(.user.login | startswith("qodo"))] | length'
+```
+
+Collapsing those two into one number is exactly the mistake `REVIEW-LOG.md`'s
+ninth shape is about — *"I could not tell" reported as "it did not happen"* —
+and it was raised on the first version of this paragraph, which offered only the
+first query.
+
+A test that ran either of these in CI was considered and rejected: it would fail
+when the network is down and pass when a cache is stale — wrong in both
+directions, and reassuringly wrong in the second.
 
 **A second representative pull request, for the loop rather than the depth.**
 [#30 — *The README understated the project*](https://github.com/aryangorde8/bumpsmith/pull/30)

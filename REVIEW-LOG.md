@@ -160,6 +160,8 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 138 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | **A third map, found while fixing 136.** `src/bumpsmith/__init__.py` — the docstring `help(bumpsmith)` prints — carries its own table of the package and listed **nine of eighteen** files, missing the same four the README's table missed plus `rootdir` and `sources`. Three hand-written maps of one package, and until this pull request not one of them was checked against the package. The reader it fails is the one at a REPL who never opens the repository — *self-found* | **Fixed** — the table is complete, and `test_the_package_docstring_maps_every_module_it_claims_to` derives the expectation from `src/bumpsmith/*.py`. Its three exemptions (`migrate`, `__main__`, `__init__`) are **named one at a time with the sentence in the docstring that covers each**, rather than matched by pattern, which is 136's lesson applied on the same afternoon it was learned | this PR |
 | 139 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | **Raised by the follow-up review**, on the fix for 137. The uniqueness check written for 137 was added to the README's table and not to the `__init__` table, which makes the same one-row-per-module claim. Worse, `_init_table_modules()` was written to preserve repeats and its docstring says so — and then all three of its callers took `set(...)` of it, so the multiplicity it was careful to keep was discarded by every reader it had. **Shape 11 — a guarantee enforced at one entrance of a building with two** | **Fixed** — `test_the_package_docstring_names_each_module_once` is the fourth check on that table. The lesson is not "add the test": 137 was fixed *where it was raised* rather than *wherever it applied*, and the second site was in the same file, added in the same commit, twenty lines below. A promise nothing consumes is not a guarantee | this PR |
 | 140 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | 135's fix corrected the trail counts and left the sentence in a form that **goes stale by construction**: *"Twenty-nine pull requests … 91 in total"* is a claim about *now*, and every subsequent merge falsifies it. There is no value that can be written there and stay right, which is why the same three numbers had already been wrong twice. Correcting them a third time would have been the third instance of a defect whose real shape is the sentence, not the digits — *self-found while performing the recount 135's own disposition promised* | **Fixed** — the sentence is anchored to a named event, *"as of the merge of #30"*, and carries the `gh api` command that re-derives it. Anchored, it ages instead of lying: a later merge makes it out of date and never false. Recounted live rather than incremented — 30 pull requests, Qodo on all 30, 26 with at least one inline finding, 94 findings. **Findings 64/65, fourth instance, and the first where the fix was to change the sentence's tense rather than its numbers** | this PR |
+| 141 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | The narrative for 140 quoted the stale sentence as *"twenty-nine … twenty-five … 90 in total"*, a combination that **never existed**: before 135 it read 28 / 24 / 90, after 135 it read 29 / 25 / 91, and the entry spliced the pull request counts from one state onto the finding count from the other. A fabricated quotation, in an audit narrative, about a sentence whose subject is quoting numbers accurately | **Fixed** — the entry quotes 29 / 25 / 91, the sentence 135 actually left behind, and says so explicitly. The check that would have caught it is the one 135 itself performed and this entry did not: read the value out of the file rather than out of the paragraph describing it. Nothing here is testable — a quotation of a sentence that no longer exists anywhere cannot be verified against anything — which is the argument for quoting from a diff rather than from memory | this PR |
+| 142 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | The `gh api` command offered as the way to re-derive the anchored counts queries **inline comments on one pull request**. Four of the thirty have zero of those, and zero from that query is the same answer for *Qodo reviewed this and found nothing* as for *Qodo never reviewed this* — while the sentence it is meant to verify asserts the first for all thirty. **The ninth shape — "I could not tell" reported as "it did not happen" — in the command supplied to check a claim.** The recount actually performed did query both, so the README documented a weaker check than the one that was run | **Fixed** — two queries, with the reason for there being two written between them: inline findings from `/pulls/N/comments`, coverage from `/issues/N/comments`, which Qodo posts whether or not it finds anything. Collapsing them into one number is the mistake, not an inconvenience | this PR |
 
 
 Every finding has a row here and a fuller account below. Findings that arrived
@@ -2891,7 +2893,8 @@ Finding 135's disposition said the recount belonged in the pre-submission pass
 rather than in a test. Doing that recount is what found this.
 
 *"Twenty-nine pull requests; Qodo reviewed every one; twenty-five raised at least
-one finding, 90 in total."* Correcting those three numbers is what 135 did. But
+one finding, 91 in total."* That is the sentence **135 left behind** — the one it
+had just corrected, from 28 / 24 / 90. But
 the sentence is a claim about **now**, and every merge after it falsifies it —
 including the merge of the pull request that corrected it. There is no value that
 can be written there and stay right. That is why the same three numbers had
@@ -2912,6 +2915,44 @@ twenty-six with at least one inline finding, ninety-four findings.
 guard and not a corrected value. The three before it were fixed by making the
 number derivable. This one could not be, because the truth lives on GitHub, so it
 was fixed by making the sentence honest about when it was true.
+
+### 141–142 · the audit entry misquoted, and its own check could not tell
+
+Qodo reviewed #31 and raised two. Both land on the entry for 140, which is an
+entry about quoting numbers accurately.
+
+**141 — the quotation never existed.** The narrative for 140 quoted the stale
+sentence as *"twenty-nine … twenty-five … 90 in total"*. Before 135 it read
+**28 / 24 / 90**; after 135 it read **29 / 25 / 91**. The entry took the pull
+request counts from the corrected state and the finding count from the stale one
+and presented the splice as a quotation.
+
+The check that would have caught it is the one 135 itself performed and this
+entry did not: read the value out of the file rather than out of the paragraph
+describing it. And nothing here is testable — a quotation of a sentence that no
+longer exists in any file cannot be verified against anything — which is the
+argument for quoting from the diff rather than from memory.
+
+**142 — the verification command could not tell.** The `gh api` incantation
+offered as the way to re-derive the anchored counts queries inline comments on
+one pull request. Four of the thirty have **zero** of those, and zero from that
+query is the same answer for two opposite facts:
+
+| what happened | what the query returns |
+|---|---|
+| Qodo reviewed it and found nothing | `0` |
+| Qodo never reviewed it | `0` |
+
+The sentence being verified asserts the *first* for all thirty. **This is the
+ninth shape — "I could not tell" reported as "it did not happen" — occurring in
+the command supplied to check a claim**, which is a worse place for it than the
+claim. The recount that produced the numbers did query both; the README
+documented the weaker half of what was actually run.
+
+Fixed with two queries and the reason for there being two written between them.
+Coverage comes from `/issues/N/comments`, which carries the summary Qodo posts
+whether or not it finds anything; findings come from `/pulls/N/comments`.
+Collapsing them into one number is the mistake, not an inconvenience.
 
 ## How this stays honest
 
