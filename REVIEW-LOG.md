@@ -165,6 +165,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 143 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Raised by the follow-up review, on the fix for 142.** The coverage query added to answer 142 was written without `--paginate`. GitHub returns thirty issue comments a page, so a Qodo summary posted after the thirtieth comment comes back as **zero** — which is the false *never reviewed* that 142 exists to prevent, reintroduced by the fix for it. **The ninth shape, inside the fix for the ninth shape.** Qodo also named the second-order defect: `gh api --paginate --jq '… | length'` evaluates the filter once per page and prints a count for each, so adding the flag alone would have replaced one wrong number with several | **Fixed** — both queries paginate, and both apply their filter with `jq -s 'add | map(…) | length'` over the concatenated pages rather than with `--jq`, so the aggregate is one number. Verified against #20 (15 findings), #26 (0 findings, 2 coverage — reviewed, found nothing, the case the single query could not distinguish) and #31. Latent rather than live today: no pull request here has yet exceeded one page, so nothing was wrong until somebody's thread got long | this PR |
 | 144 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Third round on the same paragraph.** The two queries answer for **one** pull request — the README literally substitutes `N` — while the sentence they are offered as the check for is an aggregate over thirty: *30 reviewed, 26 with at least one finding, 94 findings*. None of the three figures can be derived from either command, so the paragraph presented an incomplete procedure as a complete one, which is a claim about the check rather than about the counts | **Fixed** — replaced with the loop that actually produced the numbers, which prints the sentence: `30 pull requests, 30 reviewed by Qodo, 26 with at least one inline finding, 94 findings`. Run before committing it, output pasted above. The three earlier findings on this paragraph (142, 143, 144) are now each explained beside the detail of the command that answers them, so the reasons travel with the code rather than living only here | this PR |
 | 145 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Fourth round, and the sharpest.** 140 anchored the claim to a named merge; 144 replaced the check with a loop over *everything currently merged*. The two halves disagree: the moment #31 itself lands, the loop returns 31 / 31 / 27 / 97 and appears to **refute a sentence that is still true**. A verification procedure that contradicts a correct claim is worse than none, because the reader believes the procedure. Qodo also named the trap in the obvious fix — filtering by pull request *number* would be wrong, since creation order is not merge order | **Fixed** — the cutoff is #30's own `merged_at`, and the filter is on `mergedAt` rather than on the number. Verified both ways: against #30's timestamp the loop enumerates 30 pull requests and prints the sentence verbatim; against #29's it enumerates 29, which is the check that the cutoff is doing anything at all | this PR |
+| 146 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Fifth round.** `gh pr list --limit 200` returns the *most recent* two hundred and the #30 cutoff was applied to those, so once two hundred more pull requests have merged the anchored set falls out of the window and the loop reports a smaller total — silently, and about a claim written to be permanent. The verification procedure for a sentence that cannot expire had an expiry date | **Fixed** — the enumeration paginates `pulls?state=closed` and drops the unmerged ones, so there is no window. Verified by extracting the fenced block **out of the README** and running it verbatim rather than running a copy: it prints the sentence. Also renamed the loop's `c` to `cov`, because the enumeration's `jq --arg c` reads as shadowing even though the for-header is evaluated once, before the body ever assigns it | this PR |
 
 
 Every finding has a row here and a fuller account below. Findings that arrived
@@ -3056,6 +3057,34 @@ something:
 **Four rounds on one paragraph**, and each round was the previous round's fix.
 The paragraph is eleven lines of shell. What it is *about* is a sentence
 containing four numbers.
+
+### 146 · the check for a permanent claim had an expiry date
+
+`gh pr list --state merged --limit 200` returns the **most recent** two hundred,
+and the #30 cutoff was applied to what came back. So the procedure works today,
+works for the next hundred and seventy pull requests, and then starts quietly
+reporting a smaller total — because the pull requests the snapshot is *about*
+have fallen out of the window before the filter ever sees them.
+
+The sentence it checks was deliberately written so it could never expire. Its
+check expires.
+
+Nothing about it would look wrong when it happened. It would return a plausible
+smaller number, which is the ninth shape wearing its fifth coat on this
+paragraph: *a limit reported as a result.*
+
+Fixed by paginating `pulls?state=closed` and dropping the unmerged ones, which
+has no window at all. Verified by extracting the fenced block **out of the
+README** and running that, rather than running a copy of it — the block prints:
+
+```
+30 pull requests, 30 reviewed by Qodo, 26 with at least one inline finding, 94 findings
+```
+
+**Five rounds on one paragraph.** Worth stating plainly, because it is the
+strongest thing this log has to say about review: every one of the five was found
+by the reviewer, on the fix for the previous one, and not one was found by the
+person who wrote the fix. The author was satisfied five times.
 
 ## How this stays honest
 

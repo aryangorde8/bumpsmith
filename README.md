@@ -658,7 +658,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **145 findings**: 99 raised by automated review, 4
+As of 28 August 2026 it holds **146 findings**: 100 raised by automated review, 4
 that only a live run against the harness could have raised, and 42 the author
 found rather than review. The count is not maintained by hand -- `tests/test_docs.py`
 reads the log's own table and fails if this sentence and that table disagree,
@@ -727,15 +727,17 @@ Re-deriving it is one loop, anchored to the same merge the sentence is, and it
 prints the sentence:
 
 ```
-cutoff=$(gh api repos/aryangorde8/bumpsmith/pulls/30 --jq .merged_at)
-for n in $(gh pr list --state merged --limit 200 --json number,mergedAt \
-           --jq "[.[] | select(.mergedAt <= \"$cutoff\")] | .[].number"); do
-  f=$(gh api --paginate repos/aryangorde8/bumpsmith/pulls/$n/comments \
+repo=aryangorde8/bumpsmith
+cutoff=$(gh api repos/$repo/pulls/30 --jq .merged_at)
+for n in $(gh api --paginate "repos/$repo/pulls?state=closed&per_page=100" \
+           | jq -s --arg c "$cutoff" \
+               'add | map(select(.merged_at != null and .merged_at <= $c)) | .[].number'); do
+  f=$(gh api --paginate repos/$repo/pulls/$n/comments \
       | jq -s 'add | map(select(.user.login | startswith("qodo"))
                        | select(.in_reply_to_id == null)) | length')
-  c=$(gh api --paginate repos/aryangorde8/bumpsmith/issues/$n/comments \
-      | jq -s 'add | map(select(.user.login | startswith("qodo"))) | length')
-  echo "$n $f $c"
+  cov=$(gh api --paginate repos/$repo/issues/$n/comments \
+        | jq -s 'add | map(select(.user.login | startswith("qodo"))) | length')
+  echo "$n $f $cov"
 done | awk '{ prs++; findings += $2; if ($2 > 0) withf++; if ($2 + $3 > 0) reviewed++ }
             END { printf "%d pull requests, %d reviewed by Qodo, %d with at least one inline finding, %d findings\n",
                          prs, reviewed, withf, findings }'
@@ -745,8 +747,8 @@ done | awk '{ prs++; findings += $2; if ($2 > 0) withf++; if ($2 + $3 > 0) revie
 30 pull requests, 30 reviewed by Qodo, 26 with at least one inline finding, 94 findings
 ```
 
-Four details in there were each raised as a finding on the version of this
-paragraph that lacked them, and they are four coats on one mistake.
+Five details in there were each raised as a finding on the version of this
+paragraph that lacked them, and they are five coats on one mistake.
 
 **It asks twice per pull request.** Four of the thirty have zero inline findings,
 and zero from `/pulls/N/comments` is the same answer for *Qodo reviewed this and
@@ -772,6 +774,13 @@ moment the next pull request lands, the loop returns a larger number and appears
 to refute a sentence that is still true. The cutoff is #30's own `merged_at`, and
 the filter is on **merge time** rather than pull request number, because those
 are not the same order.
+
+**It enumerates the whole history rather than a recent window.** `gh pr list
+--limit 200` returns the *most recent* two hundred and then the cutoff is applied
+to those, so once two hundred more pull requests have merged the anchored set
+falls out of the window and the loop reports a smaller total — silently, and
+about a claim written to be permanent. Paginating `pulls?state=closed` and
+dropping the unmerged ones has no window at all.
 
 A test that ran this in CI was considered and rejected: it would fail when the
 network is down and pass when a cache is stale — wrong in both directions, and
