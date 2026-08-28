@@ -1,0 +1,15 @@
+leg 1: opening a session and writing a marker...
+  session 01m14qmf52117zchr5g5z2n7vc
+  marker  '5ec90b7fb9ddcffd'
+
+leg 2: new client, same session id...
+  session 01m14qmf52117zchr5g5z2n7vc
+  marker  '5ec90b7fb9ddcffd'
+
+leg 3: control, a brand-new session...
+  session 01m14qmv5racxqtf6v71c7bdrc
+  marker  absent
+
+evidence written to proofs/recorded/session_reconnect.json
+
+the session held: 01m14qmf52117zchr5g5z2n7vc kept its sandbox across a new client, and a fresh session (01m14qmv5racxqtf6v71c7bdrc) could not see the marker.

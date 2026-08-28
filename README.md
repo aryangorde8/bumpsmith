@@ -582,7 +582,7 @@ the harness does the work rather than sitting underneath a thin wrapper.
 
 ## Where TrueForge fits
 
-The harness is not sitting underneath this project as a model call. Five things
+The harness is not sitting underneath this project as a model call. Six things
 it does here, each with the code that does it and a run that was recorded:
 
 | what the harness does | where | the run |
@@ -591,6 +591,7 @@ it does here, each with the code that does it and a run that was recorded:
 | **Runs the whole agent there.** The package installs into the sandbox, so the loop clones, edits, re-runs and reverts on one filesystem | [`remote.py`](src/bumpsmith/remote.py) | [`sandbox_fanout.py`](proofs/sandbox_fanout.py) — two real third-party repositories, **44.3s wall clock** |
 | **Stops for a person.** `tool.approval_required` is answered by the same gate that guards this tool's own effects, and a call that cannot be read is denied | [`harness.py`](src/bumpsmith/harness.py), [`gate.py`](src/bumpsmith/gate.py) | [`deny.py`](proofs/deny.py) — paused, denied, and the MCP server reports **0 tool calls served** |
 | **Reaches a real tool over MCP.** The tool is registered with the harness and annotated `destructiveHint`; TrueForge's own default `require_approval_for_tools` selects it with no configuration from us at all | [`mcp_stub.py`](proofs/mcp_stub.py) | the same run, checked against the server the harness would have called rather than one this repository chose |
+| **Keeps a session across a reconnect.** `SandboxExec` will adopt a `session_id` it did not create, so a second process holding a stored id reaches the sandbox that session opened, not a fresh one | [`trueforge.py`](src/bumpsmith/trueforge.py) | [`session_reconnect.py`](proofs/session_reconnect.py) — one session read its marker back after the client was **thrown away**; a brand-new session found nothing |
 | **Hands work out in parallel.** Several subjects migrated at once, each in a tree — or a sandbox — of its own | [`fanout.py`](src/bumpsmith/fanout.py) | [`fanout.py`](proofs/fanout.py) — 2.1s at one worker, 1.1s at four |
 
 Every one of those has its output committed verbatim in
@@ -598,6 +599,17 @@ Every one of those has its output committed verbatim in
 without a harness cannot run the ones that need one and a claim nobody can check
 is worth what it costs to make. [`proofs/README.md`](proofs/README.md) says what
 each needs and what each costs.
+
+**`session_reconnect.py` has a control, and the control has been watched fail.**
+It would print *"the session held"* against a harness that pooled its sandboxes,
+so `tests/test_session_reconnect.py` runs the script against stand-in harnesses
+that share one sandbox, forget one, keep nothing at all, and fail the read
+outright, and requires it to fail against every one of them — naming the leg
+that failed. Two ways that control could have passed while proving nothing — a
+marker whose contents impersonated absence, and a read that reported its own
+errors as absence — were Qodo findings on
+[#39](https://github.com/aryangorde8/bumpsmith/pull/39), both reproduced before
+they were accepted.
 
 **What the harness is not doing here yet.** A README that lists only the wins is
 the document this project's review log exists to catch.
@@ -609,21 +621,6 @@ the document this project's review log exists to catch.
   has subagent threads of its own — `harness.py` reads their `thread_id`s, and
   learned to, because reading one as a session id produced a live 404 — but no
   work is handed to them.
-- A session is created once per runner and reused, and `SandboxExec` will accept
-  one that already exists. That seam now has a proof against it:
-  [`session_reconnect.py`](proofs/session_reconnect.py) opens a session, writes a
-  marker into its sandbox, **throws the client away**, comes back with nothing but
-  the session id, and reads the marker back — with a brand-new session as the
-  control, which must *not* see it. `tests/test_session_reconnect.py` runs it
-  against stand-in harnesses that share one sandbox, forget one, keep nothing at
-  all, and fail the read outright, and requires it to fail against every one of
-  them, naming the leg — so the control is known to be a control. Two ways that
-  control could have passed while proving nothing — a marker whose contents
-  impersonated absence, and a read that reported its own errors as absence —
-  were Qodo findings on [#39](https://github.com/aryangorde8/bumpsmith/pull/39),
-  both reproduced before they were accepted. **What is still missing is a
-  recorded run against a live harness**, which is why this is a bullet here
-  rather than a row in the table above.
 
 ## Verifying it yourself
 
@@ -765,7 +762,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **180 findings**: 132 raised by automated review, 4
+As of 28 August 2026 it holds **181 findings**: 133 raised by automated review, 4
 that only a live run against the harness could have raised, and 44 the author
 found rather than review. **The total** is not maintained by hand —
 `tests/test_docs.py` reads the log's own table and fails if this sentence and
@@ -911,8 +908,8 @@ to it and why.
 One is threads on GitHub, anchored to #37's merge and counted by the loop below;
 the other is rows in a file, attributed to automated review by hand in a split
 this README already says is not verified. They have since come apart — the three
-findings Qodo raised on #39 took the second to 132, while the first, being
-anchored, stayed where it was. That is what a coincidence does and a
+findings Qodo raised on #39 took the second past it, and it has kept moving,
+while the first, being anchored, stayed where it was. That is what a coincidence does and a
 reconciliation does not, and it is why reading the match as a cross-check would
 have been the log's recurring **shape 3**: an answer good enough for one question
 reused to settle a stronger one. The paragraph is kept, rather than deleted with
