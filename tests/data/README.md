@@ -46,6 +46,14 @@ the keyword, and the rewriter is scoped to `conlist`, `conset` and
 broader rule than the facts support. Real pytest output against pydantic 2.12.5,
 captured 28 August 2026.
 
+`root-validator-broken.txt` is the third written-to-order recording, and the
+only break in the set whose message names the argument that fixes it: *"you MUST
+specify `skip_on_failure=True`"*. The classifier keys on the slug
+`root-validator-pre-skip` rather than on that sentence, because a library is
+free to reword an error in a patch release and is not free to renumber its own
+error codes. Real pytest output against pydantic 2.12.5, captured 28 August
+2026; machine paths replaced with `/work/repo` and `/work/.venv` as above.
+
 ---
 
 # Recorded harness events

@@ -258,7 +258,7 @@ from the other, and because the two most different results the loop can produce 
 
 ## The break taxonomy
 
-Seven classes, numbered by the project's own taxonomy. Four have rewriters; the
+Eight classes, numbered by the project's own taxonomy. Five have rewriters; the
 rest classify and stop, which is a useful result on its own.
 
 | # | class | what it is | rewriter |
@@ -270,6 +270,23 @@ rest classify and stop, which is a useful result on its own.
 | 5 | `REMOVED_INTERNAL` | an import of a pydantic internal V2 deleted | — |
 | 6 | `TRANSITIVE_DEPENDENCY` | a dependency is itself unmigrated | n/a — no edit here fixes it |
 | 7 | `ITEMS_KEYWORD` | `min_items=`/`max_items=` on a constrained collection | ✅ |
+| 8 | `ROOT_VALIDATOR_SKIP` | `@root_validator` with v1's default, which v2 refuses | ✅ |
+
+**Class 8 is the one where the migration is not a rename.** v1 ran a root
+validator whether or not field validation had failed. v2 removed that behaviour
+rather than renaming it, and refuses to construct the validator without being
+told so: `pre=False` — the default — with no `skip_on_failure=True` is a hard
+error. So the rewrite adopts the only semantics v2 offers, and the validator no
+longer runs when a field above it failed. That is a real behaviour change and
+saying otherwise would be wrong.
+
+It is written anyway, for the reason class 1 is: the alternative is code that
+does not import at all, and this loop only keeps a migration whose suite ended
+green. `pre=True` is untouched — it was legal in v1 and is legal in v2, and in
+the repository this was measured against six of the seven uses are that form.
+A decorator whose `pre` or `skip_on_failure` arrives through a variable or a
+`**kwargs` is reported as a site and left alone, because whether v2 already
+accepts it is not a question the source answers.
 
 **Class 7 is the one where the same keyword is broken in one place and merely
 deprecated in another.** `conlist(int, min_items=1)` raises a `TypeError` from
@@ -670,8 +687,8 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **148 findings**: 101 raised by automated review, 4
-that only a live run against the harness could have raised, and 43 the author
+As of 28 August 2026 it holds **149 findings**: 101 raised by automated review, 4
+that only a live run against the harness could have raised, and 44 the author
 found rather than review. **The total** is not maintained by hand —
 `tests/test_docs.py` reads the log's own table and fails if this sentence and
 that table disagree, and separately fails if the three parts do not sum to it,

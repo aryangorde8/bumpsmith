@@ -728,3 +728,99 @@ class Basket(BaseModel):
 
     assert not result.edits
     assert result.rewritten == 0
+
+
+# ---------------------------------------------------------------------------
+# Class 8 -- three shapes, and the third is an insertion rather than a swap
+# ---------------------------------------------------------------------------
+
+
+_ROOT_VALIDATOR_RULE = Rule(
+    break_class=BreakClass.ROOT_VALIDATOR_SKIP,
+    kind=RuleKind.SOURCE,
+    summary="Give `@root_validator` the `skip_on_failure=True` v2 requires",
+    rationale="v2 refuses to construct a root validator without being told explicitly.",
+)
+
+
+def _root_validator_plan(tmp_path: Path) -> Plan:
+    return plan(_ROOT_VALIDATOR_RULE, find_matches(_ROOT_VALIDATOR_RULE, tmp_path))
+
+
+def test_each_decorator_shape_gains_the_argument(tmp_path: Path) -> None:
+    source = """from pydantic import BaseModel, root_validator
+
+
+class Order(BaseModel):
+    total: int = 0
+
+    @root_validator
+    def bare(cls, values):
+        return values
+
+    @root_validator()
+    def called(cls, values):
+        return values
+
+    @root_validator(allow_reuse=True)
+    def with_arguments(cls, values):
+        return values
+"""
+    _write(tmp_path, "models.py", source)
+    result = _root_validator_plan(tmp_path)
+    assert result.is_complete, [str(s) for s in result.skipped]
+    after = result.edits[0].after
+
+    assert after.count("@root_validator(skip_on_failure=True)") == 2
+    # An insertion, so the argument already there keeps its own spelling.
+    assert "@root_validator(allow_reuse=True, skip_on_failure=True)" in after
+    assert result.rewritten == 3
+
+
+@pytest.mark.parametrize(
+    "legal", ["@root_validator(pre=True)", "@root_validator(skip_on_failure=True)"]
+)
+def test_a_decorator_v2_already_accepts_is_not_a_site(tmp_path: Path, legal: str) -> None:
+    """`pre=True` was legal in v1 and is legal in v2. Rewriting it would change working code."""
+    source = f"""from pydantic import BaseModel, root_validator
+
+
+class Order(BaseModel):
+    total: int = 0
+
+    {legal}
+    def check(cls, values):
+        return values
+"""
+    _write(tmp_path, "models.py", source)
+    result = _root_validator_plan(tmp_path)
+
+    assert not result.edits
+    assert result.rewritten == 0
+
+
+def test_an_unreadable_argument_is_a_site_that_is_left_alone(tmp_path: Path) -> None:
+    """`**options` may already carry `skip_on_failure`, and nothing here can look inside it.
+
+    Reported rather than skipped silently, and not rewritten either: "I cannot
+    see it" is not "it is not there", and it is not "it is there" either.
+    """
+    source = """from pydantic import BaseModel, root_validator
+
+options = {"skip_on_failure": True}
+
+
+class Order(BaseModel):
+    total: int = 0
+
+    @root_validator(**options)
+    def check(cls, values):
+        return values
+"""
+    _write(tmp_path, "models.py", source)
+    result = _root_validator_plan(tmp_path)
+
+    assert not result.edits
+    assert not result.is_complete
+    assert len(result.skipped) == 1
+    assert "not decidable here" in str(result.skipped[0])

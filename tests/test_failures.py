@@ -495,3 +495,37 @@ def test_a_lookalike_typeerror_is_not_this_break(message: str, why: str) -> None
     (failure,) = parse_failures(_collection_error(message), returncode=2)
 
     assert failure.break_class is BreakClass.UNKNOWN, why
+
+
+# --------------------------------------------------------------------------
+# Class 8 -- the one break whose message names the argument that fixes it
+# --------------------------------------------------------------------------
+
+
+def test_a_bare_root_validator_is_classified_from_its_slug() -> None:
+    (failure,) = parse_failures(_recorded("root-validator"), returncode=2)
+
+    assert failure.break_class is BreakClass.ROOT_VALIDATOR_SKIP
+    assert failure.pydantic_code == "root-validator-pre-skip"
+    assert str(failure.culprit) == "app.py:7"
+
+
+def test_the_slug_is_what_is_read_not_the_sentence() -> None:
+    """pydantic may reword an error in a patch release; the code is the stable half.
+
+    Written as a negative: the same slug with prose that says nothing useful is
+    still this break, which is only true if the sentence is not being parsed.
+    """
+    output = (
+        "==================================== ERRORS ===================================\n"
+        "_________________________ ERROR collecting test_app.py ________________________\n"
+        "app.py:7: in Order\n"
+        "    @root_validator\n"
+        "E   pydantic.errors.PydanticUserError: something was reworded entirely\n"
+        "E   \n"
+        "E   For further information visit "
+        "https://errors.pydantic.dev/2.12/u/root-validator-pre-skip\n"
+    )
+
+    (failure,) = parse_failures(output, returncode=2)
+    assert failure.break_class is BreakClass.ROOT_VALIDATOR_SKIP
