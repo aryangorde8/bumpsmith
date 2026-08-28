@@ -162,6 +162,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 140 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | 135's fix corrected the trail counts and left the sentence in a form that **goes stale by construction**: *"Twenty-nine pull requests … 91 in total"* is a claim about *now*, and every subsequent merge falsifies it. There is no value that can be written there and stay right, which is why the same three numbers had already been wrong twice. Correcting them a third time would have been the third instance of a defect whose real shape is the sentence, not the digits — *self-found while performing the recount 135's own disposition promised* | **Fixed** — the sentence is anchored to a named event, *"as of the merge of #30"*, and carries the `gh api` command that re-derives it. Anchored, it ages instead of lying: a later merge makes it out of date and never false. Recounted live rather than incremented — 30 pull requests, Qodo on all 30, 26 with at least one inline finding, 94 findings. **Findings 64/65, fourth instance, and the first where the fix was to change the sentence's tense rather than its numbers** | this PR |
 | 141 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | The narrative for 140 quoted the stale sentence as *"twenty-nine … twenty-five … 90 in total"*, a combination that **never existed**: before 135 it read 28 / 24 / 90, after 135 it read 29 / 25 / 91, and the entry spliced the pull request counts from one state onto the finding count from the other. A fabricated quotation, in an audit narrative, about a sentence whose subject is quoting numbers accurately | **Fixed** — the entry quotes 29 / 25 / 91, the sentence 135 actually left behind, and says so explicitly. The check that would have caught it is the one 135 itself performed and this entry did not: read the value out of the file rather than out of the paragraph describing it. Nothing here is testable — a quotation of a sentence that no longer exists anywhere cannot be verified against anything — which is the argument for quoting from a diff rather than from memory | this PR |
 | 142 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | The `gh api` command offered as the way to re-derive the anchored counts queries **inline comments on one pull request**. Four of the thirty have zero of those, and zero from that query is the same answer for *Qodo reviewed this and found nothing* as for *Qodo never reviewed this* — while the sentence it is meant to verify asserts the first for all thirty. **The ninth shape — "I could not tell" reported as "it did not happen" — in the command supplied to check a claim.** The recount actually performed did query both, so the README documented a weaker check than the one that was run | **Fixed** — two queries, with the reason for there being two written between them: inline findings from `/pulls/N/comments`, coverage from `/issues/N/comments`, which Qodo posts whether or not it finds anything. Collapsing them into one number is the mistake, not an inconvenience | this PR |
+| 143 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Raised by the follow-up review, on the fix for 142.** The coverage query added to answer 142 was written without `--paginate`. GitHub returns thirty issue comments a page, so a Qodo summary posted after the thirtieth comment comes back as **zero** — which is the false *never reviewed* that 142 exists to prevent, reintroduced by the fix for it. **The ninth shape, inside the fix for the ninth shape.** Qodo also named the second-order defect: `gh api --paginate --jq '… | length'` evaluates the filter once per page and prints a count for each, so adding the flag alone would have replaced one wrong number with several | **Fixed** — both queries paginate, and both apply their filter with `jq -s 'add | map(…) | length'` over the concatenated pages rather than with `--jq`, so the aggregate is one number. Verified against #20 (15 findings), #26 (0 findings, 2 coverage — reviewed, found nothing, the case the single query could not distinguish) and #31. Latent rather than live today: no pull request here has yet exceeded one page, so nothing was wrong until somebody's thread got long | this PR |
 
 
 Every finding has a row here and a fuller account below. Findings that arrived
@@ -2953,6 +2954,40 @@ Fixed with two queries and the reason for there being two written between them.
 Coverage comes from `/issues/N/comments`, which carries the summary Qodo posts
 whether or not it finds anything; findings come from `/pulls/N/comments`.
 Collapsing them into one number is the mistake, not an inconvenience.
+
+### 143 · the ninth shape, inside the fix for the ninth shape
+
+142 was that a query could not tell *reviewed and found nothing* from *never
+reviewed*. The fix added a second query, against the summary Qodo posts either
+way — and wrote it without `--paginate`.
+
+GitHub returns thirty issue comments a page. A Qodo summary posted after the
+thirtieth comment is on page two, and the query returns **zero**: the same false
+*never reviewed*, reintroduced by the fix for it, one commit later, in the
+paragraph explaining why that answer is dangerous.
+
+The follow-up review also named the second-order defect, which is the one worth
+keeping. Adding `--paginate` alone would not have fixed it:
+
+```
+gh api --paginate ... --jq '[...] | length'   # one count per page, printed in sequence
+```
+
+`--jq` is evaluated **per page**, so a two-page thread prints `30` then `4`
+rather than `34` — a different number that looks exactly like this one, and a
+line that would have read as a plausible answer forever. Both queries now
+concatenate first and filter once, with `jq -s 'add | map(…) | length'`.
+
+Latent rather than live: no pull request in this repository has yet exceeded one
+page, so nothing here was ever wrong. Verified against #20 (15 findings), #26
+(0 findings and 2 coverage comments — reviewed, found nothing, which is the case
+the single query could not distinguish) and #31.
+
+**This is the third time in two pull requests that a fix has carried the defect
+it was fixing** — 131→132, 133→136, and now 142→143 — and every one was caught by
+review rather than by the fix's own author. That is not a coincidence about these
+three; it is what the fourth shape says. *The fix is not automatically safer than
+the defect.*
 
 ## How this stays honest
 

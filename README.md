@@ -658,7 +658,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **142 findings**: 96 raised by automated review, 4
+As of 28 August 2026 it holds **143 findings**: 97 raised by automated review, 4
 that only a live run against the harness could have raised, and 42 the author
 found rather than review. The count is not maintained by hand -- `tests/test_docs.py`
 reads the log's own table and fails if this sentence and that table disagree,
@@ -724,11 +724,12 @@ request merged. A count with no date is a claim about now, and it was wrong abou
 now within a day, twice. Anchored, it ages instead of lying.
 
 Re-deriving it takes **two** queries, and the reason is the point. Inline
-findings are one query:
+findings are one:
 
 ```
 gh api --paginate repos/aryangorde8/bumpsmith/pulls/N/comments \
-  --jq '[.[] | select(.user.login | startswith("qodo")) | select(.in_reply_to_id == null)] | length'
+  | jq -s 'add | map(select(.user.login | startswith("qodo"))
+                   | select(.in_reply_to_id == null)) | length'
 ```
 
 But four of the thirty pull requests have **zero** of those, and zero from that
@@ -738,14 +739,20 @@ claim above asserts the first for all thirty. Coverage is therefore a separate
 query, against the summary Qodo posts whether or not it finds anything:
 
 ```
-gh api repos/aryangorde8/bumpsmith/issues/N/comments \
-  --jq '[.[] | select(.user.login | startswith("qodo"))] | length'
+gh api --paginate repos/aryangorde8/bumpsmith/issues/N/comments \
+  | jq -s 'add | map(select(.user.login | startswith("qodo"))) | length'
 ```
 
 Collapsing those two into one number is exactly the mistake `REVIEW-LOG.md`'s
 ninth shape is about — *"I could not tell" reported as "it did not happen"* —
 and it was raised on the first version of this paragraph, which offered only the
-first query.
+first query. The **second** version was raised too: it left `--paginate` off the
+coverage query, and GitHub returns thirty comments a page, so a summary on page
+two came back as zero — the same false *never reviewed*, reintroduced by the fix
+for it. Both filters are applied by `jq -s` over the concatenated pages rather
+than by `--jq`, because `gh api --paginate --jq '… | length'` evaluates the
+filter once per page and prints a count for each, which is a different number
+that looks like this one.
 
 A test that ran either of these in CI was considered and rejected: it would fail
 when the network is down and pass when a cache is stale — wrong in both
