@@ -16,7 +16,7 @@ cannot.
 
 import ast
 import os
-from collections.abc import Container, Iterator, Mapping
+from collections.abc import Container, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -344,11 +344,10 @@ def module_scope_nodes(tree: ast.Module) -> Iterator[ast.AST]:
     both wrappings are common enough that ignoring them would trade this false
     positive for a false negative.
 
-    One binding is knowingly missed: a walrus inside a module-level
-    comprehension binds in the enclosing scope, and stopping at the
-    comprehension does not see it. Missing a *shadow* is the safe direction --
-    it can only lose a rewrite, never invent one -- and the alternative treats
-    every comprehension target as a module binding, which loses real sites.
+    A walrus inside a module-level comprehension binds in the enclosing scope
+    and this walk does not see it. That is not a hole: `_walrus_targets` reads
+    the comprehension for exactly that, separately, because it wants the
+    binding without wanting the comprehension's own targets.
     """
     pending: list[ast.AST] = [tree]
     while pending:
@@ -409,6 +408,29 @@ def pydantic_names(tree: ast.Module) -> PydanticNames:
     )
 
 
+_OWN_SCOPE = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+
+def _walrus_targets(statement: ast.AST) -> Iterator[str]:
+    """Names one module-level statement binds with `:=`.
+
+    Comprehensions *are* walked into, alone among the things this stops at: a
+    walrus inside one binds in the enclosing scope, which is the whole reason it
+    is worth looking there. Everything with a namespace of its own is skipped,
+    because a walrus inside a function binds in the function.
+    """
+    if isinstance(statement, _OWN_SCOPE):
+        return
+    pending: list[ast.AST] = [statement]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, ast.NamedExpr):
+            yield from _target_names(current.target)
+        if isinstance(current, _OWN_SCOPE):
+            continue
+        pending.extend(ast.iter_child_nodes(current))
+
+
 def _unconditional_rebindings(tree: ast.Module) -> set[str]:
     """Names the module body binds by something other than a pydantic import.
 
@@ -418,6 +440,7 @@ def _unconditional_rebindings(tree: ast.Module) -> set[str]:
     """
     rebound: set[str] = set()
     for node in tree.body:
+        rebound.update(_walrus_targets(node))
         if isinstance(node, ast.ImportFrom):
             if node.level == 0 and node.module is not None and _is_pydantic_path(node.module):
                 continue
@@ -567,20 +590,32 @@ def _locally_bound(node: ast.AST) -> tuple[dict[str, str], set[str], set[str]]:
     descended into -- their bindings are theirs, not this scope's -- though the
     name a nested `def` or `class` introduces is bound here and is collected.
     """
+    parameters: set[str] = set()
+    arguments = getattr(node, "args", None)
+    if isinstance(arguments, ast.arguments):
+        for argument in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]:
+            parameters.add(argument.arg)
+        for extra in (arguments.vararg, arguments.kwarg):
+            if extra is not None:
+                parameters.add(extra.arg)
+
+    body = getattr(node, "body", [])
+    statements = list(body) if isinstance(body, list) else [body]
+    direct, modules, bound = _bindings_of(statements)
+    return direct, modules, bound | parameters
+
+
+def _bindings_of(statements: Sequence[ast.AST]) -> tuple[dict[str, str], set[str], set[str]]:
+    """What a run of statements binds, without entering a scope of their own.
+
+    Split out of :func:`_locally_bound` so a class body can be advanced one
+    statement at a time, which is how Python executes it.
+    """
     direct: dict[str, str] = {}
     modules: set[str] = set()
     bound: set[str] = set()
 
-    arguments = getattr(node, "args", None)
-    if isinstance(arguments, ast.arguments):
-        for argument in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]:
-            bound.add(argument.arg)
-        for extra in (arguments.vararg, arguments.kwarg):
-            if extra is not None:
-                bound.add(extra.arg)
-
-    body = getattr(node, "body", [])
-    pending: list[ast.AST] = list(body) if isinstance(body, list) else [body]
+    pending: list[ast.AST] = list(statements)
     while pending:
         child = pending.pop()
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -642,6 +677,15 @@ def _inside(names: PydanticNames, node: ast.AST) -> PydanticNames:
         direct=inherited,
         modules=frozenset(_without(names, bound).modules | modules),
     )
+
+
+def _advanced(names: PydanticNames, statement: ast.stmt) -> PydanticNames:
+    """The scope of a class body after one more of its statements has run."""
+    direct, modules, bound = _bindings_of([statement])
+    remaining = _without(names, bound)
+    grown = dict(remaining.direct)
+    grown.update(direct)
+    return PydanticNames(direct=grown, modules=frozenset(remaining.modules | modules))
 
 
 def _evaluated_outside(node: ast.AST) -> Iterator[ast.AST]:
@@ -710,9 +754,16 @@ def nodes_in_scope(
     if isinstance(node, ast.ClassDef):
         for part in _evaluated_outside(node):
             yield from nodes_in_scope(part, names, inherited)
-        body = _inside(names, node)
+        # Two things a class body does that a function body does not, both found
+        # by review on the first version of this walk. It does not see an
+        # enclosing *class* namespace -- so it starts from `inherited`, the same
+        # scope a nested function gets, not from `names`. And it binds top to
+        # bottom rather than treating the whole body as static locals, so an
+        # import written below a call must not reach back up to it.
+        body = inherited
         for statement in node.body:
             yield from nodes_in_scope(statement, body, inherited)
+            body = _advanced(body, statement)
         return
 
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):

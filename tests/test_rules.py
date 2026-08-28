@@ -1107,3 +1107,92 @@ def test_a_shadowed_validator_is_not_pydantics() -> None:
         def v(cls, value, field): return value
     """
     assert _sites(source, validator_parameter_sites) == []
+
+
+# --------------------------------------------------------------------------
+# Scope, the third time
+#
+# The follow-up review on #32, against the walk the previous round introduced.
+# All three are the same class of mistake as the ones they replaced -- a scope
+# modelled *nearly* the way Python models it -- and all three were confirmed by
+# running them before the fix.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("label", "source", "expected"),
+    [
+        (
+            "a module-level walrus rebinds like an assignment",
+            """
+            from pydantic import conlist
+
+            (conlist := our_factory)
+            x = conlist(str, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "a walrus inside a comprehension binds outside it",
+            """
+            from pydantic import conlist
+
+            ys = [(conlist := factory) for factory in factories]
+            x = conlist(str, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "an inner class does not see the outer class namespace",
+            """
+            class Outer:
+                from pydantic import conlist
+
+                class Inner:
+                    x = conlist(str, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "an import below a call does not reach back up to it",
+            """
+            class C:
+                x = conlist(str, min_items=1)
+                from pydantic import conlist
+            """,
+            [],
+        ),
+        (
+            "an import above a call still reaches it",
+            """
+            class C:
+                from pydantic import conlist
+                x = conlist(str, min_items=1)
+            """,
+            [3],
+        ),
+        (
+            "a shadow below a call does not reach back up either",
+            """
+            from pydantic import conlist
+
+            class C:
+                x = conlist(str, min_items=1)
+                conlist = ours
+            """,
+            [4],
+        ),
+    ],
+)
+def test_a_class_body_binds_in_order_and_inherits_like_a_function(
+    label: str, source: str, expected: list[int]
+) -> None:
+    """A class body is not a function body, in two ways this walk had wrong.
+
+    It executes top to bottom rather than treating its whole body as static
+    locals, and Python does not put an enclosing class on the lookup chain of a
+    class nested inside it. The last two cases are the ones that pin the
+    direction: an import above a call is still the same call's import, and a
+    shadow written below it was not in scope when the call ran.
+    """
+    assert _sites(source, items_keyword_sites) == expected, label
