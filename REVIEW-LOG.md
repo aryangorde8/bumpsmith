@@ -163,6 +163,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 141 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | The narrative for 140 quoted the stale sentence as *"twenty-nine … twenty-five … 90 in total"*, a combination that **never existed**: before 135 it read 28 / 24 / 90, after 135 it read 29 / 25 / 91, and the entry spliced the pull request counts from one state onto the finding count from the other. A fabricated quotation, in an audit narrative, about a sentence whose subject is quoting numbers accurately | **Fixed** — the entry quotes 29 / 25 / 91, the sentence 135 actually left behind, and says so explicitly. The check that would have caught it is the one 135 itself performed and this entry did not: read the value out of the file rather than out of the paragraph describing it. Nothing here is testable — a quotation of a sentence that no longer exists anywhere cannot be verified against anything — which is the argument for quoting from a diff rather than from memory | this PR |
 | 142 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | The `gh api` command offered as the way to re-derive the anchored counts queries **inline comments on one pull request**. Four of the thirty have zero of those, and zero from that query is the same answer for *Qodo reviewed this and found nothing* as for *Qodo never reviewed this* — while the sentence it is meant to verify asserts the first for all thirty. **The ninth shape — "I could not tell" reported as "it did not happen" — in the command supplied to check a claim.** The recount actually performed did query both, so the README documented a weaker check than the one that was run | **Fixed** — two queries, with the reason for there being two written between them: inline findings from `/pulls/N/comments`, coverage from `/issues/N/comments`, which Qodo posts whether or not it finds anything. Collapsing them into one number is the mistake, not an inconvenience | this PR |
 | 143 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Raised by the follow-up review, on the fix for 142.** The coverage query added to answer 142 was written without `--paginate`. GitHub returns thirty issue comments a page, so a Qodo summary posted after the thirtieth comment comes back as **zero** — which is the false *never reviewed* that 142 exists to prevent, reintroduced by the fix for it. **The ninth shape, inside the fix for the ninth shape.** Qodo also named the second-order defect: `gh api --paginate --jq '… | length'` evaluates the filter once per page and prints a count for each, so adding the flag alone would have replaced one wrong number with several | **Fixed** — both queries paginate, and both apply their filter with `jq -s 'add | map(…) | length'` over the concatenated pages rather than with `--jq`, so the aggregate is one number. Verified against #20 (15 findings), #26 (0 findings, 2 coverage — reviewed, found nothing, the case the single query could not distinguish) and #31. Latent rather than live today: no pull request here has yet exceeded one page, so nothing was wrong until somebody's thread got long | this PR |
+| 144 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Third round on the same paragraph.** The two queries answer for **one** pull request — the README literally substitutes `N` — while the sentence they are offered as the check for is an aggregate over thirty: *30 reviewed, 26 with at least one finding, 94 findings*. None of the three figures can be derived from either command, so the paragraph presented an incomplete procedure as a complete one, which is a claim about the check rather than about the counts | **Fixed** — replaced with the loop that actually produced the numbers, which prints the sentence: `30 pull requests, 30 reviewed by Qodo, 26 with at least one inline finding, 94 findings`. Run before committing it, output pasted above. The three earlier findings on this paragraph (142, 143, 144) are now each explained beside the detail of the command that answers them, so the reasons travel with the code rather than living only here | this PR |
 
 
 Every finding has a row here and a fuller account below. Findings that arrived
@@ -2988,6 +2989,39 @@ it was fixing** — 131→132, 133→136, and now 142→143 — and every one wa
 review rather than by the fix's own author. That is not a coincidence about these
 three; it is what the fourth shape says. *The fix is not automatically safer than
 the defect.*
+
+### 144 · and the procedure answered for one of thirty
+
+Third round on the same paragraph, and the finding is not in the commands — both
+are now correct — but in what they are offered as.
+
+The sentence they check is an aggregate: *thirty pull requests, thirty reviewed
+by Qodo, twenty-six with at least one inline finding, ninety-four findings.* Each
+command answers for **one** pull request; the README substitutes `N`. Not one of
+the four figures is derivable from either of them. So the paragraph presented an
+incomplete procedure as a complete one — a claim about the *check*, which is the
+harder kind to notice, because every part of it was true.
+
+Replaced with the loop that actually produced the numbers in the first place. It
+was run before being committed, and it prints the sentence:
+
+```
+30 pull requests, 30 reviewed by Qodo, 26 with at least one inline finding, 94 findings
+```
+
+**Three rounds on one paragraph, and every round was the previous round's fix.**
+
+| finding | what was offered | what was wrong with it |
+|---|---|---|
+| **142** | one query, inline findings | zero could not be told from never reviewed |
+| **143** | a second query, for coverage | no `--paginate`; and `--jq` would have counted per page |
+| **144** | both queries, correct | they answer for one pull request out of thirty |
+
+Each fix was right about the thing it fixed and silent about the next layer out,
+which is the argument for the follow-up review being a separate review rather
+than a re-read. The reasons now live beside the detail of the command that
+answers each one, so somebody editing the command finds out why it is shaped that
+way before they simplify it.
 
 ## How this stays honest
 

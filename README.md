@@ -658,7 +658,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **143 findings**: 97 raised by automated review, 4
+As of 28 August 2026 it holds **144 findings**: 98 raised by automated review, 4
 that only a live run against the harness could have raised, and 42 the author
 found rather than review. The count is not maintained by hand -- `tests/test_docs.py`
 reads the log's own table and fails if this sentence and that table disagree,
@@ -723,40 +723,46 @@ and the first version of this sentence went stale the moment the next pull
 request merged. A count with no date is a claim about now, and it was wrong about
 now within a day, twice. Anchored, it ages instead of lying.
 
-Re-deriving it takes **two** queries, and the reason is the point. Inline
-findings are one:
+Re-deriving it is one loop over the merged pull requests, and it prints the whole
+sentence:
 
 ```
-gh api --paginate repos/aryangorde8/bumpsmith/pulls/N/comments \
-  | jq -s 'add | map(select(.user.login | startswith("qodo"))
-                   | select(.in_reply_to_id == null)) | length'
+for n in $(gh pr list --state merged --limit 100 --json number --jq '.[].number'); do
+  f=$(gh api --paginate repos/aryangorde8/bumpsmith/pulls/$n/comments \
+      | jq -s 'add | map(select(.user.login | startswith("qodo"))
+                       | select(.in_reply_to_id == null)) | length')
+  c=$(gh api --paginate repos/aryangorde8/bumpsmith/issues/$n/comments \
+      | jq -s 'add | map(select(.user.login | startswith("qodo"))) | length')
+  echo "$n $f $c"
+done | awk '{ prs++; findings += $2; if ($2 > 0) withf++; if ($2 + $3 > 0) reviewed++ }
+            END { printf "%d pull requests, %d reviewed by Qodo, %d with at least one inline finding, %d findings\n",
+                         prs, reviewed, withf, findings }'
 ```
 
-But four of the thirty pull requests have **zero** of those, and zero from that
-query is ambiguous: it is the same answer for *Qodo reviewed this and found
-nothing* and for *Qodo never reviewed this*. Those are opposite facts, and the
-claim above asserts the first for all thirty. Coverage is therefore a separate
-query, against the summary Qodo posts whether or not it finds anything:
+Three details in there were each raised as a finding on the paragraph that
+preceded them, and each is the same mistake in a different coat.
 
-```
-gh api --paginate repos/aryangorde8/bumpsmith/issues/N/comments \
-  | jq -s 'add | map(select(.user.login | startswith("qodo"))) | length'
-```
+**It asks twice per pull request.** Four of the thirty have zero inline findings,
+and zero from `/pulls/N/comments` is the same answer for *Qodo reviewed this and
+found nothing* as for *Qodo never reviewed this* — opposite facts, and the
+sentence above asserts the first for all thirty. Coverage comes from
+`/issues/N/comments`, where Qodo posts a summary either way. Collapsing the two
+is `REVIEW-LOG.md`'s ninth shape, *"I could not tell" reported as "it did not
+happen"*.
 
-Collapsing those two into one number is exactly the mistake `REVIEW-LOG.md`'s
-ninth shape is about — *"I could not tell" reported as "it did not happen"* —
-and it was raised on the first version of this paragraph, which offered only the
-first query. The **second** version was raised too: it left `--paginate` off the
-coverage query, and GitHub returns thirty comments a page, so a summary on page
-two came back as zero — the same false *never reviewed*, reintroduced by the fix
-for it. Both filters are applied by `jq -s` over the concatenated pages rather
-than by `--jq`, because `gh api --paginate --jq '… | length'` evaluates the
-filter once per page and prints a count for each, which is a different number
-that looks like this one.
+**Both queries paginate, and both filter with `jq -s` rather than `--jq`.**
+GitHub returns thirty comments a page, so a summary on page two came back as zero
+— the same false *never reviewed*, reintroduced by the fix for it. And
+`--paginate --jq '… | length'` evaluates the filter once per page and prints a
+count for each, so a two-page thread prints `30` then `4` rather than `34`: a
+different number that looks exactly like the right one.
 
-A test that ran either of these in CI was considered and rejected: it would fail
-when the network is down and pass when a cache is stale — wrong in both
-directions, and reassuringly wrong in the second.
+**It loops.** The claim is an aggregate over thirty pull requests, and a command
+that answers for one of them is not a procedure for checking it.
+
+A test that ran this in CI was considered and rejected: it would fail when the
+network is down and pass when a cache is stale — wrong in both directions, and
+reassuringly wrong in the second.
 
 **A second representative pull request, for the loop rather than the depth.**
 [#30 — *The README understated the project*](https://github.com/aryangorde8/bumpsmith/pull/30)
