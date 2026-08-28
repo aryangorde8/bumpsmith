@@ -93,13 +93,28 @@ The script exits non-zero on each of those failing separately, and says which,
 because "leg 1 never wrote its marker" and "the session did not hold" are
 different facts and only the second is about the harness.
 
-`tests/test_session_reconnect.py` runs the whole script against three stand-in
+The read has three answers, not two. It prints `PRESENT:` followed by the
+marker's bytes, or `ABSENT:` and nothing at all, and a marker that exists but
+cannot be read — a directory, a bad mode, a dangling symlink — exits non-zero
+under `set -e` rather than answering. Absence is therefore a *position* in the
+output instead of a reserved string, so no marker contents can imitate it, and a
+read that failed is never spent as the control's evidence.
+
+Both of those were real defects, found by Qodo on
+[#39](https://github.com/aryangorde8/bumpsmith/pull/39). With absence carried as
+a value, `--nonce ABSENT:` made a shared sandbox print that the session held.
+With the read swallowing its own errors, an unreadable marker reported as *"a
+fresh session could not see it"* — the control passing because something was
+broken rather than because nothing was there.
+
+`tests/test_session_reconnect.py` runs the whole script against stand-in
 harnesses on a real socket — sandboxes kept per session, one sandbox shared by
-all of them, and a sandbox that forgets after the first leg — and requires it to
-pass against the first and **fail** against the other two. Removing the leg-3
-check makes the script print *"the session held"* against the shared harness,
-which is a false sentence; one test catches it. A control nobody has watched fail
-is not known to be a control.
+all of them, one that forgets after the first leg, one that keeps nothing at all,
+and reads that fail or answer in no shape the script knows — and requires it to
+pass against the honest one and **fail** against every other, naming the leg that
+failed. Removing the leg-3 check makes the script print *"the session held"*
+against the shared harness, which is a false sentence; one test catches it. A
+control nobody has watched fail is not known to be a control.
 
 ### `deny.py` — nothing irreversible happens without a human
 

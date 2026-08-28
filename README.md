@@ -615,10 +615,15 @@ the document this project's review log exists to catch.
   marker into its sandbox, **throws the client away**, comes back with nothing but
   the session id, and reads the marker back — with a brand-new session as the
   control, which must *not* see it. `tests/test_session_reconnect.py` runs it
-  against three stand-in harnesses and requires it to fail on two of them, so the
-  control is known to be a control. **What is still missing is a recorded run
-  against a live harness**, which is why this is a bullet here rather than a row
-  in the table above.
+  against stand-in harnesses that share one sandbox, forget one, keep nothing at
+  all, and fail the read outright, and requires it to fail against every one of
+  them, naming the leg — so the control is known to be a control. Two ways that
+  control could have passed while proving nothing — a marker whose contents
+  impersonated absence, and a read that reported its own errors as absence —
+  were Qodo findings on [#39](https://github.com/aryangorde8/bumpsmith/pull/39),
+  both reproduced before they were accepted. **What is still missing is a
+  recorded run against a live harness**, which is why this is a bullet here
+  rather than a row in the table above.
 
 ## Verifying it yourself
 
@@ -760,7 +765,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **177 findings**: 129 raised by automated review, 4
+As of 28 August 2026 it holds **180 findings**: 132 raised by automated review, 4
 that only a live run against the harness could have raised, and 44 the author
 found rather than review. **The total** is not maintained by hand —
 `tests/test_docs.py` reads the log's own table and fails if this sentence and
@@ -902,14 +907,17 @@ reviewed every one; thirty-two raised at least one inline finding, **129 in
 total**. Every finding is in [`REVIEW-LOG.md`](REVIEW-LOG.md) with what happened
 to it and why.
 
-**Two numbers in this README are now both 129, and they do not check each
-other.** One is threads on GitHub, counted by the loop below; the other is rows
-in a file, attributed to automated review by hand in a split this README already
-says is not verified. Neither is derived from the other, so their agreeing is a
-coincidence and not a reconciliation — and reading it as one would be the log's
-recurring **shape 3**, an answer good enough for one question reused to settle a
-stronger one. Said here because the next reader to notice the match will
-otherwise have to work out for themselves which of the two it was.
+**Two numbers in this README were both 129, and they never checked each other.**
+One is threads on GitHub, anchored to #37's merge and counted by the loop below;
+the other is rows in a file, attributed to automated review by hand in a split
+this README already says is not verified. They have since come apart — the three
+findings Qodo raised on #39 took the second to 132, while the first, being
+anchored, stayed where it was. That is what a coincidence does and a
+reconciliation does not, and it is why reading the match as a cross-check would
+have been the log's recurring **shape 3**: an answer good enough for one question
+reused to settle a stronger one. The paragraph is kept, rather than deleted with
+the coincidence, because a reader who saw those two numbers agree is owed the
+reason they no longer do.
 
 The trail sentence is anchored to a named merge on purpose. The log's total
 cannot go stale — a test reads [`REVIEW-LOG.md`](REVIEW-LOG.md)'s own table and
