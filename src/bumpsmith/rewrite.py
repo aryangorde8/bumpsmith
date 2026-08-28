@@ -41,6 +41,7 @@ from bumpsmith.rules import (
     pydantic_name,
     pydantic_names,
     regex_keyword_sites,
+    root_validator_sites,
     validator_parameter_sites,
 )
 from bumpsmith.sources import read_source
@@ -825,6 +826,169 @@ def _plan_items_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, lis
     return _plan_keyword_rename(path, lines, items_keyword_sites, LENGTH_KEYWORDS)
 
 
+_SKIP = "skip_on_failure"
+_SKIP_ON_FAILURE = f"{_SKIP}=True"
+
+_EMPTY_CALL = re.compile(r"(?P<name>[\w.]+)\(\s*\)")
+_PLAIN_NAME = re.compile(r"[\w.]+")
+
+
+def _span(text: str, node: ast.expr) -> str | None:
+    """The source of one expression, when it lies on a single line.
+
+    Read out of the file rather than reconstructed from the tree. `ast.unparse`
+    would give a normalised spelling, and the whole contract of
+    :class:`_Replacement` is that `old` is what is actually there.
+    """
+    if node.end_lineno is None or node.end_col_offset is None or node.lineno != node.end_lineno:
+        return None
+    lines = [line.encode("utf-8") for line in _lines(text)]
+    if not 1 <= node.lineno <= len(lines):
+        return None
+    try:
+        return lines[node.lineno - 1][node.col_offset : node.end_col_offset].decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _after_open_paren(text: str, node: ast.Call) -> tuple[int, int] | None:
+    """The position just inside a call's `(`, or ``None`` if it cannot be found.
+
+    Walks forward from the end of the callable expression and refuses anything
+    but whitespace on the way. A comment can hold a `(` of its own, and
+    inserting an argument into one writes a decorator that is a comment.
+    """
+    lines = [line.encode("utf-8") for line in _lines(text)]
+    line, column = node.func.end_lineno, node.func.end_col_offset
+    if line is None or column is None:
+        return None
+    while 1 <= line <= len(lines):
+        row = lines[line - 1]
+        while column < len(row):
+            character = row[column : column + 1]
+            if character == b"(":
+                return line, column + 1
+            if not character.isspace():
+                return None
+            column += 1
+        line, column = line + 1, 0
+    return None
+
+
+def _skip_on_failure(text: str, node: ast.expr) -> _Replacement | None:
+    """How to give one `@root_validator` the argument v2 demands, or ``None``.
+
+    Four shapes. `@root_validator` grows a call, `@root_validator()` gains an
+    argument between its parentheses, `@root_validator(skip_on_failure=False)`
+    has the argument already and needs its *value* changed, and
+    `@root_validator(allow_reuse=True)` gains one after the last it already has.
+
+    The third was missing and review found it: the decorator was read as
+    rewritable and then handed to the fourth branch, which appended a second
+    `skip_on_failure=` beside the first. `ast.parse` accepts a repeated keyword
+    and `compile` does not, so nothing in this module would have noticed -- only
+    the suite re-run, by failing to import the file this tool had just edited.
+    """
+    if not isinstance(node, ast.Call):
+        span = _span(text, node)
+        if span is None or _PLAIN_NAME.fullmatch(span) is None:
+            return None
+        return _Replacement(node.lineno, node.col_offset, span, f"{span}({_SKIP_ON_FAILURE})")
+
+    if not node.args and not node.keywords:
+        span = _span(text, node)
+        match = _EMPTY_CALL.fullmatch(span) if span is not None else None
+        if span is not None and match is not None:
+            return _Replacement(
+                node.lineno, node.col_offset, span, f"{match['name']}({_SKIP_ON_FAILURE})"
+            )
+        # `@root_validator(\n)` is the same empty call with a newline in it.
+        # Rewriting it as one span would reflow the decorator, so the argument
+        # goes in just past the `(` and everything else keeps its own shape.
+        inside = _after_open_paren(text, node)
+        if inside is None:
+            return None
+        return _Replacement(inside[0], inside[1], "", _SKIP_ON_FAILURE)
+
+    for word in node.keywords:
+        if word.arg != _SKIP or not isinstance(word.value, ast.Constant):
+            continue
+        if word.value.value is not False:
+            continue
+        span = _span(text, word.value)
+        if span is None:
+            return None
+        return _Replacement(word.value.lineno, word.value.col_offset, span, "True")
+
+    # After the last argument, wherever that is. Written as an insertion so the
+    # existing arguments keep their own spelling -- reformatting somebody's
+    # decorator is not this rule's business.
+    ends = [
+        (item.end_lineno, item.end_col_offset)
+        for item in (*node.args, *(word.value for word in node.keywords))
+        if item.end_lineno is not None and item.end_col_offset is not None
+    ]
+    if not ends:
+        return None
+    line, col = max(ends)
+    return _Replacement(line, col, "", f", {_SKIP_ON_FAILURE}")
+
+
+def _plan_root_validator_file(
+    path: Path, lines: Sequence[int]
+) -> tuple[Edit | None, list[Skipped]]:
+    """Add `skip_on_failure=True` to the root validators v2 refuses, in one file."""
+    try:
+        source = read_source(path)
+        tree = ast.parse(source.text)
+    except _UNREADABLE as exc:
+        return None, [Skipped(path, line, f"could not be read: {exc!r}") for line in lines]
+
+    by_line: dict[int, list[tuple[ast.expr, bool]]] = {}
+    for line, node, rewritable in root_validator_sites(tree):
+        by_line.setdefault(line, []).append((node, rewritable))
+
+    replacements: dict[tuple[int, int], _Replacement] = {}
+    skipped: list[Skipped] = []
+    for line in sorted(set(lines)):
+        wanted = lines.count(line)
+        found = by_line.get(line, [])
+        if len(found) > wanted:
+            skipped.extend(Skipped(path, line, _MOVED) for _ in range(wanted))
+            continue
+        for node, rewritable in found[:wanted]:
+            if not rewritable:
+                skipped.append(
+                    Skipped(
+                        path,
+                        line,
+                        "`pre` or `skip_on_failure` is passed as something this cannot read, "
+                        "so whether v2 already accepts this decorator is not decidable here",
+                    )
+                )
+                continue
+            made = _skip_on_failure(source.text, node)
+            if made is None:
+                skipped.append(
+                    Skipped(path, line, "the decorator is not written in a shape this can extend")
+                )
+                continue
+            replacements[(made.line, made.col)] = made
+        for _ in range(wanted - len(found)):
+            skipped.append(Skipped(path, line, _GONE))
+
+    if not replacements:
+        return None, skipped
+
+    after = _replace(source.text, replacements.values())
+    if after is None:
+        reason = "the source moved under the positions the parser reported"
+        return None, [Skipped(path, line, reason) for line in lines]
+
+    edit = Edit(path=path, before=source.text, after=after, encoding=source.encoding)
+    return (edit if edit.changes_anything else None), skipped
+
+
 _USES_LISTED = 5
 """How many use sites the refusal names before it summarises the rest.
 
@@ -838,6 +1002,7 @@ _PLANNERS = {
     BreakClass.ROOT_MODEL: _plan_root_model_file,
     BreakClass.REGEX_KEYWORD: _plan_regex_file,
     BreakClass.ITEMS_KEYWORD: _plan_items_file,
+    BreakClass.ROOT_VALIDATOR_SKIP: _plan_root_validator_file,
 }
 """The break classes that can be carried out, not the ones that can be named.
 

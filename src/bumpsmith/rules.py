@@ -46,6 +46,7 @@ _SKIP_DIRECTORIES = frozenset(
 # The v1 decorators that took `field` and `config`. V2 replaced both parameters
 # with a single `info` argument carrying ValidationInfo.
 _V1_VALIDATORS = frozenset({"validator", "root_validator"})
+_ROOT_VALIDATOR = "root_validator"
 _V1_INFO_PARAMETERS = frozenset({"field", "config"})
 
 _ROOT_FIELD = "__root__"
@@ -227,6 +228,21 @@ def write_rule(failure: Failure) -> Rule | None:
                 "sees the call. `Field` is not part of this: it accepts either spelling in "
                 "v2 and warns, so the sites this rule reports are the ones that actually "
                 "stop the suite."
+            ),
+        )
+
+    if failure.break_class is BreakClass.ROOT_VALIDATOR_SKIP:
+        return Rule(
+            break_class=failure.break_class,
+            kind=RuleKind.SOURCE,
+            summary="Give `@root_validator` the `skip_on_failure=True` v2 requires",
+            rationale=(
+                "v1 ran a root validator whether or not field validation had failed. v2 "
+                "removed that behaviour rather than renaming it, and refuses to construct "
+                "the validator without being told so explicitly. The rewrite adopts the "
+                "only semantics v2 offers, which is a change and not a rename: the "
+                "validator no longer runs when a field above it failed. `pre=True` is "
+                "untouched -- it was legal in v1 and is legal in v2."
             ),
         )
 
@@ -529,6 +545,54 @@ def _validator_sites(tree: ast.Module) -> Iterator[int]:
         yield line
 
 
+def _literal_keyword(node: ast.Call, name: str) -> bool | None:
+    """The value of a boolean keyword written as a literal, or ``None``.
+
+    ``None`` covers both "not passed" and "passed as something this cannot
+    read" -- `pre=SOME_FLAG`. The caller has to tell those apart, because one
+    means the default applies and the other means nothing here can say.
+    """
+    for word in node.keywords:
+        if word.arg == name:
+            if isinstance(word.value, ast.Constant) and isinstance(word.value.value, bool):
+                return word.value.value
+            return None
+    return None
+
+
+def root_validator_sites(tree: ast.Module) -> Iterator[tuple[int, ast.expr, bool]]:
+    """Yield every ``@root_validator`` V2 will refuse, and whether it can be read.
+
+    The third element is False when the decorator passes `pre` or
+    `skip_on_failure` as something other than a literal. That is a site -- the
+    error names this decorator -- but not one to rewrite, because whether it is
+    already correct depends on a value only the running program knows.
+
+    `pre=True` is not a site at all. It was legal in V1 and is legal in V2, and
+    it is the majority form in the wild.
+    """
+    for node, names in functions_in_scope(tree):
+        for decorator in node.decorator_list:
+            if pydantic_name(decorator, names) != _ROOT_VALIDATOR:
+                continue
+            if not isinstance(decorator, ast.Call):
+                # `@root_validator` bare: `pre` defaults to False and
+                # `skip_on_failure` is absent, which is exactly the refused form.
+                yield decorator.lineno, decorator, True
+                continue
+            passes_pre = any(word.arg == "pre" for word in decorator.keywords)
+            passes_skip = any(word.arg == "skip_on_failure" for word in decorator.keywords)
+            pre = _literal_keyword(decorator, "pre")
+            skip = _literal_keyword(decorator, "skip_on_failure")
+            if pre is True or skip is True:
+                continue
+            # `**options` may carry either argument. Nothing here can look
+            # inside it, and "I cannot see it" is not "it is not there".
+            splatted = any(word.arg is None for word in decorator.keywords)
+            unreadable = splatted or (passes_pre and pre is None) or (passes_skip and skip is None)
+            yield decorator.lineno, decorator, not unreadable
+
+
 def _root_model_sites(tree: ast.Module) -> Iterator[int]:
     """Yield the line of every ``__root__`` field declared in a class body.
 
@@ -610,10 +674,18 @@ def _bindings_of(statements: Sequence[ast.AST]) -> tuple[dict[str, str], set[str
 
     Split out of :func:`_locally_bound` so a class body can be advanced one
     statement at a time, which is how Python executes it.
+
+    A name declared `global` or `nonlocal` is **not** bound here. The assignment
+    beside such a declaration writes the outer binding rather than making a new
+    local one, so reading it as a shadow hides a decorator that still resolves to
+    the import at the top of the file. Review found exactly that, on a real
+    `@root_validator` the migration would then have left unmigrated -- the safe
+    direction of getting scope wrong, and still wrong.
     """
     direct: dict[str, str] = {}
     modules: set[str] = set()
     bound: set[str] = set()
+    declared: set[str] = set()
 
     pending: list[ast.AST] = list(statements)
     while pending:
@@ -645,8 +717,10 @@ def _bindings_of(statements: Sequence[ast.AST]) -> tuple[dict[str, str], set[str
             bound.update(_target_names(child.optional_vars))
         elif isinstance(child, ast.ExceptHandler) and child.name is not None:
             bound.add(child.name)
+        elif isinstance(child, (ast.Global, ast.Nonlocal)):
+            declared.update(child.names)
         pending.extend(ast.iter_child_nodes(child))
-    return direct, modules, bound
+    return direct, modules, bound - declared
 
 
 def _target_names(target: ast.expr) -> Iterator[str]:
@@ -997,6 +1071,8 @@ def _sites(rule: Rule, tree: ast.Module) -> Iterator[tuple[int, Role]]:
         return ((line, Role.SITE) for line, _ in regex_keyword_sites(tree))
     if rule.break_class is BreakClass.ITEMS_KEYWORD:
         return ((line, Role.SITE) for line, _ in items_keyword_sites(tree))
+    if rule.break_class is BreakClass.ROOT_VALIDATOR_SKIP:
+        return ((line, Role.SITE) for line, _, _ in root_validator_sites(tree))
     if rule.break_class is BreakClass.REMOVED_INTERNAL and rule.module and rule.name:
         return _removed_symbol_sites(tree, rule.module, rule.name)
     return iter(())

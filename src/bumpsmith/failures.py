@@ -212,6 +212,26 @@ class BreakClass(Enum):
     other direction: there ``Field`` raises and here it does not.
     """
 
+    ROOT_VALIDATOR_SKIP = 8
+    """``@root_validator`` with V1's default, which V2 refuses to construct.
+
+    V1 ran a root validator whether or not field validation had failed. V2
+    removed that behaviour rather than renaming it, and the shim will not guess:
+    ``pre=False`` without ``skip_on_failure=True`` is a hard error naming the
+    argument it wants.
+
+    So the migration adopts the only semantics V2 offers, and that is a real
+    change rather than a rename -- the validator no longer runs when a field
+    above it failed. It is written anyway, for the same reason
+    :attr:`VALIDATOR_FIELD_CONFIG` is: the alternative is code that does not
+    import at all, and the suite is what decides whether the new behaviour is
+    acceptable. A migration this loop keeps is one that ended green.
+
+    ``pre=True`` is untouched. It was legal in V1 and is legal in V2, and six of
+    the seven ``@root_validator`` uses in the repository this was measured
+    against are that form.
+    """
+
     REMOVED_INTERNAL = 5
     """An import of a pydantic internal that V2 deleted."""
 
@@ -410,6 +430,12 @@ def _classify(
     # that actually stopped collection exactly where it was.
     if pydantic_code == "removed-kwargs" and "regex" in message:
         return BreakClass.REGEX_KEYWORD
+
+    # Keyed on the slug rather than the sentence. This is the one break in the
+    # set whose message names the argument that fixes it, and pydantic could
+    # reword that sentence in a patch release without changing the slug.
+    if pydantic_code == "root-validator-pre-skip":
+        return BreakClass.ROOT_VALIDATOR_SKIP
 
     if error_type.endswith("PydanticUserError") and "field" in message and "config" in message:
         return BreakClass.VALIDATOR_FIELD_CONFIG
