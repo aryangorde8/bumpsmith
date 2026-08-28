@@ -152,6 +152,9 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 131 | [#29](https://github.com/aryangorde8/bumpsmith/pull/29) | `_no_sandbox()` — the only text a user of this package ever sees about the sandbox — ended *"carrying the edits across is the missing piece; until it is written and reviewed, this refuses"*. It had been written, eight pull requests earlier, by moving the **agent** instead of the edits: `bumpsmith.remote` installs the package into the sandbox and runs the whole loop there. `remote.py`'s own docstring cites this refusal approvingly, so the two modules agreed about the design and only the sentence a reader is shown still described the hole — *self-found while verifying a deferral before answering it in a review thread* | **Fixed** — the refusal and every line of its reasoning stay, because the refusal is still right. What changes is the ending: the mechanism exists, it is named (`bumpsmith.remote`, `proofs/sandbox_fanout.py`), and the missing piece is narrowed to the command-line route it actually is. **Prose stating a property is not the property** (60, 69, 117, 122) — seventh instance, and the first where the prose described a gap the code had already closed rather than a property the code lacked | this PR |
 
 | 132 | [#29](https://github.com/aryangorde8/bumpsmith/pull/29) | The README dated its finding snapshot *"As of 28 August 2026"*, and every timestamp this repository carries said otherwise: the commit (`2026-08-27T19:54:20Z`), the pull request, and the review comment that caught it (`2026-08-27T19:56:32Z`). The date was read off a clock at UTC+05:30; git and GitHub keep time in UTC. The documentation guards check the total and the arithmetic and had nothing to say about the date, which Qodo noted in the same breath | **Fixed** — the snapshot reads 27 August, and `test_the_readme_finding_snapshot_is_not_future_dated` now fails on any snapshot dated after today in UTC. It can pass and never spuriously fail later, because a date in the past stays in the past. 🔴 **Raised on the pull request whose entire subject is prose drifting from what the code does** — the correction to one stale sentence shipped a fresh one, dated a day into the future | this PR |
+| 133 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | The README's *Where the suite runs* section ended with the same sentence finding 131 removed from `_no_sandbox()` — *"carrying the edits across is the missing piece; until it is written and reviewed, a flag that quietly did it would be worse than no flag at all"*. 131 corrected the command-line text and left the README's copy of it standing, in the section a reader arriving for the harness reads first. `proofs/README.md` had described `remote.py` correctly since #23, so **three documents disagreed and only the least-read one was right** — *self-found while auditing the README against the Best Use of TrueForge criteria* | **Fixed** — the refusal paragraph stays; the ending is replaced with what actually happened, naming `remote.py` and `proofs/sandbox_fanout.py` and narrowing the gap to the command-line route. **Prose stating a property is not the property** (60, 69, 117, 122, 131) — eighth instance, and the second in two pull requests where the fix for a stale sentence did not reach every copy of it. Findings 64/65's shape — *a stale number corrected in one file and left standing in another a `grep` away* — applied to a claim rather than a number | this PR |
+| 134 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | The module table under *How it is put together* opens "Everything is in `src/bumpsmith/`" and lists **twelve of the sixteen** modules the package ships. The four with no row — `fanout.py`, `remote.py`, `publish.py`, `report.py` — are the parallel fan-out, the sandbox-resident loop, the only irreversible effect the tool has, and the HTML report: four of the project's strongest claims, absent from the map a reader navigates by. Counted, not noticed | **Fixed** — four rows added, and `test_the_readme_maps_every_module_the_package_ships` now derives the expected set from `src/bumpsmith/*.py` so the table cannot fall behind the package again. A second test catches the other direction, a row naming a file that no longer exists. Scoped to the table's first column for the reason `_stop_table` already documents: nearly every module is named elsewhere in the README, so a file-wide search would have reported a complete map | this PR |
+| 135 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | *"Twenty-eight pull requests; Qodo reviewed every one; twenty-four raised at least one finding, **90 in total**"* — in the `## Qodo Code Review Evidence` section, which the rules require by name. Live counts at the time of reading: **29** pull requests, **25** with at least one inline finding, **91** findings. #29 merged and none of the three numbers followed. Unlike the finding total two paragraphs above it, this sentence has no test behind it, because the numbers live on GitHub rather than in the repository | **Fixed** — all three corrected against `gh api`, recounted rather than incremented. Left deliberately unguarded, and the reason is worth stating: a test that queried GitHub would fail on a network outage and pass on a stale cache, which is a guard that is wrong in the reassuring direction. The check belongs in the pre-submission pass, and it is written down there instead. **Findings 64/65 for the third time**, now in the one section a rule names | this PR |
 
 
 Every finding has a row here and a fuller account below. Findings that arrived
@@ -2681,6 +2684,93 @@ executed and therefore is not checked unless something is written to check it.
 Two guards now do, in the one file where the numbers are the argument.
 
 **1 of 1 guard caught** when broken, plus a no-op control.
+
+## 133–135 · The README understated the project
+
+Read cold, against the two tracks it is being judged on, rather than for
+correctness. That is a different pass and it found a different class of thing:
+not a claim that is false about the code, but a document that is **behind** it.
+
+### 133 · the same stale sentence, in the room with more visitors
+
+Finding 131 removed a sentence from `_no_sandbox()` that said carrying the edits
+into the sandbox was the missing piece. It had stopped being true eight pull
+requests earlier, when `bumpsmith.remote` started moving the *agent* instead of
+the edits. What #29 did not do was look for other copies of it. There was one, in
+`README.md` under *Where the suite runs* — which is the section a reader arriving
+for the harness reads first, and the one a hackathon judge scoring *use of
+sponsor tools* reads at all.
+
+So three documents described the same design and the ranking was backwards:
+
+| document | what it said | right? |
+|---|---|---|
+| `proofs/README.md` | `remote.py` installs the package into the sandbox and runs the whole loop there | ✅ since #23 |
+| `src/bumpsmith/__main__.py` | the same, after #29 | ✅ since yesterday |
+| `README.md` | carrying the edits across is the missing piece | ❌ since #23 |
+
+**The least-read document was the accurate one.** That is the part worth keeping.
+131 was recorded as *"prose stating a property is not the property"*, and the fix
+for it was itself prose — so it inherited the defect it was fixing, and inherited
+it in the direction that costs most. Findings 64 and 65 named this exact
+mechanism for numbers: a stale value corrected in one file and left standing in
+another a `grep` away. It applies to claims, and nothing about a claim makes it
+easier to grep for.
+
+### 134 · a map missing a quarter of its territory
+
+The module table says "Everything is in `src/bumpsmith/`" and then lists twelve
+of sixteen files. This was found by counting rather than by reading, which is the
+only way it *could* be found: every row present is correct, the prose around it is
+correct, and nothing about the table looks short. A reader has no way to know what
+is not on a list.
+
+The four absent were `fanout.py`, `remote.py`, `publish.py` and `report.py` — the
+parallel fan-out, the loop that lives in the sandbox, the one irreversible effect
+the tool has, and the report a person reads. Four of the project's five strongest
+claims, and the table that maps the package to a stranger did not mention them.
+
+The fix is a test, not four rows. `test_the_readme_maps_every_module_the_package_ships`
+derives the expected set from `src/bumpsmith/*.py`, so a module added tomorrow
+fails the suite until the table follows. It is scoped to the table's **first
+column** for the reason `_stop_table` already gives: `remote` and `report` and
+`publish` all appear in the README's prose, so a search of the whole file would
+have found every one of them and reported a complete map.
+
+Verified by breaking, one at a time, with a no-op control:
+
+| break | result |
+|---|---|
+| delete the `fanout.py` row | ❌ `modules in src/bumpsmith/ with no row: fanout.py` |
+| delete the `remote.py`, `publish.py`, `report.py` rows | ❌ all three named |
+| rename a row's module to `fanout2.py` | ❌ both directions fire — one missing, one invented |
+| reword the table header | ❌ the anchor assertion, naming itself as the thing to update |
+| touch the README without changing the table | ✅ green |
+
+### 135 · the numbers in the section the rules name
+
+*"Twenty-eight pull requests; Qodo reviewed every one; twenty-four raised at
+least one finding, 90 in total."* Live: twenty-nine, twenty-five, ninety-one.
+#29 merged, Qodo reviewed it, raised finding 132, and none of the three numbers
+in `## Qodo Code Review Evidence` moved.
+
+Two paragraphs above it sits a finding total that **cannot** go stale, because
+`test_the_readme_finding_count_matches_the_log_it_describes` reads the log's own
+table and fails when the sentence disagrees with it. The difference is where the
+truth lives. The finding total is checkable from the repository; the pull request
+counts are only checkable from GitHub.
+
+That is the reason this one is left unguarded, and it is a decision rather than
+an omission. A test that queried the API would fail when the network is down and
+pass when a cache is stale — wrong in both directions, and in the second one it
+is wrong *reassuringly*, which finding 9's shape says is the expensive kind. So
+the recount is a step in the pre-submission pass with the command written beside
+it, where a human is already looking, rather than a green tick that means nothing.
+
+**This is findings 64/65 for the third time.** Twice is a coincidence; three
+times is the shape asserting itself. Every instance has been the same: a number
+that is derived somewhere, written down somewhere else, and true on the day it
+was typed.
 
 ## How this stays honest
 

@@ -37,6 +37,8 @@ README = Path(__file__).resolve().parent.parent / "README.md"
 
 _STOP_TABLE_HEADER = "| `Stop` | meaning |"
 _OUTCOME_ANCHOR = "`Outcome` says what is on disk"
+_MODULE_TABLE_HEADER = "| module | what it guarantees |"
+PACKAGE = Path(__file__).resolve().parent.parent / "src" / "bumpsmith"
 
 
 def _readme() -> str:
@@ -74,6 +76,44 @@ def _outcome_paragraph(text: str) -> str:
         f"no paragraph in the README contains {_OUTCOME_ANCHOR!r}. If the list moved "
         f"or was reworded, update this anchor."
     )
+
+
+def _module_table(text: str) -> list[str]:
+    """The rows of the README's module table, and nothing else.
+
+    Same scoping as :func:`_stop_table`, for the same reason: nearly every module
+    is named somewhere else in the README, so a file-wide search would report a
+    complete map while the table a reader actually navigates by was missing rows.
+    """
+    lines = text.splitlines()
+    starts = [i for i, line in enumerate(lines) if line.startswith(_MODULE_TABLE_HEADER)]
+    assert len(starts) == 1, (
+        f"expected exactly one module table header starting {_MODULE_TABLE_HEADER!r}, "
+        f"found {len(starts)}. If the table moved or was reworded, update this anchor."
+    )
+    rows: list[str] = []
+    for line in lines[starts[0] + 1 :]:
+        if not line.startswith("|"):
+            break
+        rows.append(line)
+    assert rows, "the module table header is not followed by any rows"
+    return rows[1:]  # drop the |---|---| separator
+
+
+def _shipped_modules() -> set[str]:
+    """Every module of the package a reader could open, dunders excluded.
+
+    ``__init__`` and ``__main__`` are left out deliberately: the table's column
+    is "what it guarantees", and neither of those is a guarantee a caller reasons
+    about. Every other file in the package is something the table claims to map.
+    """
+    assert PACKAGE.is_dir(), f"expected the package beside the tests, at {PACKAGE}"
+    return {path.name for path in PACKAGE.glob("*.py") if not path.name.startswith("__")}
+
+
+def _tabled_modules(text: str) -> set[str]:
+    """The module named in the first column of each row of the README's table."""
+    return {row.split("|")[1].strip().strip("*").split("`")[1] for row in _module_table(text)}
 
 
 def test_the_readme_does_not_restate_the_number_of_stop_reasons() -> None:
@@ -128,6 +168,32 @@ def test_readme_lists_every_outcome() -> None:
     missing = [outcome.name for outcome in Outcome if f"`{outcome.name}`" not in paragraph]
     assert not missing, (
         f"`Outcome` members absent from the paragraph that lists them: {', '.join(missing)}"
+    )
+
+
+def test_the_readme_maps_every_module_the_package_ships() -> None:
+    """A module with no row is a module a reader of the README does not know exists.
+
+    Found by counting: the table offered itself as the map of ``src/bumpsmith/``
+    and listed twelve of sixteen. The four it omitted -- ``fanout.py``,
+    ``remote.py``, ``publish.py`` and ``report.py`` -- were the ones doing the
+    work the project most wanted read, and the omission cost nothing that failed.
+    """
+    missing = sorted(_shipped_modules() - _tabled_modules(_readme()))
+    assert not missing, (
+        f"modules in src/bumpsmith/ with no row in the README's module table: {', '.join(missing)}"
+    )
+
+
+def test_the_readme_module_table_invents_no_module() -> None:
+    """The other direction: a row for a file that was renamed or removed.
+
+    A stale row is worse than a missing one. The table still looks complete, and
+    the link in it goes nowhere.
+    """
+    strays = sorted(_tabled_modules(_readme()) - _shipped_modules())
+    assert not strays, (
+        f"README module table rows naming no file in src/bumpsmith/: {', '.join(strays)}"
     )
 
 
