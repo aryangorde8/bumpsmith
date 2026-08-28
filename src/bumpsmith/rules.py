@@ -548,12 +548,7 @@ def root_validator_sites(tree: ast.Module) -> Iterator[tuple[int, ast.expr, bool
     `pre=True` is not a site at all. It was legal in V1 and is legal in V2, and
     it is the majority form in the wild.
     """
-    names = pydantic_names(tree)
-    if not names.direct and not names.modules:
-        return
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for node, names in functions_in_scope(tree):
         for decorator in node.decorator_list:
             if pydantic_name(decorator, names) != _ROOT_VALIDATOR:
                 continue

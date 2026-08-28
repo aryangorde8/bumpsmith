@@ -824,3 +824,89 @@ class Order(BaseModel):
     assert not result.is_complete
     assert len(result.skipped) == 1
     assert "not decidable here" in str(result.skipped[0])
+
+
+def test_an_explicit_false_is_changed_rather_than_argued_with(tmp_path: Path) -> None:
+    """`skip_on_failure=False` is the refused form written out, and v2 refuses it.
+
+    Found by review. The decorator was read as rewritable and then handed to the
+    branch that appends after the last argument, which wrote
+    `skip_on_failure=False, skip_on_failure=True` -- a repeated keyword, which
+    `ast.parse` accepts and `compile` does not. So the file this tool had just
+    edited would not import, and nothing in the rewriter would have said so:
+    only the suite re-run, by going red on a syntax error in somebody else's
+    code. The check below is `compile`, for that reason.
+    """
+    source = """from pydantic import BaseModel, root_validator
+
+
+class Order(BaseModel):
+    total: int = 0
+
+    @root_validator(skip_on_failure=False)
+    def check(cls, values):
+        return values
+"""
+    _write(tmp_path, "models.py", source)
+    result = _root_validator_plan(tmp_path)
+
+    assert result.is_complete, [str(s) for s in result.skipped]
+    after = result.edits[0].after
+    assert "@root_validator(skip_on_failure=True)" in after
+    assert after.count("skip_on_failure") == 1
+    compile(after, "models.py", "exec")
+
+
+def test_an_empty_call_split_over_lines_is_still_extended(tmp_path: Path) -> None:
+    """`@root_validator(\\n)` is the same empty call with a newline inside it.
+
+    It was scanned as rewritable and then skipped, because the empty-call rewrite
+    replaces a single-line span and this one has no such span. The argument goes
+    in just past the `(` instead, so the decorator keeps the shape its author
+    gave it rather than being reflowed onto one line by a migration tool.
+    """
+    source = """from pydantic import BaseModel, root_validator
+
+
+class Order(BaseModel):
+    total: int = 0
+
+    @root_validator(
+    )
+    def check(cls, values):
+        return values
+"""
+    _write(tmp_path, "models.py", source)
+    result = _root_validator_plan(tmp_path)
+
+    assert result.is_complete, [str(s) for s in result.skipped]
+    after = result.edits[0].after
+    assert "@root_validator(skip_on_failure=True\n    )" in after
+    compile(after, "models.py", "exec")
+
+
+def test_a_parenthesis_inside_a_comment_is_not_the_call(tmp_path: Path) -> None:
+    """The `(` the argument goes past has to be the call's own.
+
+    A comment between the name and the parenthesis can hold one of its own, and
+    inserting an argument into a comment writes a decorator that is a comment.
+    Refused rather than guessed: the site is reported, and skipped.
+    """
+    source = """from pydantic import BaseModel, root_validator
+
+
+class Order(BaseModel):
+    total: int = 0
+
+    @root_validator  # see the docs (really)
+    def check(cls, values):
+        return values
+"""
+    _write(tmp_path, "models.py", source)
+    result = _root_validator_plan(tmp_path)
+
+    # A bare `@root_validator` grows its own call, so the comment is untouched
+    # and the line above it is what changes.
+    after = result.edits[0].after
+    assert "@root_validator(skip_on_failure=True)  # see the docs (really)" in after
+    compile(after, "models.py", "exec")

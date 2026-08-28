@@ -826,7 +826,8 @@ def _plan_items_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, lis
     return _plan_keyword_rename(path, lines, items_keyword_sites, LENGTH_KEYWORDS)
 
 
-_SKIP_ON_FAILURE = "skip_on_failure=True"
+_SKIP = "skip_on_failure"
+_SKIP_ON_FAILURE = f"{_SKIP}=True"
 
 _EMPTY_CALL = re.compile(r"(?P<name>[\w.]+)\(\s*\)")
 _PLAIN_NAME = re.compile(r"[\w.]+")
@@ -850,13 +851,43 @@ def _span(text: str, node: ast.expr) -> str | None:
         return None
 
 
+def _after_open_paren(text: str, node: ast.Call) -> tuple[int, int] | None:
+    """The position just inside a call's `(`, or ``None`` if it cannot be found.
+
+    Walks forward from the end of the callable expression and refuses anything
+    but whitespace on the way. A comment can hold a `(` of its own, and
+    inserting an argument into one writes a decorator that is a comment.
+    """
+    lines = [line.encode("utf-8") for line in _lines(text)]
+    line, column = node.func.end_lineno, node.func.end_col_offset
+    if line is None or column is None:
+        return None
+    while 1 <= line <= len(lines):
+        row = lines[line - 1]
+        while column < len(row):
+            character = row[column : column + 1]
+            if character == b"(":
+                return line, column + 1
+            if not character.isspace():
+                return None
+            column += 1
+        line, column = line + 1, 0
+    return None
+
+
 def _skip_on_failure(text: str, node: ast.expr) -> _Replacement | None:
     """How to give one `@root_validator` the argument v2 demands, or ``None``.
 
-    Three shapes, and the third is an insertion rather than a substitution:
-    `@root_validator` grows a call, `@root_validator()` gains an argument
-    between its parentheses, and `@root_validator(allow_reuse=True)` gains one
-    after the last it already has.
+    Four shapes. `@root_validator` grows a call, `@root_validator()` gains an
+    argument between its parentheses, `@root_validator(skip_on_failure=False)`
+    has the argument already and needs its *value* changed, and
+    `@root_validator(allow_reuse=True)` gains one after the last it already has.
+
+    The third was missing and review found it: the decorator was read as
+    rewritable and then handed to the fourth branch, which appended a second
+    `skip_on_failure=` beside the first. `ast.parse` accepts a repeated keyword
+    and `compile` does not, so nothing in this module would have noticed -- only
+    the suite re-run, by failing to import the file this tool had just edited.
     """
     if not isinstance(node, ast.Call):
         span = _span(text, node)
@@ -867,11 +898,27 @@ def _skip_on_failure(text: str, node: ast.expr) -> _Replacement | None:
     if not node.args and not node.keywords:
         span = _span(text, node)
         match = _EMPTY_CALL.fullmatch(span) if span is not None else None
-        if span is None or match is None:
+        if span is not None and match is not None:
+            return _Replacement(
+                node.lineno, node.col_offset, span, f"{match['name']}({_SKIP_ON_FAILURE})"
+            )
+        # `@root_validator(\n)` is the same empty call with a newline in it.
+        # Rewriting it as one span would reflow the decorator, so the argument
+        # goes in just past the `(` and everything else keeps its own shape.
+        inside = _after_open_paren(text, node)
+        if inside is None:
             return None
-        return _Replacement(
-            node.lineno, node.col_offset, span, f"{match['name']}({_SKIP_ON_FAILURE})"
-        )
+        return _Replacement(inside[0], inside[1], "", _SKIP_ON_FAILURE)
+
+    for word in node.keywords:
+        if word.arg != _SKIP or not isinstance(word.value, ast.Constant):
+            continue
+        if word.value.value is not False:
+            continue
+        span = _span(text, word.value)
+        if span is None:
+            return None
+        return _Replacement(word.value.lineno, word.value.col_offset, span, "True")
 
     # After the last argument, wherever that is. Written as an insertion so the
     # existing arguments keep their own spelling -- reformatting somebody's
@@ -906,6 +953,9 @@ def _plan_root_validator_file(
     for line in sorted(set(lines)):
         wanted = lines.count(line)
         found = by_line.get(line, [])
+        if len(found) > wanted:
+            skipped.extend(Skipped(path, line, _MOVED) for _ in range(wanted))
+            continue
         for node, rewritable in found[:wanted]:
             if not rewritable:
                 skipped.append(
@@ -924,8 +974,8 @@ def _plan_root_validator_file(
                 )
                 continue
             replacements[(made.line, made.col)] = made
-        for _ in range(wanted - len(found[:wanted])):
-            skipped.append(Skipped(path, line, "the site the scan reported is not there any more"))
+        for _ in range(wanted - len(found)):
+            skipped.append(Skipped(path, line, _GONE))
 
     if not replacements:
         return None, skipped

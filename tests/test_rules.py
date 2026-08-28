@@ -19,6 +19,7 @@ from bumpsmith.rules import (
     find_matches,
     items_keyword_sites,
     regex_keyword_sites,
+    root_validator_sites,
     validator_parameter_sites,
     write_rule,
 )
@@ -1094,6 +1095,95 @@ def test_a_real_constructor_is_still_found(
     """
     found = _sites(template.format(name=name, call=call), finder)
     assert len(found) == 1, label
+
+
+@pytest.mark.parametrize(
+    ("label", "source", "expected"),
+    [
+        (
+            "rebound at module level",
+            """
+            from pydantic import root_validator
+            root_validator = mine
+
+            class M:
+                @root_validator
+                def v(cls, values): return values
+            """,
+            [],
+        ),
+        (
+            "a custom decorator defined in the enclosing function",
+            """
+            from pydantic import root_validator
+
+            def outer():
+                def root_validator(f): return f
+
+                class M:
+                    @root_validator
+                    def v(cls, values): return values
+            """,
+            [],
+        ),
+        (
+            "imported in one class, used by another",
+            """
+            class C:
+                from pydantic import root_validator
+
+            class M:
+                @root_validator
+                def v(cls, values): return values
+            """,
+            [],
+        ),
+        (
+            "the plain form, which is the break",
+            """
+            from pydantic import root_validator
+
+            class M:
+                @root_validator
+                def v(cls, values): return values
+            """,
+            [4],
+        ),
+        (
+            "imported in the class that uses it",
+            """
+            class M:
+                from pydantic import root_validator
+
+                @root_validator
+                def v(cls, values): return values
+            """,
+            [4],
+        ),
+        (
+            "the decorated function rebinds the name in its own body",
+            """
+            from pydantic import root_validator
+
+            class M:
+                @root_validator
+                def v(cls, values):
+                    root_validator = 1
+                    return values
+            """,
+            [4],
+        ),
+    ],
+)
+def test_a_root_validator_decorator_is_resolved_where_it_is_written(
+    label: str, source: str, expected: list[int]
+) -> None:
+    """A decorator runs in the scope holding the `def`, not the one it opens.
+
+    The last case is why: reading the decorator under the function's own names
+    lets a body that assigns `root_validator` hide the decorator above its head.
+    """
+    assert _sites(source, root_validator_sites) == expected, label
 
 
 def test_a_shadowed_validator_is_not_pydantics() -> None:
