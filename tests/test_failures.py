@@ -20,6 +20,24 @@ def _recorded(name: str) -> str:
     return (DATA / f"{name}-broken.txt").read_text()
 
 
+def _collection_error(message: str) -> str:
+    """A minimal collection error carrying one message, in pytest's own layout.
+
+    Used only where the *message* is the whole subject -- the recorded runs
+    cover the layout, and writing a dozen of those to vary one string would be
+    recording the parser's input rather than testing the classifier.
+    """
+    return (
+        "==================================== ERRORS ===================================\n"
+        "_________________________ ERROR collecting test_app.py ________________________\n"
+        "test_app.py:1: in <module>\n"
+        "    from app import Basket\n"
+        "app.py:7: in Basket\n"
+        "    items: broken\n"
+        f"E   TypeError: {message}\n"
+    )
+
+
 # --------------------------------------------------------------------------
 # Shape dispatch
 # --------------------------------------------------------------------------
@@ -417,3 +435,63 @@ def test_a_project_directory_shaped_like_an_interpreter_is_still_the_project() -
     assert Frame(path="/opt/python/lib/python3.13/typing.py", line=1).is_foreign
     assert Frame(path="../../../uv/python/x/lib/python3.13/typing.py", line=1).is_foreign
     assert Frame(path="../../.venv/lib/python3.13/site-packages/pydantic/x.py", line=1).is_foreign
+
+
+# --------------------------------------------------------------------------
+# Class 7 -- one keyword, broken in one callable and merely deprecated in another
+# --------------------------------------------------------------------------
+
+
+def test_a_conlist_items_break_arrives_with_no_slug() -> None:
+    """`conlist(min_items=...)` is rejected while binding the call, like `constr`.
+
+    Recorded from a real pytest run rather than written here, because the shape
+    the parser has to survive -- the caret line under the annotation, the
+    truncated `short test summary` echo -- is not something worth inventing.
+    """
+    (failure,) = parse_failures(_recorded("conlist-items"), returncode=2)
+
+    assert failure.break_class is BreakClass.ITEMS_KEYWORD
+    assert failure.pydantic_code is None
+    assert failure.error_type == "TypeError"
+    assert str(failure.culprit) == "app.py:7"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "conlist() got an unexpected keyword argument 'min_items'",
+        "conlist() got an unexpected keyword argument 'max_items'",
+        "conset() got an unexpected keyword argument 'min_items'",
+        "confrozenset() got an unexpected keyword argument 'max_items'",
+    ],
+)
+def test_every_constrained_collection_constructor_is_recognised(message: str) -> None:
+    output = _collection_error(message)
+
+    (failure,) = parse_failures(output, returncode=2)
+    assert failure.break_class is BreakClass.ITEMS_KEYWORD
+
+
+@pytest.mark.parametrize(
+    ("message", "why"),
+    [
+        (
+            "conint() got an unexpected keyword argument 'min_items'",
+            "conint never took min_items, so this is somebody else's TypeError",
+        ),
+        (
+            "shopping_list() got an unexpected keyword argument 'min_items'",
+            "a project function may be called anything, including something ending in list",
+        ),
+        (
+            "conlist() got an unexpected keyword argument 'unique_items'",
+            "unique_items was removed rather than renamed; there is no length to rewrite it to",
+        ),
+    ],
+)
+def test_a_lookalike_typeerror_is_not_this_break(message: str, why: str) -> None:
+    """The keyword alone is not the signal, and neither is the word `list`."""
+    (failure,) = parse_failures(_collection_error(message), returncode=2)
+
+    assert failure.break_class is BreakClass.UNKNOWN, why

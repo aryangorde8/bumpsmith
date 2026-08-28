@@ -216,6 +216,20 @@ def write_rule(failure: Failure) -> Rule | None:
             ),
         )
 
+    if failure.break_class is BreakClass.ITEMS_KEYWORD:
+        return Rule(
+            break_class=failure.break_class,
+            kind=RuleKind.SOURCE,
+            summary="Rename `min_items=`/`max_items=` to `min_length=`/`max_length=`",
+            rationale=(
+                "v2 renamed both constraints on the constrained-collection constructors, "
+                "which reject the old spelling in Python's argument binding before pydantic "
+                "sees the call. `Field` is not part of this: it accepts either spelling in "
+                "v2 and warns, so the sites this rule reports are the ones that actually "
+                "stop the suite."
+            ),
+        )
+
     if failure.break_class is BreakClass.REMOVED_INTERNAL:
         symbol = _split_symbol(failure.symbol)
         if symbol is None:
@@ -458,6 +472,20 @@ matching on the keyword alone would report sites that were never broken.
 """
 
 
+_ITEMS_CALLABLES = frozenset({"conlist", "conset", "confrozenset"})
+"""The pydantic callables that *raise* on `min_items=`/`max_items=`.
+
+`Field` is the interesting omission. It took both spellings in v1 and still
+takes them in v2, where it renames them and warns -- so a `Field(min_items=1)`
+is deprecated rather than broken, and rewriting it would be this tool editing
+code that runs. `_REGEX_CALLABLES` includes `Field` for the opposite reason:
+there it raises.
+"""
+
+LENGTH_KEYWORDS = {"min_items": "min_length", "max_items": "max_length"}
+"""The v1 spelling of each constraint, and what v2 calls it."""
+
+
 def _locally_bound(node: ast.AST) -> tuple[dict[str, str], set[str], set[str]]:
     """What one function binds in its own scope.
 
@@ -564,6 +592,21 @@ def regex_keyword_sites(tree: ast.Module) -> Iterator[tuple[int, ast.keyword]]:
             continue
         for word in node.keywords:
             if word.arg == "regex":
+                yield word.lineno, word
+
+
+def items_keyword_sites(tree: ast.Module) -> Iterator[tuple[int, ast.keyword]]:
+    """Yield every `min_items=`/`max_items=` passed to a constrained collection.
+
+    Shaped like :func:`regex_keyword_sites`, and for the same reason: the
+    keyword node carries the column the rewrite needs, and a line can hold more
+    than one of these -- `conlist(int, min_items=1, max_items=3)` is two sites.
+    """
+    for node, scope in calls_in_scope(tree, pydantic_names(tree)):
+        if pydantic_name(node, scope) not in _ITEMS_CALLABLES:
+            continue
+        for word in node.keywords:
+            if word.arg in LENGTH_KEYWORDS:
                 yield word.lineno, word
 
 
@@ -713,6 +756,8 @@ def _sites(rule: Rule, tree: ast.Module) -> Iterator[tuple[int, Role]]:
         return ((line, Role.SITE) for line in _root_model_sites(tree))
     if rule.break_class is BreakClass.REGEX_KEYWORD:
         return ((line, Role.SITE) for line, _ in regex_keyword_sites(tree))
+    if rule.break_class is BreakClass.ITEMS_KEYWORD:
+        return ((line, Role.SITE) for line, _ in items_keyword_sites(tree))
     if rule.break_class is BreakClass.REMOVED_INTERNAL and rule.module and rule.name:
         return _removed_symbol_sites(tree, rule.module, rule.name)
     return iter(())

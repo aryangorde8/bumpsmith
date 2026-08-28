@@ -34,6 +34,18 @@ is the point: one class, two signatures, and only one of them can be classified
 the reliable way. Real pytest output against pydantic 2.12.5, captured 25 August
 2026.
 
+`conlist-items-broken.txt` is the second deliberately-written one, and it is
+here for the distinction that makes class 7 a rule rather than a keyword search.
+`conlist(str, min_items=1, max_items=5)` raises a plain `TypeError` from Python's
+argument binding, with no slug -- the same arrival as `constr(regex=...)`. What
+the recording cannot show is the other half: `Field(min_items=1)` does **not**
+raise in v2. It is accepted, renamed internally, and warned about. So the
+classifier keys on the constructor that appears in the message rather than on
+the keyword, and the rewriter is scoped to `conlist`, `conset` and
+`confrozenset`. A recording of the failing half alone would have justified a
+broader rule than the facts support. Real pytest output against pydantic 2.12.5,
+captured 28 August 2026.
+
 ---
 
 # Recorded harness events

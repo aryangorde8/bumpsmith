@@ -650,3 +650,81 @@ def test_a_planner_is_never_handed_a_use_to_rewrite(tmp_path: Path) -> None:
     # One site rewritten. The use contributed nothing -- not an edit, not a skip.
     assert planned.rewritten == 1
     assert [s for s in planned.skipped if s.line == 1] == []
+
+
+# ---------------------------------------------------------------------------
+# Class 7 -- the same machinery, and the callable is what decides
+# ---------------------------------------------------------------------------
+
+
+_ITEMS_RULE = Rule(
+    break_class=BreakClass.ITEMS_KEYWORD,
+    kind=RuleKind.SOURCE,
+    summary="Rename `min_items=`/`max_items=` to `min_length=`/`max_length=`",
+    rationale="v2 renamed both constraints on the constrained-collection constructors.",
+)
+
+
+def _items_plan(tmp_path: Path) -> Plan:
+    return plan(_ITEMS_RULE, find_matches(_ITEMS_RULE, tmp_path))
+
+
+def test_both_length_keywords_are_renamed(tmp_path: Path) -> None:
+    source = """from pydantic import BaseModel, conlist
+
+
+class Basket(BaseModel):
+    items: conlist(str, min_items=1, max_items=5) = []
+"""
+    path = _write(tmp_path, "models.py", source)
+    result = _items_plan(tmp_path)
+    assert result.is_complete, [str(s) for s in result.skipped]
+    after = result.edits[0].after
+
+    assert "conlist(str, min_length=1, max_length=5)" in after
+    assert "_items" not in after
+    # Two sites on one line, which is the case the shared planner exists to get
+    # right: a line-to-line mapping would have rewritten one and called it done.
+    assert result.rewritten == 2
+    assert [line for line, _, _ in _changed_lines(path.read_text(), after)] == [5]
+
+
+def test_field_is_left_alone(tmp_path: Path) -> None:
+    """`Field(min_items=...)` runs under v2. Rewriting it would be editing working code.
+
+    This is the difference between class 7 and a search for the keyword, and it
+    is the opposite of class 3, where `Field` is the callable that raises.
+    """
+    source = """from pydantic import BaseModel, Field, conlist
+
+
+class Basket(BaseModel):
+    kept: list[str] = Field(default_factory=list, min_items=1)
+    fixed: conlist(str, min_items=1) = []
+"""
+    _write(tmp_path, "models.py", source)
+    result = _items_plan(tmp_path)
+    after = result.edits[0].after
+
+    assert "Field(default_factory=list, min_items=1)" in after
+    assert "conlist(str, min_length=1)" in after
+    assert result.rewritten == 1
+
+
+def test_a_shadowed_conlist_is_not_pydantics(tmp_path: Path) -> None:
+    """A local function named `conlist` is somebody else's, and keeps its keyword."""
+    source = """from pydantic import BaseModel
+
+
+def conlist(kind, min_items=0):
+    return list
+
+
+class Basket(BaseModel):
+    items: conlist(str, min_items=1) = []
+"""
+    _write(tmp_path, "models.py", source)
+    result = _items_plan(tmp_path)
+
+    assert not result.edits
+    assert result.rewritten == 0

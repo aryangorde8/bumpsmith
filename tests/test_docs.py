@@ -31,7 +31,9 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
+from bumpsmith.failures import BreakClass
 from bumpsmith.migrate import Outcome, Stop
+from bumpsmith.rewrite import has_rewriter
 
 README = Path(__file__).resolve().parent.parent / "README.md"
 
@@ -471,4 +473,141 @@ def test_the_log_does_not_claim_findings_are_unindexed_while_indexing_them() -> 
         f"the note under the index again says findings are not listed there "
         f"({match.group(0)!r}), while the index is contiguous 1..{len(_logged_ids())}. "
         f"One of the two is wrong."
+    )
+
+
+_TAXONOMY_TABLE_HEADER = "| # | class | what it is | rewriter |"
+
+_TAXONOMY_PROSE = re.compile(
+    r"^(?P<classes>\w+) classes, numbered by the project's own taxonomy\. "
+    r"(?P<rewriters>\w+) have rewriters;",
+    re.MULTILINE,
+)
+
+_NUMBER_WORDS = {
+    "One": 1,
+    "Two": 2,
+    "Three": 3,
+    "Four": 4,
+    "Five": 5,
+    "Six": 6,
+    "Seven": 7,
+    "Eight": 8,
+    "Nine": 9,
+    "Ten": 10,
+    "Eleven": 11,
+    "Twelve": 12,
+}
+"""Written out because the README writes them out, and the README is right to.
+
+A guard that forced the prose to say "7 classes" would be the test dictating
+style to the document it exists to serve.
+"""
+
+_TAXONOMY_EXEMPT = {
+    "UNKNOWN": (
+        "not a break the project can name but the absence of one -- the table "
+        "numbers what the classifier recognises, and UNKNOWN is what it reports "
+        "when it recognises nothing. A row for it would claim a taxonomy entry "
+        "that does not exist"
+    ),
+}
+"""Members with no row, each named individually with the reason it has none.
+
+Named one at a time rather than matched by pattern, which is the lesson of the
+module table: a pattern silently adopts members that do not exist yet, so a
+class added next month would fall out of scope by nobody's decision.
+"""
+
+
+def _taxonomy_rows(text: str) -> list[tuple[int, str | None, bool]]:
+    """Each row of the break-taxonomy table as ``(number, class name, has rewriter)``.
+
+    The name is ``None`` for the row that records a *deliberately absent* class,
+    which is a fact about the taxonomy rather than about the enum.
+    """
+    lines = text.splitlines()
+    starts = [i for i, line in enumerate(lines) if line.startswith(_TAXONOMY_TABLE_HEADER)]
+    assert len(starts) == 1, f"expected one taxonomy table, found {len(starts)}"
+    rows: list[tuple[int, str | None, bool]] = []
+    for line in lines[starts[0] + 2 :]:  # +2 skips the |---| separator
+        if not line.startswith("|"):
+            break
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        assert len(cells) == 4, f"taxonomy row does not have four cells: {line}"
+        number, name, _what, rewriter = cells
+        named = name.strip("`") if name.startswith("`") else None
+        rows.append((int(number), named, rewriter == "✅"))
+    assert rows, "the taxonomy table header is not followed by any rows"
+    return rows
+
+
+def test_the_readme_taxonomy_lists_every_break_class() -> None:
+    """A class with no row is a class the README's taxonomy denies exists.
+
+    Found by adding one. `ITEMS_KEYWORD` went into `BreakClass`, the table kept
+    saying "Six classes", and all 750 tests passed -- the same shape as the
+    module table two pull requests earlier, in the other table on this page.
+    """
+    tabled = {name: number for number, name, _ in _taxonomy_rows(_readme()) if name}
+    missing = sorted(
+        member.name
+        for member in BreakClass
+        if member.name not in _TAXONOMY_EXEMPT and member.name not in tabled
+    )
+    assert not missing, f"BreakClass members with no row in the README's taxonomy: {missing}"
+
+
+def test_the_readme_taxonomy_numbers_each_class_as_the_enum_does() -> None:
+    """The `#` column is the enum's value, so a class added with the wrong number fails."""
+    # Filtered to names the enum knows, so an invented row fails its own test
+    # with its own message rather than killing this one with a `KeyError`.
+    wrong = [
+        (name, number, BreakClass[name].value)
+        for number, name, _ in _taxonomy_rows(_readme())
+        if name is not None and name in BreakClass.__members__ and BreakClass[name].value != number
+    ]
+    assert not wrong, f"taxonomy rows numbered differently from BreakClass: {wrong}"
+
+
+def test_the_readme_taxonomy_invents_no_break_class() -> None:
+    """The other direction: a row for a class that was renamed or removed."""
+    known = {member.name for member in BreakClass}
+    invented = sorted(
+        name for _, name, _ in _taxonomy_rows(_readme()) if name and name not in known
+    )
+    assert not invented, f"taxonomy rows naming no BreakClass member: {invented}"
+
+
+def test_the_readme_taxonomy_marks_a_rewriter_where_one_exists() -> None:
+    """The rewriter column is a claim about `rewrite._PLANNERS`, so it is read from it.
+
+    The column is the part a reader acts on: it is the difference between "this
+    tool will fix it" and "this tool will tell you about it".
+    """
+    disagree = [
+        (name, marked, has_rewriter(BreakClass[name]))
+        for _, name, marked in _taxonomy_rows(_readme())
+        if name is not None
+        and name in BreakClass.__members__
+        and marked != has_rewriter(BreakClass[name])
+    ]
+    assert not disagree, f"taxonomy rewriter column disagrees with rewrite._PLANNERS: {disagree}"
+
+
+def test_the_readme_taxonomy_prose_counts_its_own_table() -> None:
+    """ "Seven classes ... Four have rewriters" -- both counted rather than typed.
+
+    The sentence above the table is the part a reader believes without checking,
+    and it is the part nothing checked.
+    """
+    match = _TAXONOMY_PROSE.search(_readme())
+    assert match is not None, "the sentence introducing the taxonomy table has changed shape"
+    rows = _taxonomy_rows(_readme())
+    assert _NUMBER_WORDS[match["classes"]] == len(rows), (
+        f"the README says {match['classes']} classes; the table has {len(rows)} rows"
+    )
+    with_rewriter = sum(1 for _, _, marked in rows if marked)
+    assert _NUMBER_WORDS[match["rewriters"]] == with_rewriter, (
+        f"the README says {match['rewriters']} have rewriters; the table marks {with_rewriter}"
     )

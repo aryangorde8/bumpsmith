@@ -258,7 +258,7 @@ from the other, and because the two most different results the loop can produce 
 
 ## The break taxonomy
 
-Six classes, numbered by the project's own taxonomy. Three have rewriters; the
+Seven classes, numbered by the project's own taxonomy. Four have rewriters; the
 rest classify and stop, which is a useful result on its own.
 
 | # | class | what it is | rewriter |
@@ -269,6 +269,18 @@ rest classify and stop, which is a useful result on its own.
 | 4 | `ROOT_MODEL` | a field named `__root__` | ✅ |
 | 5 | `REMOVED_INTERNAL` | an import of a pydantic internal V2 deleted | — |
 | 6 | `TRANSITIVE_DEPENDENCY` | a dependency is itself unmigrated | n/a — no edit here fixes it |
+| 7 | `ITEMS_KEYWORD` | `min_items=`/`max_items=` on a constrained collection | ✅ |
+
+**Class 7 is the one where the same keyword is broken in one place and merely
+deprecated in another.** `conlist(int, min_items=1)` raises a `TypeError` from
+Python's argument binding, because v2's `conlist` has no such parameter. But
+`Field(min_items=1)` still works in v2 — it renames the argument itself and
+emits a deprecation warning. So the rule is scoped to `conlist`, `conset` and
+`confrozenset`, and deliberately excludes `Field`: a rule written against the
+keyword alone would report sites that are not broken and rewrite code that runs
+today. Class 3 draws the same distinction in the opposite direction, where
+`Field` is the one that raises — which is why neither rule can be derived from
+the argument name.
 
 **Class 2 is deliberately absent**, and the reason is worth stating because it is
 the same reason the loop declines to name a rule at step 4 above. It has a
@@ -658,8 +670,8 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **147 findings**: 101 raised by automated review, 4
-that only a live run against the harness could have raised, and 42 the author
+As of 28 August 2026 it holds **148 findings**: 101 raised by automated review, 4
+that only a live run against the harness could have raised, and 43 the author
 found rather than review. **The total** is not maintained by hand —
 `tests/test_docs.py` reads the log's own table and fails if this sentence and
 that table disagree, and separately fails if the three parts do not sum to it,

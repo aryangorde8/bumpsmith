@@ -59,6 +59,14 @@ _SYMBOL = re.compile(r"`(?P<symbol>[\w.]+:[\w]+)`")
 # The missing module in "No module named 'typing_inspect'".
 _MISSING_MODULE = re.compile(r"No module named ['\"](?P<module>[\w.]+)['\"]")
 
+_ITEMS_CALL = re.compile(r"\bcon(?:list|set|frozenset)\(\)")
+r"""The constrained-collection constructors, as they name themselves in a TypeError.
+
+Written out rather than matched as `con\w+`, which would also catch `conint`
+and `condecimal`. Those never took `min_items`, so a site reported in one of
+them would be a rewrite of code that was never broken.
+"""
+
 # "____________ ERROR collecting tests/test_thing.py ____________" -- pytest
 # prints one of these per test module that failed to import.
 _COLLECT_BANNER = re.compile(r"^_+ ERROR collecting (?P<target>.+?) _+$", re.MULTILINE)
@@ -193,6 +201,16 @@ class BreakClass(Enum):
 
     ROOT_MODEL = 4
     """A field named ``__root__``, which V2 replaced with ``pydantic.RootModel``."""
+
+    ITEMS_KEYWORD = 7
+    """``min_items=``/``max_items=``, which V2 renamed to ``min_length=``/``max_length=``.
+
+    Only the constrained-collection constructors raise. ``Field`` accepts both
+    spellings in V2 and emits a deprecation warning instead, so a rule matching
+    the keyword alone would report sites that are not broken and rewrite code
+    that runs today -- the same distinction :attr:`REGEX_KEYWORD` draws, in the
+    other direction: there ``Field`` raises and here it does not.
+    """
 
     REMOVED_INTERNAL = 5
     """An import of a pydantic internal that V2 deleted."""
@@ -373,6 +391,17 @@ def _classify(
     # produce.
     if error_type == "TypeError" and "constr()" in message and "'regex'" in message:
         return BreakClass.REGEX_KEYWORD
+
+    # The same failure mode one constructor over: Python rejects the keyword
+    # while binding the arguments, so there is no slug to key on. `Field` is
+    # deliberately absent -- it still accepts `min_items` in V2 and only warns,
+    # so a message-only match would classify a run that never broke here.
+    if (
+        error_type == "TypeError"
+        and _ITEMS_CALL.search(message) is not None
+        and ("'min_items'" in message or "'max_items'" in message)
+    ):
+        return BreakClass.ITEMS_KEYWORD
 
     # `removed-kwargs` is the one slug in the set that does not identify a single
     # break: `const` and `unique_items` were removed too and raise it with the
