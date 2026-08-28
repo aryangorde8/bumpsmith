@@ -73,8 +73,11 @@ strict = true
 warn_unreachable = true
 warn_return_any = true
 show_error_codes = true
-files = ["src", "tests", "proofs"]
+files = ["src", "tests", "proofs", "pages"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `pages/` is not a package and is not installed, so the site generator is
+# reachable from the suite by path rather than by installation.
+pythonpath = ["pages"]
 addopts = "-ra --strict-markers --strict-config"

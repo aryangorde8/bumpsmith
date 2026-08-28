@@ -1,0 +1,79 @@
+# The runs the site publishes.
+#
+# Every payload in `runs/` is the verbatim output of `--json` from a real run
+# against a real repository, captured on the commit named below. None of them is
+# written by hand, and none is edited afterwards except for one mechanical
+# substitution recorded per run in `redacted`: the absolute path of the machine
+# that captured it, replaced with a stable public name. `pages/build_site.py` renders
+# them and adds nothing -- anything the page shows is something the payload
+# already contained, which is the same guarantee `bumpsmith.report` makes.
+#
+# `expected` is what the run is *supposed* to demonstrate, written down so that a
+# regenerated payload that no longer demonstrates it is a visible failure rather
+# than a quiet one. `tests/test_pages.py` asserts it against the payload.
+
+captured = "2026-08-28"
+bumpsmith = "24093e21044ee03e14038d499c9de3cac79d0238"
+
+[runs.fixture-b]
+order = 1
+title = "Three real breaks, then a stop"
+payload = "runs/fixture-b.json"
+upstream = "https://github.com/emnify/emnify-sdk-python.git"
+sha = "1c595e4806022cb80748000e37cd52c413c248a5"
+pydantic = "1.10.26"
+redacted = "the local checkout path, replaced with `fixtures/B`"
+expected = { outcome = "reverted", stop = "no-rule", kept = false }
+blurb = """
+The flagship run. It peels three genuine pydantic v1-to-v2 breaks off a real \
+SDK — a `__root__` field across 19 sites, `regex=` across 5, a validator's \
+`field`/`config` pair — and then meets a failure it cannot classify. It does \
+not guess. It reverts all three, and `git diff` on the checkout afterwards is \
+empty."""
+
+[runs.fixture-a]
+order = 2
+title = "One site found, and deliberately not rewritten"
+payload = "runs/fixture-a.json"
+upstream = "https://github.com/data-mie/dbt-cloud-cli.git"
+sha = "cb2680d353727f895b958fd8c5a8fec7657962b6"
+pydantic = "1.10.10"
+redacted = "the local checkout path, replaced with `fixtures/A`"
+expected = { outcome = "untouched", complete = false }
+blurb = """
+The rule matches one site. The rewriter declines it: `field_not_none` reads \
+`field` inside its own body, and v2 passes nothing to rebind it from, so \
+removing the parameter would leave a name that is not defined. The run ends \
+`untouched` and marks itself **not complete** rather than claiming a migration \
+it did not perform."""
+
+[runs.fixture-f4]
+order = 3
+title = "A break with no rewriter, said out loud"
+payload = "runs/fixture-f4.json"
+upstream = "https://github.com/cloudblue/connect-eaas-core.git"
+sha = "25ab907b9a4b0adbf354db450b137e29312bcfd5"
+pydantic = "1.10.26"
+redacted = "the local checkout path, replaced with `fixtures/F4`"
+expected = { outcome = "untouched" }
+blurb = """
+The break arrives through a dependency rather than the project's own source. \
+bumpsmith classifies it, names the rule, and then reports that no rewriter is \
+written for it — because the name is still read further down the file, and \
+deleting the site alone would swap this error for a `NameError`. The \
+classification is still useful output; the edit is not made."""
+
+[runs.green]
+order = 4
+title = "A migration that is kept"
+payload = "runs/green.json"
+upstream = "a small fixture written for this project"
+sha = ""
+pydantic = "1.10.x"
+redacted = "the local checkout path, replaced with `fixtures/green`"
+expected = { outcome = "migrated", kept = true }
+blurb = """
+The other half of the claim. Two breaks, both fixed, suite green, edits kept. \
+The interesting part is the edit it did *not* make: a class body that rebinds \
+`conlist` to something of its own before using it is left alone, because at \
+that point the name is no longer pydantic's."""

@@ -1,0 +1,39 @@
+{
+  "repository": "fixtures/A",
+  "command": [
+    "/path/to/a/pydantic2/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-m",
+    "not integration"
+  ],
+  "outcome": "untouched",
+  "stop": "nothing-to-apply",
+  "reason": "the rule matched 1 site, of which 0 could be rewritten and none needed to be",
+  "applied": 0,
+  "kept": false,
+  "complete": false,
+  "steps": [
+    {
+      "step": 1,
+      "returncode": 4,
+      "where": "local",
+      "break_class": "VALIDATOR_FIELD_CONFIG",
+      "message": "The `field` and `config` parameters are not available in Pydantic V2, please use the `info` parameter instead.",
+      "culprit": "dbt_cloud/command/command.py:27",
+      "rule": "Remove a v1 validator's `field` and `config` parameters",
+      "sites": 1,
+      "match_files": 1,
+      "uses": [],
+      "scan_complete": true,
+      "unreadable": [],
+      "rewritten": 0,
+      "edit_files": 0,
+      "skipped": [
+        "fixtures/A/dbt_cloud/command/command.py:82  field_not_none reads `field` somewhere inside itself, and V2 passes nothing to rebind it from; removing the parameter would leave a name that is not defined"
+      ],
+      "applied": false
+    }
+  ]
+}

@@ -37,7 +37,12 @@ import html
 from collections.abc import Mapping
 from typing import Any
 
-_STYLE = """
+# Public because `pages/build.py` renders an index over several of these pages and
+# has to look like them. The alternative is a second copy of this stylesheet kept
+# in step by hand, and findings 145 and 164 are both about a second copy of
+# something drifting from the first. A caller may read it; nothing may rely on
+# any particular rule inside it.
+STYLE = """
 :root {
   --bg: #fbfbfa; --panel: #ffffff; --line: #e4e2dd; --ink: #1a1917;
   --muted: #6b6862; --accent: #2f5d50; --warn: #8a5a1e; --stop: #8f3a34;
@@ -381,9 +386,9 @@ def page(payload: Mapping[str, Any], *, title: str = "bumpsmith run") -> str:
     return (
         '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f"<title>{_e(title)}</title><style>{_STYLE}</style></head>"
+        f"<title>{_e(title)}</title><style>{STYLE}</style></head>"
         f"<body>{''.join(body)}</body></html>\n"
     )
 
 
-__all__ = ["page"]
+__all__ = ["STYLE", "page"]

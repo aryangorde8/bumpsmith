@@ -1,0 +1,68 @@
+name: Pages
+
+# The site is built from `pages/runs.toml` and the payloads committed beside it.
+# It runs no migration and clones no fixture: everything it publishes was
+# captured by a real run beforehand and checked in, so a green build here means
+# the recorded evidence rendered, not that a network call happened to succeed.
+on:
+  push:
+    branches: [main]
+    # A push that cannot change the site should not redeploy it.
+    paths:
+      - "pages/**"
+      - "src/bumpsmith/report.py"
+      - ".github/workflows/pages.yml"
+  # So a deploy can be re-run without an empty commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never two deploys at once, and never cancel one half-way: a cancelled deploy
+# is what leaves a half-published site. `cancel-in-progress` is deliberately
+# false here, unlike in ci.yml where cancelling a superseded check is free.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # Actions are pinned to full commit SHAs, not tags, for the reason
+      # ci.yml gives: a tag is a mutable pointer.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      # The site's own tests, before it is built. They check that each recorded
+      # run still demonstrates what the manifest says it demonstrates, so a
+      # payload that stopped being evidence fails here rather than deploying.
+      - name: Test the site
+        run: pytest tests/test_pages.py -q
+
+      - name: Build
+        run: python pages/build_site.py --out pages/_site
+
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: pages/_site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

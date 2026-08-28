@@ -1,0 +1,71 @@
+{
+  "repository": "fixtures/green",
+  "command": [
+    "/path/to/a/pydantic2/python",
+    "-m",
+    "pytest",
+    "-q"
+  ],
+  "outcome": "migrated",
+  "stop": "green",
+  "reason": "the suite passed on this machine",
+  "applied": 2,
+  "kept": true,
+  "complete": true,
+  "steps": [
+    {
+      "step": 1,
+      "returncode": 2,
+      "where": "local",
+      "break_class": "ITEMS_KEYWORD",
+      "message": "conlist() got an unexpected keyword argument 'min_items'",
+      "culprit": "app.py:9",
+      "rule": "Rename `min_items=`/`max_items=` to `min_length=`/`max_length=`",
+      "sites": 4,
+      "match_files": 1,
+      "uses": [],
+      "scan_complete": true,
+      "unreadable": [],
+      "rewritten": 4,
+      "edit_files": 1,
+      "skipped": [],
+      "applied": true
+    },
+    {
+      "step": 2,
+      "returncode": 2,
+      "where": "local",
+      "break_class": "ROOT_VALIDATOR_SKIP",
+      "message": "If you use `@root_validator` with pre=False (the default) you MUST specify `skip_on_failure=True`. Note that `@root_validator` is deprecated and should be replaced with `@model_validator`.",
+      "culprit": "app.py:11",
+      "rule": "Give `@root_validator` the `skip_on_failure=True` v2 requires",
+      "sites": 2,
+      "match_files": 1,
+      "uses": [],
+      "scan_complete": true,
+      "unreadable": [],
+      "rewritten": 2,
+      "edit_files": 1,
+      "skipped": [],
+      "applied": true
+    },
+    {
+      "step": 3,
+      "returncode": 0,
+      "where": "local",
+      "break_class": null,
+      "message": null,
+      "culprit": null,
+      "rule": null,
+      "sites": null,
+      "match_files": null,
+      "uses": [],
+      "scan_complete": null,
+      "unreadable": [],
+      "rewritten": null,
+      "edit_files": null,
+      "skipped": [],
+      "applied": false
+    }
+  ]
+}

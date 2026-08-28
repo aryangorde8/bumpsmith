@@ -1,0 +1,42 @@
+{
+  "repository": "fixtures/F4",
+  "command": [
+    "/path/to/a/pydantic2/python",
+    "-m",
+    "pytest",
+    "-q",
+    "--ignore=tests/connect/eaas/core/contrib/django"
+  ],
+  "outcome": "untouched",
+  "stop": "no-rewriter",
+  "reason": "no rewriter is written for REMOVED_INTERNAL; the rule is still the useful output, but it cannot be applied automatically; the name is still read at fixtures/F4/connect/eaas/core/proto.py:40, so removing the site alone would replace this error with a NameError",
+  "applied": 0,
+  "kept": false,
+  "complete": true,
+  "steps": [
+    {
+      "step": 1,
+      "returncode": 2,
+      "where": "local",
+      "break_class": "REMOVED_INTERNAL",
+      "message": "`pydantic.utils:DUNDER_ATTRIBUTES` has been removed in V2.",
+      "culprit": "connect/eaas/core/proto.py:10",
+      "rule": "Stop importing `DUNDER_ATTRIBUTES` from `pydantic.utils`",
+      "sites": 1,
+      "match_files": 1,
+      "uses": [
+        {
+          "path": "fixtures/F4/connect/eaas/core/proto.py",
+          "line": 40,
+          "excerpt": "k not in DUNDER_ATTRIBUTES"
+        }
+      ],
+      "scan_complete": true,
+      "unreadable": [],
+      "rewritten": null,
+      "edit_files": null,
+      "skipped": [],
+      "applied": false
+    }
+  ]
+}
