@@ -658,8 +658,8 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **139 findings**: 94 raised by automated review, 4
-that only a live run against the harness could have raised, and 41 the author
+As of 28 August 2026 it holds **140 findings**: 94 raised by automated review, 4
+that only a live run against the harness could have raised, and 42 the author
 found rather than review. The count is not maintained by hand -- `tests/test_docs.py`
 reads the log's own table and fails if this sentence and that table disagree,
 because this paragraph has been the stale number twice already. The log also names the recurring *shapes* those
@@ -712,9 +712,44 @@ all. The point of keeping this paragraph is that the follow-up review is not a
 formality — it found real defects in merged code, which is the argument for
 requiring one.
 
-**The whole trail.** Twenty-nine pull requests; Qodo reviewed every one;
-twenty-five raised at least one finding, **91 in total**. Every finding is in
-[`REVIEW-LOG.md`](REVIEW-LOG.md) with what happened to it and why.
+**The whole trail, as of the merge of #30.** Thirty pull requests; Qodo reviewed
+every one; twenty-six raised at least one inline finding, **94 in total**. Every
+finding is in [`REVIEW-LOG.md`](REVIEW-LOG.md) with what happened to it and why.
+
+That sentence is anchored to a named merge on purpose. The finding total two
+paragraphs above cannot go stale — a test reads the log's own table and fails
+when the two disagree — but these numbers live on GitHub, not in the repository,
+and the first version of this sentence went stale the moment the next pull
+request merged. A count with no date is a claim about now, and it was wrong about
+now within a day, twice. Anchored, it ages instead of lying, and anyone can
+re-derive it:
+
+```
+gh api --paginate repos/aryangorde8/bumpsmith/pulls/{N}/comments \
+  --jq '[.[] | select(.user.login | startswith("qodo")) | select(.in_reply_to_id == null)] | length'
+```
+
+A test that did this in CI was considered and rejected: it would fail when the
+network is down and pass when a cache is stale — wrong in both directions, and
+reassuringly wrong in the second, which the log's ninth shape says is the
+expensive kind.
+
+**A second representative pull request, for the loop rather than the depth.**
+[#30 — *The README understated the project*](https://github.com/aryangorde8/bumpsmith/pull/30)
+is smaller than #20 and shows the whole cycle inside one pull request. Three
+findings were self-found by reading this README cold against the criteria it is
+judged on: a stale claim that survived the pull request which fixed its twin
+elsewhere, a module table listing twelve of eighteen files, and the counts above.
+Qodo then raised two findings **on the fix** — the completeness guard filtered
+`__*.py` while the sentence it defends says *everything*, so it enforced a
+narrower claim than the README makes; and the helper returned a set, so neither
+check could see a duplicate row. Both were fixed, and fixing the first turned up
+a third map of the package inside `__init__.py` listing nine of eighteen. The
+follow-up `/agentic_review` then found that the uniqueness check had been added
+to one of the two tables that make the claim, and the second `/agentic_review`
+against `026d73c` came back **Bugs (0)** with every finding marked ✓ Resolved.
+Six findings, three rounds, and the defect the pull request is *about* recurred
+twice inside its own fix.
 
 **What was intentionally dismissed.** Three findings were rejected rather than
 fixed, each with the measurement that rejected it rather than an opinion. The

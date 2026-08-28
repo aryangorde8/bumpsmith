@@ -159,6 +159,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 137 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | `_tabled_modules()` returned a **set**, so both checks written for 134 compared sets and neither could see multiplicity. A table that had drifted into two rows for one module — one of them stale, which is how it happens — satisfied "nothing missing" and "nothing invented" while the one-row-per-module mapping it advertises was gone. The stale row is the one nobody updates, so this is the failure mode that actually occurs | **Fixed** — the helper returns a list, in order and with repeats, and `test_the_readme_module_table_names_each_module_once` is the third check. The two set-difference tests take `set(...)` explicitly at the call site rather than hiding it in the helper, so what each one is blind to is visible where it is used | this PR |
 | 138 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | **A third map, found while fixing 136.** `src/bumpsmith/__init__.py` — the docstring `help(bumpsmith)` prints — carries its own table of the package and listed **nine of eighteen** files, missing the same four the README's table missed plus `rootdir` and `sources`. Three hand-written maps of one package, and until this pull request not one of them was checked against the package. The reader it fails is the one at a REPL who never opens the repository — *self-found* | **Fixed** — the table is complete, and `test_the_package_docstring_maps_every_module_it_claims_to` derives the expectation from `src/bumpsmith/*.py`. Its three exemptions (`migrate`, `__main__`, `__init__`) are **named one at a time with the sentence in the docstring that covers each**, rather than matched by pattern, which is 136's lesson applied on the same afternoon it was learned | this PR |
 | 139 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | **Raised by the follow-up review**, on the fix for 137. The uniqueness check written for 137 was added to the README's table and not to the `__init__` table, which makes the same one-row-per-module claim. Worse, `_init_table_modules()` was written to preserve repeats and its docstring says so — and then all three of its callers took `set(...)` of it, so the multiplicity it was careful to keep was discarded by every reader it had. **Shape 11 — a guarantee enforced at one entrance of a building with two** | **Fixed** — `test_the_package_docstring_names_each_module_once` is the fourth check on that table. The lesson is not "add the test": 137 was fixed *where it was raised* rather than *wherever it applied*, and the second site was in the same file, added in the same commit, twenty lines below. A promise nothing consumes is not a guarantee | this PR |
+| 140 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | 135's fix corrected the trail counts and left the sentence in a form that **goes stale by construction**: *"Twenty-nine pull requests … 91 in total"* is a claim about *now*, and every subsequent merge falsifies it. There is no value that can be written there and stay right, which is why the same three numbers had already been wrong twice. Correcting them a third time would have been the third instance of a defect whose real shape is the sentence, not the digits — *self-found while performing the recount 135's own disposition promised* | **Fixed** — the sentence is anchored to a named event, *"as of the merge of #30"*, and carries the `gh api` command that re-derives it. Anchored, it ages instead of lying: a later merge makes it out of date and never false. Recounted live rather than incremented — 30 pull requests, Qodo on all 30, 26 with at least one inline finding, 94 findings. **Findings 64/65, fourth instance, and the first where the fix was to change the sentence's tense rather than its numbers** | this PR |
 
 
 Every finding has a row here and a fuller account below. Findings that arrived
@@ -2883,6 +2884,34 @@ duplicating the `gate` row fails with `modules with more than one row in
 src/bumpsmith/__init__.py: gate.py`; no-op control green; file restored
 byte-identical.
 
+
+### 140 · the sentence, not the digits
+
+Finding 135's disposition said the recount belonged in the pre-submission pass
+rather than in a test. Doing that recount is what found this.
+
+*"Twenty-nine pull requests; Qodo reviewed every one; twenty-five raised at least
+one finding, 90 in total."* Correcting those three numbers is what 135 did. But
+the sentence is a claim about **now**, and every merge after it falsifies it —
+including the merge of the pull request that corrected it. There is no value that
+can be written there and stay right. That is why the same three numbers had
+already been wrong twice, and correcting them a third time would have been the
+third instance of a defect whose actual shape is the sentence rather than the
+digits in it.
+
+So the fix is the tense. *"The whole trail, as of the merge of #30"* is true when
+written and stays true; a later merge makes it **out of date**, which is a
+different thing from **wrong**, and a reader can see which one they are looking
+at. The `gh api` incantation that re-derives the count sits beside it, because an
+anchored number nobody can check is only a better-dated assertion.
+
+Recounted live rather than incremented: thirty pull requests, Qodo on all thirty,
+twenty-six with at least one inline finding, ninety-four findings.
+
+**Findings 64/65, fourth instance** — and the first where the answer was not a
+guard and not a corrected value. The three before it were fixed by making the
+number derivable. This one could not be, because the truth lives on GitHub, so it
+was fixed by making the sentence honest about when it was true.
 
 ## How this stays honest
 
