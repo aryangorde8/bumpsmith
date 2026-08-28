@@ -601,13 +601,13 @@ is worth what it costs to make. [`proofs/README.md`](proofs/README.md) says what
 each needs and what each costs.
 
 **`session_reconnect.py` has a control, and the control has been watched fail.**
-It would print *"the session held"* against a harness that
-pooled its sandboxes, so `tests/test_session_reconnect.py` runs the script
-against stand-in harnesses that share one sandbox, forget one, keep nothing at
-all, and fail the read outright, and requires it to fail against every one of
-them — naming the leg that failed. Two ways that control could have passed while
-proving nothing — a marker whose contents impersonated absence, and a read that
-reported its own errors as absence — were Qodo findings on
+It would print *"the session held"* against a harness that pooled its sandboxes,
+so `tests/test_session_reconnect.py` runs the script against stand-in harnesses
+that share one sandbox, forget one, keep nothing at all, and fail the read
+outright, and requires it to fail against every one of them — naming the leg
+that failed. Two ways that control could have passed while proving nothing — a
+marker whose contents impersonated absence, and a read that reported its own
+errors as absence — were Qodo findings on
 [#39](https://github.com/aryangorde8/bumpsmith/pull/39), both reproduced before
 they were accepted.
 
