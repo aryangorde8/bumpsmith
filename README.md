@@ -658,11 +658,24 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **146 findings**: 100 raised by automated review, 4
+As of 28 August 2026 it holds **147 findings**: 101 raised by automated review, 4
 that only a live run against the harness could have raised, and 42 the author
-found rather than review. The count is not maintained by hand -- `tests/test_docs.py`
-reads the log's own table and fails if this sentence and that table disagree,
-because this paragraph has been the stale number twice already. The log also names the recurring *shapes* those
+found rather than review. **The total** is not maintained by hand —
+`tests/test_docs.py` reads the log's own table and fails if this sentence and
+that table disagree, and separately fails if the three parts do not sum to it,
+because this paragraph has been the stale number twice already.
+
+**The split between those three is maintained by hand, and is not checked.** It
+could be, and deliberately is not: the log marks a finding's provenance in prose,
+and only when it is *not* Qodo's — a row with no marker is a row nobody marked,
+which is not the same fact as a row Qodo raised. A test inferring the first from
+the second would be the log's own ninth shape, reading an absence as evidence,
+and it would be most confident about exactly the rows nobody had thought about.
+So the arithmetic is guarded, the totals are guarded, and the classification is a
+claim by the author. This paragraph used to say the whole sentence was checked;
+review pointed out that it was not.
+
+The log also names the recurring *shapes* those
 findings fall into — a guarantee true only in the cases the tests covered, an
 answer good enough for reporting reused for mutating, "I could not tell" reported
 as "it did not happen" — because naming a class of mistake is cheaper than

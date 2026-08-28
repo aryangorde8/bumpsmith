@@ -166,6 +166,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 144 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Third round on the same paragraph.** The two queries answer for **one** pull request — the README literally substitutes `N` — while the sentence they are offered as the check for is an aggregate over thirty: *30 reviewed, 26 with at least one finding, 94 findings*. None of the three figures can be derived from either command, so the paragraph presented an incomplete procedure as a complete one, which is a claim about the check rather than about the counts | **Fixed** — replaced with the loop that actually produced the numbers, which prints the sentence: `30 pull requests, 30 reviewed by Qodo, 26 with at least one inline finding, 94 findings`. Run before committing it, output pasted above. The three earlier findings on this paragraph (142, 143, 144) are now each explained beside the detail of the command that answers them, so the reasons travel with the code rather than living only here | this PR |
 | 145 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Fourth round, and the sharpest.** 140 anchored the claim to a named merge; 144 replaced the check with a loop over *everything currently merged*. The two halves disagree: the moment #31 itself lands, the loop returns 31 / 31 / 27 / 97 and appears to **refute a sentence that is still true**. A verification procedure that contradicts a correct claim is worse than none, because the reader believes the procedure. Qodo also named the trap in the obvious fix — filtering by pull request *number* would be wrong, since creation order is not merge order | **Fixed** — the cutoff is #30's own `merged_at`, and the filter is on `mergedAt` rather than on the number. Verified both ways: against #30's timestamp the loop enumerates 30 pull requests and prints the sentence verbatim; against #29's it enumerates 29, which is the check that the cutoff is doing anything at all | this PR |
 | 146 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Fifth round.** `gh pr list --limit 200` returns the *most recent* two hundred and the #30 cutoff was applied to those, so once two hundred more pull requests have merged the anchored set falls out of the window and the loop reports a smaller total — silently, and about a claim written to be permanent. The verification procedure for a sentence that cannot expire had an expiry date | **Fixed** — the enumeration paginates `pulls?state=closed` and drops the unmerged ones, so there is no window. Verified by extracting the fenced block **out of the README** and running it verbatim rather than running a copy: it prints the sentence. Also renamed the loop's `c` to `cov`, because the enumeration's `jq --arg c` reads as shadowing even though the for-header is evaluated once, before the body ever assigns it | this PR |
+| 147 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | *"The count is not maintained by hand — `tests/test_docs.py` reads the log's own table and fails if this sentence and that table disagree."* The guards check the **total** against the row count and check that the three parts sum to it. **The split is unchecked**: moving ten findings from `self-found` to `automated review` passes both, while the sentence beside them says it cannot. A guarantee stated about a guard that the guard does not make — **prose stating a property is not the property, tenth instance**, and the first time it has landed on a claim about the tests rather than about the code | **Fixed** — the sentence now says which half is guarded and which is not, and why the second half **deliberately** is not: the log marks provenance in prose and only when a finding is *not* Qodo's, so a row with no marker is a row nobody marked. Inferring *Qodo raised this* from that is reading an absence as evidence — the ninth shape — and it would be most confident about exactly the rows nobody had thought about. Making the split derivable means marking all 147 rows, which is worth doing and is not a thing to do the day before a deadline | this PR |
 
 
 Every finding has a row here and a fuller account below. Findings that arrived
@@ -3085,6 +3086,38 @@ README** and running that, rather than running a copy of it — the block prints
 strongest thing this log has to say about review: every one of the five was found
 by the reviewer, on the fix for the previous one, and not one was found by the
 person who wrote the fix. The author was satisfied five times.
+
+### 147 · a guarantee about the guard that the guard does not make
+
+Not the trail paragraph this time — the one above it, and the one that has been
+held up throughout as the example of a number that *cannot* go stale.
+
+> *"The count is not maintained by hand — `tests/test_docs.py` reads the log's own
+> table and fails if this sentence and that table disagree."*
+
+Two guards stand behind it. One compares the stated total to the number of rows.
+The other checks that the three parts sum to the total. **Neither looks at the
+split.** Move ten findings from *self-found* to *automated review* and both stay
+green while the sentence beside them says they cannot.
+
+**Prose stating a property is not the property, tenth instance** — and the first
+time it has landed on a claim about the *tests* rather than about the code. That
+is a worse place for it: a reader who distrusts prose can check code, and a
+reader told the code checks the prose has nowhere left to stand.
+
+The split **could** be derived, and deliberately is not. The log marks provenance
+in prose, and only when a finding is not Qodo's — *found by audit*, *self-found
+while…*, *raised by the live harness*. A row with no marker is a row **nobody
+marked**, which is a different fact from a row Qodo raised. A test inferring the
+second from the first would be the ninth shape again, reading an absence as
+evidence, and it would be most confident about precisely the rows nobody had
+thought about. It would also be wrong today: writing that inference is what
+produced two false exclusions the last time it was tried, on rows 5 and 35.
+
+So the sentence now says which half is guarded and which is a claim by the
+author. Making the split derivable means giving all 147 rows an explicit
+provenance field. That is worth doing and it is not a thing to start the day
+before a deadline.
 
 ## How this stays honest
 
