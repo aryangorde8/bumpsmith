@@ -192,6 +192,10 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 170 | [#35](https://github.com/aryangorde8/bumpsmith/pull/35) | **Third round, on the fix for 168.** Filtering the type parameter out of what a method inherits also hid it from a `global` declaration: in `class C[conlist]` a method writing `global conlist` resolves to the *module's* import, and the genuine site went unreported. This is finding 163's rule meeting the type parameter work — 163 stopped the assignment beside a declaration from counting as a binding, and the other half of the same sentence is that `global` reaches past whatever shadowed the name, however far out it was shadowed. **Half the report is not reproducible and is recorded as rejected:** it offers `nonlocal` as the analogous case, and Python refuses that outright — `nonlocal binding not allowed for type parameter` — so the code it describes cannot be written | **Fixed for `global`, rejected for `nonlocal`.** The walker now carries the module namespace and a `global` name is restored from it. The fix is wider than the report: an ordinary class-body shadow with no type parameter anywhere was wrong in the same way and is fixed by the same change, which is the tell that the defect was the missing model rather than the type parameter code. `nonlocal` needs nothing — it names an enclosing *function* binding, which inheritance already models. Four regression cases, two of them controls | this PR |
 | 171 | [#35](https://github.com/aryangorde8/bumpsmith/pull/35) | **Fourth round, an ordering bug in the fix for 170.** The module namespace was restored *after* `_inside`, so a function's own `from pydantic import conlist` was overwritten by a snapshot taken before its body was read — and under `global` that import writes the very module name the snapshot was of. A genuine site inside such a function went unreported | **Fixed** — the restore happens first and the body's own bindings land on top, which models both halves. Recorded alongside it, because the report is next to it and the answer is *not* a change: `global conlist` followed by a **non**-pydantic local import or assignment still reports the call. That is finding 163's recorded decision, it behaves identically on the commit before this branch, and it is order-dependent inside a function body in a way this walk does not model — the walker advances statement by statement through a class body and not through a function one. Left as it is rather than traded for 163's case two days from a deadline, and written down here instead of being discovered later | this PR |
 
+| 172 | [#36](https://github.com/aryangorde8/bumpsmith/pull/36) | **`--out` can delete anything.** `build()` recursively removed whatever path `--out` named before recreating it, so `--out .` typed once would destroy a repository rather than fail. Reproduced before accepting: a directory holding `source.py` came back holding five HTML files and no `source.py` | **Fixed.** A build now drops a `.bumpsmith-site` marker into what it writes, and `_clear` refuses a non-empty directory that has no marker. Rebuilding from scratch is kept — it is what stops a page from a deleted run staying published — but it now only applies to directories this script made. An empty directory is still accepted, since nothing there is at risk | this PR |
+| 173 | [#36](https://github.com/aryangorde8/bumpsmith/pull/36) | **A manifest outside `pages/` read its payloads from the wrong place.** `build()` resolved run pages against the manifest's own directory but called `index()` without that root, and `index()` re-reads every payload to put an outcome on each card. Reproduced: building a manifest from a temporary directory raised `FileNotFoundError` naming `pages/runs/only.json` — a path belonging to a different manifest | **Fixed** — `index()` takes the root and is given it. The failure mode worth noting is the one that did *not* raise: had a same-named payload existed under `pages/`, the card would have silently described a different run from the page it linked to | this PR |
+| 174 | [#36](https://github.com/aryangorde8/bumpsmith/pull/36) | **A slug could climb out of the output directory.** Manifest keys became file names directly, and `[runs."../x"]` is valid TOML, so `out / "../x.html"` resolves above the directory the build was given. Confirmed by path arithmetic rather than by writing the file, since the payload lookup failed first | **Fixed** — a slug is checked against `[a-z0-9]+(?:-[a-z0-9]+)*` when the manifest is read, which is what a file name and a link can both carry, rather than what TOML permits. It raises at load rather than sanitising, because a slug that needs rewriting to be safe is a typo worth seeing | this PR |
+| 175 | [#36](https://github.com/aryangorde8/bumpsmith/pull/36) | **The manifest's claims were shallower than its prose.** `expected` checked only how a run ended, so the flagship blurb could keep saying "nineteen sites" and "five" after a regenerated payload stopped containing them, and the test asserting the manifest against the payload would still pass. The finding is against the honesty mechanism itself, which is the part of this PR that most needed one | **Fixed** — every run gained `expected_steps`, restating its per-step claims: break class, whether the edit was applied, how many sites. Verified by breaking rather than by inspection — dropping fixture B's first step from 19 rewrites to 18 now fails the suite, and the payload was restored and sha256-checked afterwards | this PR |
 
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
@@ -3142,6 +3146,42 @@ So the sentence now says which half is guarded and which is a claim by the
 author. Making the split derivable means giving all 147 rows an explicit
 provenance field. That is worth doing and it is not a thing to start the day
 before a deadline.
+
+## The site's own review — 172 to 175
+
+Four findings on the pull request that publishes the recorded runs, and the
+useful thing about them is where they landed. None is in the migration loop;
+every one is in the machinery built to *show* the migration loop, which had
+existed for about an hour and had therefore been read by nobody.
+
+Three are the same shape: a path built from something the code did not check.
+`--out` was passed to `rmtree` unexamined, a manifest root was computed and then
+not used, and a TOML key became a file name. Each was reproduced before it was
+accepted — the first by watching a file called `source.py` disappear, the second
+by a `FileNotFoundError` naming a payload under the wrong directory, the third by
+resolving the path rather than writing through it.
+
+The fourth is the one worth keeping. `runs.toml` writes down what each run is
+supposed to demonstrate so that a regenerated payload which no longer
+demonstrates it fails the suite instead of going up as a nicer story than the
+truth. The review pointed out that the written-down part covered only how a run
+*ended* — so the flagship blurb could go on claiming nineteen rewritten sites
+long after the payload stopped containing nineteen, and the test would still
+pass. That is a finding against the honesty mechanism, raised against the one
+artefact in this repository whose whole purpose is to be believed. It was the
+weakest link in the change and it was found by review, not by the author.
+
+All four fixes were verified by removing the fix and watching the test fail:
+
+| Fix removed | Test that failed |
+| --- | --- |
+| the `rmtree` guard | `test_a_directory_the_build_did_not_write_is_never_deleted` |
+| the index root | `test_a_manifest_outside_pages_resolves_its_own_payloads` |
+| the slug check | `test_a_slug_cannot_climb_out_of_the_output_directory` |
+| a payload's step count | `test_each_run_still_has_the_steps_its_blurb_describes` |
+
+`pages/build_site.py` and `pages/runs/fixture-b.json` were restored and
+sha256-checked afterwards.
 
 ## How this stays honest
 

@@ -56,6 +56,33 @@ def test_each_run_demonstrates_what_the_manifest_claims(slug: str, entry: dict[s
 
 
 @pytest.mark.parametrize(("slug", "entry"), _RUNS, ids=_ids())
+def test_each_run_still_has_the_steps_its_blurb_describes(slug: str, entry: dict[str, Any]) -> None:
+    """The blurbs make claims about individual steps, so the steps are checked.
+
+    `expected` covers how a run ended. That is not enough: the flagship blurb
+    says nineteen sites and five and a fourth failure nobody could classify, and
+    every one of those numbers could go stale while the outcome stayed
+    `reverted`. `expected_steps` restates the per-step claims so a regenerated
+    payload that no longer supports the prose fails here.
+
+    Extra trailing steps are allowed -- the green run ends with a passing check
+    that claims nothing -- but every step the manifest describes must still be
+    there, in order, saying what it said.
+    """
+    payload = load_payload(entry, PAGES)
+    expected_steps = entry.get("expected_steps", [])
+    assert expected_steps, f"{slug} describes no steps"
+    steps = payload.get("steps", [])
+    assert len(steps) >= len(expected_steps), f"{slug}: payload has fewer steps than claimed"
+    for position, claim in enumerate(expected_steps):
+        actual = steps[position]
+        for key, value in claim.items():
+            assert actual.get(key) == value, (
+                f"{slug} step {position + 1}: {key}={actual.get(key)!r}, claimed {value!r}"
+            )
+
+
+@pytest.mark.parametrize(("slug", "entry"), _RUNS, ids=_ids())
 def test_no_run_carries_a_path_from_the_machine_that_captured_it(
     slug: str, entry: dict[str, Any]
 ) -> None:
@@ -205,3 +232,85 @@ def test_every_payload_the_manifest_names_is_a_file_that_exists() -> None:
         raw = tomllib.load(handle)
     for slug, entry in raw["runs"].items():
         assert (PAGES / entry["payload"]).is_file(), f"{slug} names a missing payload"
+
+
+# --------------------------------------------------------------------------
+# The build stays inside the directory it was given
+# --------------------------------------------------------------------------
+
+
+def test_a_directory_the_build_did_not_write_is_never_deleted(tmp_path: Path) -> None:
+    """`--out` takes any path a person can type, including the wrong one.
+
+    Rebuilding from scratch wants `rmtree`, and `rmtree` pointed at a source
+    directory is a very bad afternoon. So a non-empty directory with no marker in
+    it is refused rather than emptied.
+    """
+    victim = tmp_path / "precious"
+    victim.mkdir()
+    (victim / "source.py").write_text("# not the site\n", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="was not written by this script"):
+        build(victim, MANIFEST)
+
+    assert (victim / "source.py").read_text(encoding="utf-8") == "# not the site\n"
+
+
+def test_a_directory_the_build_did_write_is_rebuilt(tmp_path: Path) -> None:
+    """The refusal must not cost the rebuild: the marker is what tells them apart."""
+    out = tmp_path / "out"
+    build(out, MANIFEST)
+    stale = out / "left-over.html"
+    stale.write_text("stale", encoding="utf-8")
+    build(out, MANIFEST)
+    assert not stale.exists()
+    assert (out / "index.html").is_file()
+
+
+def test_an_empty_directory_is_accepted(tmp_path: Path) -> None:
+    """Nothing is at risk in an empty directory, marker or no marker."""
+    out = tmp_path / "empty"
+    out.mkdir()
+    build(out, MANIFEST)
+    assert (out / "index.html").is_file()
+
+
+def test_a_slug_cannot_climb_out_of_the_output_directory() -> None:
+    """A slug is a TOML key, and `[runs."../x"]` is valid TOML.
+
+    It becomes both a file name and a link, so it is checked against what those
+    two can carry rather than against what TOML allows.
+    """
+    for hostile in ("../escaped", "a/b", "Upper", "with space", "trailing-"):
+        with pytest.raises(ValueError, match="not a usable run name"):
+            ordered_runs({"runs": {hostile: {"order": 1}}})
+
+
+def test_a_manifest_outside_pages_resolves_its_own_payloads(tmp_path: Path) -> None:
+    """Everything a manifest names is relative to the manifest, not to this file.
+
+    The index reads every payload a second time to put an outcome on each card.
+    When that read used a different root from the one the run pages used, a build
+    driven from anywhere else raised -- or, worse, found a same-named payload
+    belonging to a different manifest.
+    """
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "runs").mkdir(parents=True)
+    (elsewhere / "runs" / "only.json").write_text(
+        json.dumps({"repository": "somewhere/X", "outcome": "migrated", "kept": True, "steps": []}),
+        encoding="utf-8",
+    )
+    (elsewhere / "runs.toml").write_text(
+        'captured = "2026-08-28"\n'
+        f'bumpsmith = "{"a" * 40}"\n\n'
+        '[runs.only]\norder = 1\ntitle = "Only"\npayload = "runs/only.json"\n'
+        'upstream = "x"\npydantic = "1"\nblurb = "b"\n'
+        'expected = { outcome = "migrated" }\n'
+        "expected_steps = []\n",
+        encoding="utf-8",
+    )
+
+    build(tmp_path / "out", elsewhere / "runs.toml")
+    rendered = (tmp_path / "out" / "index.html").read_text(encoding="utf-8")
+    assert "Only" in rendered
+    assert "migrated" in rendered

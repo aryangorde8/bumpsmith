@@ -23,7 +23,16 @@ upstream = "https://github.com/emnify/emnify-sdk-python.git"
 sha = "1c595e4806022cb80748000e37cd52c413c248a5"
 pydantic = "1.10.26"
 redacted = "the local checkout path, replaced with `fixtures/B`"
-expected = { outcome = "reverted", stop = "no-rule", kept = false }
+expected = { outcome = "reverted", stop = "no-rule", kept = false, applied = 3, complete = true }
+# The blurb names three breaks and a fourth it could not classify. Without these
+# the blurb could keep saying "nineteen sites" long after the payload stopped
+# containing nineteen.
+expected_steps = [
+    { break_class = "ROOT_MODEL", applied = true, rewritten = 19 },
+    { break_class = "REGEX_KEYWORD", applied = true, rewritten = 5 },
+    { break_class = "VALIDATOR_FIELD_CONFIG", applied = true, rewritten = 1 },
+    { break_class = "UNKNOWN", applied = false },
+]
 blurb = """
 The flagship run. It peels three genuine pydantic v1-to-v2 breaks off a real \
 SDK — a `__root__` field across 19 sites, `regex=` across 5, a validator's \
@@ -39,7 +48,12 @@ upstream = "https://github.com/data-mie/dbt-cloud-cli.git"
 sha = "cb2680d353727f895b958fd8c5a8fec7657962b6"
 pydantic = "1.10.10"
 redacted = "the local checkout path, replaced with `fixtures/A`"
-expected = { outcome = "untouched", complete = false }
+expected = { outcome = "untouched", stop = "nothing-to-apply", complete = false, applied = 0 }
+# "The rule matches one site" and "the rewriter declines it" are the two halves
+# of the blurb, and they are `sites = 1` with `applied = false`.
+expected_steps = [
+    { break_class = "VALIDATOR_FIELD_CONFIG", applied = false, rewritten = 0, sites = 1 },
+]
 blurb = """
 The rule matches one site. The rewriter declines it: `field_not_none` reads \
 `field` inside its own body, and v2 passes nothing to rebind it from, so \
@@ -55,7 +69,12 @@ upstream = "https://github.com/cloudblue/connect-eaas-core.git"
 sha = "25ab907b9a4b0adbf354db450b137e29312bcfd5"
 pydantic = "1.10.26"
 redacted = "the local checkout path, replaced with `fixtures/F4`"
-expected = { outcome = "untouched" }
+expected = { outcome = "untouched", stop = "no-rewriter", complete = true, applied = 0 }
+# `rewritten` is absent rather than zero here: there is no rewriter to run, which
+# is a different thing from one that ran and changed nothing.
+expected_steps = [
+    { break_class = "REMOVED_INTERNAL", applied = false, sites = 1 },
+]
 blurb = """
 The break arrives through a dependency rather than the project's own source. \
 bumpsmith classifies it, names the rule, and then reports that no rewriter is \
@@ -71,7 +90,14 @@ upstream = "a small fixture written for this project"
 sha = ""
 pydantic = "1.10.x"
 redacted = "the local checkout path, replaced with `fixtures/green`"
-expected = { outcome = "migrated", kept = true }
+expected = { outcome = "migrated", stop = "green", kept = true, applied = 2, complete = true }
+# Two breaks, both applied. The site the blurb says was *not* rewritten is not
+# checkable from the payload -- a site nobody edited leaves no record -- so the
+# suite covers that one instead, in test_rules.py.
+expected_steps = [
+    { break_class = "ITEMS_KEYWORD", applied = true, rewritten = 4 },
+    { break_class = "ROOT_VALIDATOR_SKIP", applied = true, rewritten = 2 },
+]
 blurb = """
 The other half of the claim. Two breaks, both fixed, suite green, edits kept. \
 The interesting part is the edit it did *not* make: a class body that rebinds \

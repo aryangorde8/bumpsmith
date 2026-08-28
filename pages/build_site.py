@@ -62,6 +62,15 @@ a:focus-visible, .card h3 a:focus-visible { outline: 2px solid var(--accent); ou
 
 _OUTCOME_CLASS = {"migrated": "ok", "reverted": "warn", "untouched": "warn"}
 
+# A slug is a TOML table key that becomes a file name and a link, and neither of
+# those tolerates the full range of a TOML key. `[runs."../x"]` is valid TOML and
+# would put `x.html` a directory above the one the build was asked to write to.
+_SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+
+# Written into the output directory so a rebuild can tell a directory it made
+# from a directory it was merely pointed at. See `build`.
+_MARKER = ".bumpsmith-site"
+
 
 def _text(mapping: Mapping[str, Any], key: str) -> str:
     """The value at *key* as text, or empty when it is absent or not a string."""
@@ -135,7 +144,16 @@ def ordered_runs(manifest: Mapping[str, Any]) -> list[tuple[str, Mapping[str, An
     runs = manifest.get("runs")
     if not isinstance(runs, dict):
         return []
-    entries = [(slug, entry) for slug, entry in runs.items() if isinstance(entry, dict)]
+    entries = []
+    for slug, entry in runs.items():
+        if not isinstance(entry, dict):
+            continue
+        if not _SLUG.fullmatch(slug):
+            raise ValueError(
+                f"{slug!r} is not a usable run name: a slug becomes a file name and a "
+                "link, so it is restricted to lowercase letters, digits and hyphens"
+            )
+        entries.append((slug, entry))
     return sorted(entries, key=lambda pair: (pair[1].get("order", 0), pair[0]))
 
 
@@ -187,19 +205,28 @@ def _card(slug: str, entry: Mapping[str, Any], payload: Mapping[str, Any]) -> st
     )
 
 
-def index(manifest: Mapping[str, Any], runs: Sequence[tuple[str, Mapping[str, Any]]]) -> str:
+def index(
+    manifest: Mapping[str, Any],
+    runs: Sequence[tuple[str, Mapping[str, Any]]],
+    root: Path = HERE,
+) -> str:
     """Render the page that links to every run.
 
     Args:
         manifest: the parsed manifest, for the provenance footer.
         runs: ``(slug, entry)`` pairs already paired with their payloads.
+        root: the directory each entry's ``payload`` path is relative to. It has
+            to be passed in rather than defaulted to :data:`HERE`, because the
+            index reads every payload a second time to put an outcome on each
+            card -- and a build driven by a manifest somewhere else would
+            otherwise render pages from one directory and cards from another.
 
     Returns:
         A complete HTML document with no scripts and no external assets.
     """
     cards = []
     for slug, entry in runs:
-        cards.append(_card(slug, entry, load_payload(entry)))
+        cards.append(_card(slug, entry, load_payload(entry, root)))
 
     captured = escape(_text(manifest, "captured"))
     commit = _text(manifest, "bumpsmith")
@@ -247,27 +274,64 @@ def index(manifest: Mapping[str, Any], runs: Sequence[tuple[str, Mapping[str, An
     )
 
 
+def _clear(out: Path) -> None:
+    """Empty *out*, but only if emptying it is this module's business.
+
+    Rebuilding from scratch is the property that keeps a page from a deleted run
+    published forever, and it wants ``rmtree``. But ``--out`` takes any path a
+    person can type, and ``--out .`` typed once into the wrong terminal would
+    then delete a repository rather than fail. So the directory has to identify
+    itself first: a build drops :data:`_MARKER` into whatever it writes, and a
+    directory that already has files but no marker is something this module did
+    not create and will not remove.
+
+    Raises:
+        FileExistsError: if *out* holds files that no build put there.
+    """
+    if not out.exists():
+        return
+    if not out.is_dir():
+        raise FileExistsError(f"{out} is not a directory")
+    if any(out.iterdir()) and not (out / _MARKER).is_file():
+        raise FileExistsError(
+            f"{out} is not empty and was not written by this script -- it has no "
+            f"{_MARKER}. Refusing to delete it. Pass an empty or new directory."
+        )
+    shutil.rmtree(out)
+
+
 def build(out: Path, manifest_path: Path = MANIFEST) -> list[Path]:
     """Write the whole site into *out*.
 
     Args:
-        out: the directory to write into. Removed first if it exists, so a file
-            from a run that has since been deleted cannot survive a rebuild.
-        manifest_path: the manifest to build from.
+        out: the directory to write into. Emptied first, so a file from a run
+            that has since been deleted cannot survive a rebuild -- but only
+            when it is empty or carries this script's marker. See :func:`_clear`.
+        manifest_path: the manifest to build from. Everything it names is
+            resolved relative to *its* directory, not to this file's, so a
+            manifest outside `pages/` builds the same way.
 
     Returns:
-        Every path written, index first.
+        Every path written, index first. The marker is not among them: it is
+        bookkeeping for the next build, not part of the site.
+
+    Raises:
+        FileExistsError: if *out* holds files this script did not write.
     """
     manifest = load_manifest(manifest_path)
     runs = ordered_runs(manifest)
     root = manifest_path.resolve().parent
 
-    if out.exists():
-        shutil.rmtree(out)
+    _clear(out)
     out.mkdir(parents=True)
+    (out / _MARKER).write_text(
+        "Written by pages/build_site.py. Its presence is what allows the next "
+        "build to empty this directory.\n",
+        encoding="utf-8",
+    )
 
     written = [out / "index.html"]
-    written[0].write_text(index(manifest, runs), encoding="utf-8")
+    written[0].write_text(index(manifest, runs, root), encoding="utf-8")
 
     for slug, entry in runs:
         payload = load_payload(entry, root)
