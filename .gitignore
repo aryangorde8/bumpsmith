@@ -28,3 +28,7 @@ pr-calls.log
 # `proofs/recorded/` are committed deliberately; a fresh run's output is not.
 /sandbox.json
 /deny.json
+
+# The generated site. Built from `pages/runs.toml` on demand; never committed,
+# because a stale copy of a generated page is worse than no copy.
+pages/_site/

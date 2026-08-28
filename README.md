@@ -18,6 +18,15 @@ than buried: the suite it runs is not isolated and leaves its own artefacts, and
 if something else edits a file mid-run the revert **refuses** rather than
 destroying that work. See [what it does not do](#what-it-does-not-do).
 
+**Four real runs are published at
+[aryangorde8.github.io/bumpsmith](https://aryangorde8.github.io/bumpsmith/)** —
+three real third-party repositories and one small fixture, rendered from the same
+JSON `--json` writes. Three of the four end *without* a migration, which is the
+part worth looking at: one reverts three applied edits after meeting a failure it
+cannot classify, one finds a site and refuses to rewrite it, and one classifies a
+break it has no rewriter for and says so. See
+[the recorded runs](#the-recorded-runs).
+
 ---
 
 ## Exit code 0 is not a migration
@@ -226,6 +235,33 @@ escaped and placed in a text node, never in an attribute, a script, a style bloc
 or a URL. There is no network access and no JavaScript: one file that opens from
 `file://`, which is the only form that can be attached to a review or committed
 as evidence.
+
+## The recorded runs
+
+Four runs are published at
+**[aryangorde8.github.io/bumpsmith](https://aryangorde8.github.io/bumpsmith/)**,
+each one the page above rendered from a real run:
+
+| Run | Repository | Ends |
+| --- | --- | --- |
+| Three real breaks, then a stop | [emnify-sdk-python](https://github.com/emnify/emnify-sdk-python) | `reverted` |
+| One site found, and deliberately not rewritten | [dbt-cloud-cli](https://github.com/data-mie/dbt-cloud-cli) | `untouched` |
+| A break with no rewriter, said out loud | [connect-eaas-core](https://github.com/cloudblue/connect-eaas-core) | `untouched` |
+| A migration that is kept | a small fixture | `migrated` |
+
+Three of the four end without a migration, and that is the reason they are the
+four. A migration tool that always edits something is not reporting what it
+found.
+
+The site is built by [`pages/build_site.py`](pages/build_site.py) from the
+payloads committed in [`pages/runs/`](pages/runs), which are verbatim `--json`
+output with exactly one mechanical substitution — the capturing machine's
+absolute path, replaced with a stable name.
+[`pages/runs.toml`](pages/runs.toml) records that swap for every run, along with
+the commit each was captured against and what each is supposed to demonstrate;
+[`tests/test_pages.py`](tests/test_pages.py) asserts that claim against the
+payload, so a regenerated run that no longer shows what its blurb says fails the
+suite rather than going up as a nicer story than the truth.
 
 ## When it stops, it says which thing happened
 
@@ -564,7 +600,13 @@ ruff check . && ruff format --check .
 mypy
 ```
 
-`mypy` runs strict over `src`, `tests` and `proofs`. `ruff` selects the rule
+The site is built and checked offline too:
+
+```bash
+python pages/build_site.py --out pages/_site   # renders the recorded runs
+```
+
+`mypy` runs strict over `src`, `tests`, `proofs` and `pages`. `ruff` selects the rule
 groups [`REVIEW.md`](REVIEW.md) asks for in prose, so the linter and the written
 standard say the same thing and a reviewer never has to arbitrate between them.
 
@@ -687,7 +729,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **171 findings**: 123 raised by automated review, 4
+As of 28 August 2026 it holds **177 findings**: 129 raised by automated review, 4
 that only a live run against the harness could have raised, and 44 the author
 found rather than review. **The total** is not maintained by hand —
 `tests/test_docs.py` reads the log's own table and fails if this sentence and
