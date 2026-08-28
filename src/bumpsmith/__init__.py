@@ -5,13 +5,19 @@ part it uses:
 
 ===========================  ===================================================
 :mod:`bumpsmith.run`         where a suite runs, locally or in the harness's sandbox
+:mod:`bumpsmith.remote`      running the whole loop inside that sandbox instead
+:mod:`bumpsmith.fanout`      several subjects at once, each in a tree of its own
 :mod:`bumpsmith.failures`    what pytest's output says the break is
 :mod:`bumpsmith.rules`       which migration rule that break implies, and every site
 :mod:`bumpsmith.rewrite`     the smallest edit that carries the rule out
 :mod:`bumpsmith.apply`       applying it as a transaction that reverts by default
 :mod:`bumpsmith.gate`        stopping before anything irreversible
+:mod:`bumpsmith.publish`     the one irreversible thing, and only where somebody said
 :mod:`bumpsmith.harness`     answering TrueForge's approval events with that gate
 :mod:`bumpsmith.trueforge`   the transport, and the only place a socket is opened
+:mod:`bumpsmith.report`      the run as a page, from the payload ``--json`` writes
+:mod:`bumpsmith.rootdir`     whose pytest configuration the subject's suite runs under
+:mod:`bumpsmith.sources`     one byte-exact reader, so encoding handling cannot drift
 :mod:`bumpsmith.fixtures`    cloning the repositories it is measured against
 ===========================  ===================================================
 

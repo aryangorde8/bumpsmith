@@ -101,19 +101,34 @@ def _module_table(text: str) -> list[str]:
 
 
 def _shipped_modules() -> set[str]:
-    """Every module of the package a reader could open, dunders excluded.
+    """Every ``.py`` file the package ships, with nothing filtered out.
 
-    ``__init__`` and ``__main__`` are left out deliberately: the table's column
-    is "what it guarantees", and neither of those is a guarantee a caller reasons
-    about. Every other file in the package is something the table claims to map.
+    The first version of this excluded ``__*.py`` by pattern, on the reasoning
+    that the table's column is "what it guarantees" and a dunder is not a
+    guarantee. Review rejected it, and correctly: the README's sentence is
+    "Everything is in ``src/bumpsmith/``", so a guard that means *everything
+    except dunders* enforces a claim the README does not make -- which is this
+    file's own subject happening inside this file. Worse, a pattern excludes
+    modules that do not exist yet: a ``__version__.py`` added next month would
+    have been silently out of scope, and nobody would have chosen that.
+
+    So nothing is filtered. ``__main__.py`` and ``__init__.py`` have rows,
+    because on reflection both are things a reader wants to find.
     """
     assert PACKAGE.is_dir(), f"expected the package beside the tests, at {PACKAGE}"
-    return {path.name for path in PACKAGE.glob("*.py") if not path.name.startswith("__")}
+    return {path.name for path in PACKAGE.glob("*.py")}
 
 
-def _tabled_modules(text: str) -> set[str]:
-    """The module named in the first column of each row of the README's table."""
-    return {row.split("|")[1].strip().strip("*").split("`")[1] for row in _module_table(text)}
+def _tabled_modules(text: str) -> list[str]:
+    """The module named in the first column of each row, **in order, with repeats**.
+
+    A list rather than a set, and that is the whole point. Set-difference catches
+    a missing name and an invented one; neither notices the same name twice, so a
+    table that had drifted into two rows for one module -- one of them stale --
+    would have satisfied both checks while the mapping it advertises was gone.
+    Raised in review on the first version of this file.
+    """
+    return [row.split("|")[1].strip().strip("*").split("`")[1] for row in _module_table(text)]
 
 
 def test_the_readme_does_not_restate_the_number_of_stop_reasons() -> None:
@@ -179,7 +194,7 @@ def test_the_readme_maps_every_module_the_package_ships() -> None:
     ``remote.py``, ``publish.py`` and ``report.py`` -- were the ones doing the
     work the project most wanted read, and the omission cost nothing that failed.
     """
-    missing = sorted(_shipped_modules() - _tabled_modules(_readme()))
+    missing = sorted(_shipped_modules() - set(_tabled_modules(_readme())))
     assert not missing, (
         f"modules in src/bumpsmith/ with no row in the README's module table: {', '.join(missing)}"
     )
@@ -191,9 +206,83 @@ def test_the_readme_module_table_invents_no_module() -> None:
     A stale row is worse than a missing one. The table still looks complete, and
     the link in it goes nowhere.
     """
-    strays = sorted(_tabled_modules(_readme()) - _shipped_modules())
+    strays = sorted(set(_tabled_modules(_readme())) - _shipped_modules())
     assert not strays, (
         f"README module table rows naming no file in src/bumpsmith/: {', '.join(strays)}"
+    )
+
+
+# --------------------------------------------------------------------------
+# The package's own map of itself
+#
+# Found while fixing the review finding above. `src/bumpsmith/__init__.py` is a
+# *third* description of the same package -- the one `help(bumpsmith)` prints --
+# and it listed nine of the eighteen files. The same four the README omitted were
+# among them. Three maps of one package, all written by hand, and until now none
+# of them was checked against the package.
+# --------------------------------------------------------------------------
+
+INIT = PACKAGE / "__init__.py"
+
+#: Modules the ``__init__`` table legitimately leaves out, each named in its own
+#: prose instead. Named individually rather than matched by pattern, for the
+#: reason :func:`_shipped_modules` gives: a pattern silently adopts files that do
+#: not exist yet, and a decision nobody made is not a decision.
+_INIT_TABLE_EXEMPT = {
+    "migrate.py",  # "Start at bumpsmith.migrate ... every other module is a part it uses"
+    "__main__.py",  # "python -m bumpsmith runs the loop from a command line"
+    "__init__.py",  # the file the docstring is in
+}
+
+_INIT_ROW = re.compile(r"^:mod:`bumpsmith\.(\w+)`", re.MULTILINE)
+
+
+def _init_table_modules() -> list[str]:
+    """The modules named in the package docstring's table, in order, with repeats."""
+    assert INIT.is_file(), f"expected the package's __init__ at {INIT}"
+    doc = INIT.read_text(encoding="utf-8")
+    rows = [m.group(1) + ".py" for m in _INIT_ROW.finditer(doc)]
+    assert rows, (
+        "no ``:mod:`bumpsmith.X```  rows found in the package docstring. If the table "
+        "moved or was reworded, update this anchor."
+    )
+    return rows
+
+
+def test_the_package_docstring_maps_every_module_it_claims_to() -> None:
+    """`help(bumpsmith)` is a map too, and it was missing six of the files it maps.
+
+    The docstring says every module other than `migrate` is a part the loop uses,
+    and then lists them. That is the same promise the README's table makes, made
+    to a different reader -- somebody at a REPL who never opens the repository.
+    """
+    expected = _shipped_modules() - _INIT_TABLE_EXEMPT
+    missing = sorted(expected - set(_init_table_modules()))
+    assert not missing, (
+        f"modules absent from the table in src/bumpsmith/__init__.py: {', '.join(missing)}"
+    )
+
+
+def test_the_package_docstring_invents_no_module() -> None:
+    """A row in the docstring for a file that is not there, which `help()` still prints."""
+    strays = sorted(set(_init_table_modules()) - _shipped_modules())
+    assert not strays, (
+        f"rows in src/bumpsmith/__init__.py naming no file in the package: {', '.join(strays)}"
+    )
+
+
+def test_the_readme_module_table_names_each_module_once() -> None:
+    """One row per module, which neither of the two checks above can see.
+
+    Both of those compare sets, and a set has already thrown multiplicity away by
+    the time they run. A table with two rows for one module passes them while
+    being exactly the thing the table promises not to be -- and the second row is
+    the one nobody updates.
+    """
+    named = _tabled_modules(_readme())
+    repeated = sorted({name for name in named if named.count(name) > 1})
+    assert not repeated, (
+        f"modules with more than one row in the README's module table: {', '.join(repeated)}"
     )
 
 

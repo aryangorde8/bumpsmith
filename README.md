@@ -319,6 +319,8 @@ implementation.
 | [`sources.py`](src/bumpsmith/sources.py) | one byte-exact reader honouring PEP 263, shared so encoding handling cannot drift between modules |
 | [`rootdir.py`](src/bumpsmith/rootdir.py) | which configuration would govern the subject's suite. pytest walks *upward* for it, so a repository that configures nothing inherits whatever it sits beneath — and a verdict from the right tree can still not be about it |
 | [`fixtures.py`](src/bumpsmith/fixtures.py) | clones the four fixtures from upstream at pinned SHAs and verifies `HEAD`. No vendored code in this repository |
+| [`__main__.py`](src/bumpsmith/__main__.py) | the command line — `python -m bumpsmith PATH -- <suite>`. It parses, refuses `--sandbox` with the reason above, and renders what came back. It holds no migration logic at all, which is what lets `migrate()` be driven by a caller that never touches `argparse` — and is why the guarantees that matter are enforced there rather than here |
+| [`__init__.py`](src/bumpsmith/__init__.py) | the package's public surface, deliberately almost empty. **Nothing is re-exported**: `bumpsmith.migrate` is both a module and the function inside it, and binding one name to both would make `from bumpsmith import migrate` mean different things depending on import order |
 
 Two design choices carry more weight than the rest.
 
@@ -656,8 +658,8 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **135 findings**: 91 raised by automated review, 4
-that only a live run against the harness could have raised, and 40 the author
+As of 28 August 2026 it holds **138 findings**: 93 raised by automated review, 4
+that only a live run against the harness could have raised, and 41 the author
 found rather than review. The count is not maintained by hand -- `tests/test_docs.py`
 reads the log's own table and fails if this sentence and that table disagree,
 because this paragraph has been the stale number twice already. The log also names the recurring *shapes* those
