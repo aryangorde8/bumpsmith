@@ -1345,3 +1345,329 @@ def test_a_declaration_is_not_a_binding(label: str, source: str, expected: list[
     declaration away and the same assignment shadows exactly as before.
     """
     assert _sites(source, root_validator_sites) == expected, label
+
+
+# --------------------------------------------------------------------------
+# Scope, the fourth time
+#
+# The follow-up review on #32 raised five findings, not the three the log
+# recorded at the time; these are the two that were left. Both lose a site
+# rather than inventing one, which is why nothing failed and why they were
+# easy to miss -- a repository is left unmigrated by a tool that said it had
+# looked. Both were confirmed by running them before the fix.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("label", "source", "expected"),
+    [
+        (
+            "a bare module annotation does not replace the import",
+            """
+            from pydantic import conlist
+
+            conlist: object
+
+            class M:
+                x: conlist(str, min_items=1)
+            """,
+            [6],
+        ),
+        (
+            "an annotation with a value is still a rebinding",
+            """
+            from pydantic import conlist
+
+            conlist: object = None
+
+            class M:
+                x: conlist(str, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "a bare annotation in a class body binds nothing",
+            """
+            from pydantic import conlist
+
+            class M:
+                conlist: object
+                x: conlist(str, min_items=1)
+            """,
+            [5],
+        ),
+        (
+            "a bare annotation in a function body is still a local",
+            """
+            from pydantic import conlist
+
+            def f():
+                conlist: object
+                return conlist(str, min_items=1)
+            """,
+            [],
+        ),
+    ],
+)
+def test_a_bare_annotation_binds_only_where_python_binds_it(
+    label: str, source: str, expected: list[int]
+) -> None:
+    """`x: int` with no value is three different statements in three scopes.
+
+    At module level and in a class body it writes `__annotations__` and leaves
+    any existing binding alone, so reading it as a rebinding drops a name that
+    is still pydantic's. In a function body it does bind -- without assigning --
+    and `x: int` alone is enough to make reading `x` raise `UnboundLocalError`.
+    The fourth case is the control for the other three.
+    """
+    assert _sites(source, items_keyword_sites) == expected, label
+
+
+@pytest.mark.parametrize(
+    ("label", "source", "expected"),
+    [
+        (
+            "a class type parameter's bound is an expression like any other",
+            """
+            from pydantic import conlist
+
+            class C[T: conlist(str, min_items=1)]:
+                pass
+            """,
+            [3],
+        ),
+        (
+            "so is a function's",
+            """
+            from pydantic import conlist
+
+            def f[T: conlist(str, min_items=1)]():
+                pass
+            """,
+            [3],
+        ),
+        (
+            "and so is a type parameter default",
+            """
+            from pydantic import conlist
+
+            def f[T = conlist(str, min_items=1)]():
+                pass
+            """,
+            [3],
+        ),
+        (
+            "a type parameter shadows the import it is named after",
+            """
+            from pydantic import conlist
+
+            class C[conlist](list[conlist(str, min_items=1)]):
+                pass
+            """,
+            [],
+        ),
+    ],
+)
+def test_a_type_parameter_list_is_walked_and_can_shadow(
+    label: str, source: str, expected: list[int]
+) -> None:
+    """PEP 695 bounds and defaults were reachable by `ast.walk` and not by the
+    scope walk that replaced it, so replacing the traversal quietly narrowed
+    what the rules could see on a version of Python this project requires.
+
+    The last case is the direction that matters more. A type parameter binds a
+    name in its own annotation scope, so walking these under the enclosing
+    names alone would report a call that has nothing to do with pydantic --
+    which is the mistake the whole module exists to avoid.
+    """
+    assert _sites(source, items_keyword_sites) == expected, label
+
+
+@pytest.mark.parametrize(
+    ("label", "source", "expected"),
+    [
+        (
+            "a type parameter shadows inside the class body, not only above it",
+            """
+            from pydantic import conlist
+
+            class C[conlist]:
+                x = conlist(str, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "and inside a method of that class",
+            """
+            from pydantic import conlist
+
+            class C[conlist]:
+                def m(self):
+                    return conlist(str, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "a type alias binds its parameters for the value as well",
+            """
+            from pydantic import conlist
+
+            type A[conlist] = conlist(int, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "an alias type parameter's bound is still a real site",
+            """
+            from pydantic import conlist
+
+            type A[T: conlist(int, min_items=1)] = list[T]
+            """,
+            [3],
+        ),
+        (
+            "an ordinary alias is untouched by any of it",
+            """
+            from pydantic import conlist
+
+            type A = conlist(int, min_items=1)
+            """,
+            [3],
+        ),
+    ],
+)
+def test_a_type_parameter_shadows_everything_the_statement_covers(
+    label: str, source: str, expected: list[int]
+) -> None:
+    """Review on the fix for #167, and both halves fail the dangerous way.
+
+    The first fix subtracted type parameter names while walking the bases and
+    bounds and then started the class body from the unfiltered map, so
+    `class C[conlist]` shadowed above the body and not inside it. And
+    `ast.TypeAlias` was never given a branch at all, so a `type A[conlist] = ...`
+    value was read under the module's names.
+
+    Both report a site that is not pydantic's, which is the direction that
+    edits somebody's unrelated code rather than the direction that misses a
+    migration. The last two cases are the controls.
+    """
+    assert _sites(source, items_keyword_sites) == expected, label
+
+
+@pytest.mark.parametrize(
+    ("label", "source", "expected"),
+    [
+        (
+            "global reaches past a type parameter to the module",
+            """
+            from pydantic import conlist
+
+            class C[conlist]:
+                def m(self):
+                    global conlist
+                    return conlist(str, min_items=1)
+            """,
+            [6],
+        ),
+        (
+            "and past an ordinary class-body shadow",
+            """
+            from pydantic import conlist
+
+            class C:
+                conlist = ours
+                def m(self):
+                    global conlist
+                    return conlist(str, min_items=1)
+            """,
+            [7],
+        ),
+        (
+            "a global naming something the module never imported stays absent",
+            """
+            class C[conlist]:
+                def m(self):
+                    global conlist
+                    return conlist(str, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "without the declaration the type parameter still shadows",
+            """
+            from pydantic import conlist
+
+            class C[conlist]:
+                def m(self):
+                    return conlist(str, min_items=1)
+            """,
+            [],
+        ),
+    ],
+)
+def test_global_resolves_in_the_module_whatever_shadowed_it(
+    label: str, source: str, expected: list[int]
+) -> None:
+    """Third round on the type parameter work, and finding 163's rule again.
+
+    163 stopped the assignment beside a `global` from counting as a local
+    binding. This is the other half of the same sentence: a name can be missing
+    from the inherited map because something further out removed it, and
+    `global` reaches past all of that to the module. Restoring from the module
+    namespace is the only reading right in both cases -- which is why the second
+    case, an ordinary class-body shadow with no type parameter anywhere, was
+    also wrong before this and is fixed by the same change.
+
+    `nonlocal` has no equivalent case to test: Python refuses it outright for a
+    type parameter name, so the code the report imagined cannot be written.
+    The last two cases are the controls.
+    """
+    assert _sites(source, items_keyword_sites) == expected, label
+
+
+@pytest.mark.parametrize(
+    ("label", "source", "expected"),
+    [
+        (
+            "a function's own pydantic import wins over the module snapshot",
+            """
+            def f():
+                global conlist
+                from pydantic import conlist
+                return conlist(str, min_items=1)
+            """,
+            [4],
+        ),
+        (
+            "the restore still happens when the body imports nothing",
+            """
+            from pydantic import conlist
+
+            class C[conlist]:
+                def m(self):
+                    global conlist
+                    return conlist(str, min_items=1)
+            """,
+            [6],
+        ),
+    ],
+)
+def test_a_global_import_is_still_the_function_s_own(
+    label: str, source: str, expected: list[int]
+) -> None:
+    """Fourth round, and an ordering bug in the fix for 170.
+
+    Restoring the module namespace *after* `_inside` overwrote the function's
+    own `from pydantic import conlist` with a snapshot taken before the body
+    was read -- and under `global` that import writes the very module name the
+    snapshot was of. Restoring first and letting the body's own bindings land
+    on top is the order that models both.
+
+    A neighbouring case is deliberately not asserted here: `global conlist`
+    followed by a *non*-pydantic local import or assignment still reports the
+    call. That is finding 163's recorded decision rather than this change --
+    it behaves identically on the commit before this branch -- and it is
+    order-dependent inside a function body in a way this walk does not model.
+    See `REVIEW-LOG.md` #171.
+    """
+    assert _sites(source, items_keyword_sites) == expected, label
