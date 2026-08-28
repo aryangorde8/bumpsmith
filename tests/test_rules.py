@@ -1345,3 +1345,139 @@ def test_a_declaration_is_not_a_binding(label: str, source: str, expected: list[
     declaration away and the same assignment shadows exactly as before.
     """
     assert _sites(source, root_validator_sites) == expected, label
+
+
+# --------------------------------------------------------------------------
+# Scope, the fourth time
+#
+# The follow-up review on #32 raised five findings, not the three the log
+# recorded at the time; these are the two that were left. Both lose a site
+# rather than inventing one, which is why nothing failed and why they were
+# easy to miss -- a repository is left unmigrated by a tool that said it had
+# looked. Both were confirmed by running them before the fix.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("label", "source", "expected"),
+    [
+        (
+            "a bare module annotation does not replace the import",
+            """
+            from pydantic import conlist
+
+            conlist: object
+
+            class M:
+                x: conlist(str, min_items=1)
+            """,
+            [6],
+        ),
+        (
+            "an annotation with a value is still a rebinding",
+            """
+            from pydantic import conlist
+
+            conlist: object = None
+
+            class M:
+                x: conlist(str, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "a bare annotation in a class body binds nothing",
+            """
+            from pydantic import conlist
+
+            class M:
+                conlist: object
+                x: conlist(str, min_items=1)
+            """,
+            [5],
+        ),
+        (
+            "a bare annotation in a function body is still a local",
+            """
+            from pydantic import conlist
+
+            def f():
+                conlist: object
+                return conlist(str, min_items=1)
+            """,
+            [],
+        ),
+    ],
+)
+def test_a_bare_annotation_binds_only_where_python_binds_it(
+    label: str, source: str, expected: list[int]
+) -> None:
+    """`x: int` with no value is three different statements in three scopes.
+
+    At module level and in a class body it writes `__annotations__` and leaves
+    any existing binding alone, so reading it as a rebinding drops a name that
+    is still pydantic's. In a function body it does bind -- without assigning --
+    and `x: int` alone is enough to make reading `x` raise `UnboundLocalError`.
+    The fourth case is the control for the other three.
+    """
+    assert _sites(source, items_keyword_sites) == expected, label
+
+
+@pytest.mark.parametrize(
+    ("label", "source", "expected"),
+    [
+        (
+            "a class type parameter's bound is an expression like any other",
+            """
+            from pydantic import conlist
+
+            class C[T: conlist(str, min_items=1)]:
+                pass
+            """,
+            [3],
+        ),
+        (
+            "so is a function's",
+            """
+            from pydantic import conlist
+
+            def f[T: conlist(str, min_items=1)]():
+                pass
+            """,
+            [3],
+        ),
+        (
+            "and so is a type parameter default",
+            """
+            from pydantic import conlist
+
+            def f[T = conlist(str, min_items=1)]():
+                pass
+            """,
+            [3],
+        ),
+        (
+            "a type parameter shadows the import it is named after",
+            """
+            from pydantic import conlist
+
+            class C[conlist](list[conlist(str, min_items=1)]):
+                pass
+            """,
+            [],
+        ),
+    ],
+)
+def test_a_type_parameter_list_is_walked_and_can_shadow(
+    label: str, source: str, expected: list[int]
+) -> None:
+    """PEP 695 bounds and defaults were reachable by `ast.walk` and not by the
+    scope walk that replaced it, so replacing the traversal quietly narrowed
+    what the rules could see on a version of Python this project requires.
+
+    The last case is the direction that matters more. A type parameter binds a
+    name in its own annotation scope, so walking these under the enclosing
+    names alone would report a call that has nothing to do with pydantic --
+    which is the mistake the whole module exists to avoid.
+    """
+    assert _sites(source, items_keyword_sites) == expected, label
