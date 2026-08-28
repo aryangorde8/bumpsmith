@@ -600,8 +600,8 @@ without a harness cannot run the ones that need one and a claim nobody can check
 is worth what it costs to make. [`proofs/README.md`](proofs/README.md) says what
 each needs and what each costs.
 
-**The last of those has a control, and the control has been watched fail.**
-`session_reconnect.py` would print *"the session held"* against a harness that
+**`session_reconnect.py` has a control, and the control has been watched fail.**
+It would print *"the session held"* against a harness that
 pooled its sandboxes, so `tests/test_session_reconnect.py` runs the script
 against stand-in harnesses that share one sandbox, forget one, keep nothing at
 all, and fail the read outright, and requires it to fail against every one of
@@ -762,7 +762,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **180 findings**: 132 raised by automated review, 4
+As of 28 August 2026 it holds **181 findings**: 133 raised by automated review, 4
 that only a live run against the harness could have raised, and 44 the author
 found rather than review. **The total** is not maintained by hand —
 `tests/test_docs.py` reads the log's own table and fails if this sentence and
@@ -908,8 +908,8 @@ to it and why.
 One is threads on GitHub, anchored to #37's merge and counted by the loop below;
 the other is rows in a file, attributed to automated review by hand in a split
 this README already says is not verified. They have since come apart — the three
-findings Qodo raised on #39 took the second to 132, while the first, being
-anchored, stayed where it was. That is what a coincidence does and a
+findings Qodo raised on #39 took the second past it, and it has kept moving,
+while the first, being anchored, stayed where it was. That is what a coincidence does and a
 reconciliation does not, and it is why reading the match as a cross-check would
 have been the log's recurring **shape 3**: an answer good enough for one question
 reused to settle a stronger one. The paragraph is kept, rather than deleted with
