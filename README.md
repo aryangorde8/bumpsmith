@@ -19,7 +19,7 @@ if something else edits a file mid-run the revert **refuses** rather than
 destroying that work. See [what it does not do](#what-it-does-not-do).
 
 **Four real runs are published at
-[aryangorde8.github.io/bumpsmith](https://aryangorde8.github.io/bumpsmith/)** —
+[aryangorde.com/bumpsmith](https://aryangorde.com/bumpsmith/)** —
 three real third-party repositories and one small fixture, rendered from the same
 JSON `--json` writes. Three of the four end *without* a migration, which is the
 part worth looking at: one reverts three applied edits after meeting a failure it
@@ -239,7 +239,7 @@ as evidence.
 ## The recorded runs
 
 Four runs are published at
-**[aryangorde8.github.io/bumpsmith](https://aryangorde8.github.io/bumpsmith/)**,
+**[aryangorde.com/bumpsmith](https://aryangorde.com/bumpsmith/)**,
 each one the page above rendered from a real run:
 
 | Run | Repository | Ends |
