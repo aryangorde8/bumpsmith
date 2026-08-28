@@ -687,7 +687,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **163 findings**: 115 raised by automated review, 4
+As of 28 August 2026 it holds **165 findings**: 117 raised by automated review, 4
 that only a live run against the harness could have raised, and 44 the author
 found rather than review. **The total** is not maintained by hand —
 `tests/test_docs.py` reads the log's own table and fails if this sentence and
@@ -754,9 +754,35 @@ all. The point of keeping this paragraph is that the follow-up review is not a
 formality — it found real defects in merged code, which is the argument for
 requiring one.
 
-**The whole trail, as of the merge of #30.** Thirty pull requests; Qodo reviewed
-every one; twenty-six raised at least one inline finding, **94 in total**. Every
-finding is in [`REVIEW-LOG.md`](REVIEW-LOG.md) with what happened to it and why.
+**Two rounds against the final code:
+[#32](https://github.com/aryangorde8/bumpsmith/pull/32) and
+[#33](https://github.com/aryangorde8/bumpsmith/pull/33)**, the last two merges.
+Qodo raised **nine** findings between them on its first pass. Three on #32 were
+one defect wearing three faces: every rule resolved names against a single
+file-wide import map, so a `conlist` shadowed in a class body, bound by a
+comprehension, or imported inside a class was still read as pydantic's. The same
+map was behind an already-merged rule and a third that review never mentioned —
+fixed at the root, for all four consumers, which is finding 139's lesson applied.
+The worst was on #33: `@root_validator(skip_on_failure=False)` was handed a
+*second* `skip_on_failure=True` rather than having the first one changed. That
+one is worth saying plainly, because `ast.parse` accepts a repeated keyword
+argument and `compile` does not — so the tool's own re-parse could not see it,
+and the migration would have written a file that does not import.
+
+Asked for a second review against the fix, Qodo returned **five more findings,
+every one of them inside the first round's own fix**: a walrus rebinding it did
+not count, a nested class handed its enclosing class's namespace, sequential
+class-body binding — raised on both pull requests, from opposite directions —
+and `global`/`nonlocal` misread as shadowing. All fourteen are fixed, each
+reproduced before it was accepted; Qodo marked the first round's threads resolved
+on the re-review. The pair is the clearest evidence in this repository that a
+follow-up review is not a formality: the second round found real defects in code
+whose only purpose was to fix the first.
+
+**The whole trail, as of the merge of #33.** Thirty-three pull requests; Qodo
+reviewed every one; twenty-nine raised at least one inline finding, **117 in
+total**. Every finding is in [`REVIEW-LOG.md`](REVIEW-LOG.md) with what happened
+to it and why.
 
 That sentence is anchored to a named merge on purpose. The finding total two
 paragraphs above cannot go stale — a test reads the log's own table and fails
@@ -770,7 +796,7 @@ prints the sentence:
 
 ```
 repo=aryangorde8/bumpsmith
-cutoff=$(gh api repos/$repo/pulls/30 --jq .merged_at)
+cutoff=$(gh api repos/$repo/pulls/33 --jq .merged_at)
 for n in $(gh api --paginate "repos/$repo/pulls?state=closed&per_page=100" \
            | jq -s --arg c "$cutoff" \
                'add | map(select(.merged_at != null and .merged_at <= $c)) | .[].number'); do
@@ -786,19 +812,19 @@ done | awk '{ prs++; findings += $2; if ($2 > 0) withf++; if ($2 + $3 > 0) revie
 ```
 
 ```
-30 pull requests, 30 reviewed by Qodo, 26 with at least one inline finding, 94 findings
+33 pull requests, 33 reviewed by Qodo, 29 with at least one inline finding, 117 findings
 ```
 
 Five details in there were each raised as a finding on the version of this
 paragraph that lacked them, and they are five coats on one mistake.
 
-**It asks twice per pull request.** Four of the thirty have zero inline findings,
-and zero from `/pulls/N/comments` is the same answer for *Qodo reviewed this and
-found nothing* as for *Qodo never reviewed this* — opposite facts, and the
-sentence above asserts the first for all thirty. Coverage comes from
-`/issues/N/comments`, where Qodo posts a summary either way. Collapsing the two
-is `REVIEW-LOG.md`'s ninth shape, *"I could not tell" reported as "it did not
-happen"*.
+**It asks twice per pull request.** Four of the thirty-three have zero inline
+findings, and zero from `/pulls/N/comments` is the same answer for *Qodo
+reviewed this and found nothing* as for *Qodo never reviewed this* — opposite
+facts, and the sentence above asserts the first for all thirty-three. Coverage
+comes from `/issues/N/comments`, where Qodo posts a summary either way.
+Collapsing the two is `REVIEW-LOG.md`'s ninth shape, *"I could not tell"
+reported as "it did not happen"*.
 
 **Both queries paginate, and both filter with `jq -s` rather than `--jq`.**
 GitHub returns thirty comments a page, so a summary on page two came back as
@@ -807,13 +833,13 @@ zero — the same false *never reviewed*, reintroduced by the fix for it. And
 count for each, so a two-page thread prints `30` then `4` rather than `34`: a
 different number that looks exactly like the right one.
 
-**It loops.** The claim is an aggregate over thirty pull requests, and a command
-that answers for one of them is not a procedure for checking it.
+**It loops.** The claim is an aggregate over thirty-three pull requests, and a
+command that answers for one of them is not a procedure for checking it.
 
 **It stops where the sentence stops.** Anchoring the claim to a merge and then
 checking it against *everything merged since* is two halves that disagree: the
 moment the next pull request lands, the loop returns a larger number and appears
-to refute a sentence that is still true. The cutoff is #30's own `merged_at`, and
+to refute a sentence that is still true. The cutoff is #33's own `merged_at`, and
 the filter is on **merge time** rather than pull request number, because those
 are not the same order.
 
