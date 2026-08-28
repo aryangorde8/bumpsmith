@@ -1481,3 +1481,74 @@ def test_a_type_parameter_list_is_walked_and_can_shadow(
     which is the mistake the whole module exists to avoid.
     """
     assert _sites(source, items_keyword_sites) == expected, label
+
+
+@pytest.mark.parametrize(
+    ("label", "source", "expected"),
+    [
+        (
+            "a type parameter shadows inside the class body, not only above it",
+            """
+            from pydantic import conlist
+
+            class C[conlist]:
+                x = conlist(str, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "and inside a method of that class",
+            """
+            from pydantic import conlist
+
+            class C[conlist]:
+                def m(self):
+                    return conlist(str, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "a type alias binds its parameters for the value as well",
+            """
+            from pydantic import conlist
+
+            type A[conlist] = conlist(int, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "an alias type parameter's bound is still a real site",
+            """
+            from pydantic import conlist
+
+            type A[T: conlist(int, min_items=1)] = list[T]
+            """,
+            [3],
+        ),
+        (
+            "an ordinary alias is untouched by any of it",
+            """
+            from pydantic import conlist
+
+            type A = conlist(int, min_items=1)
+            """,
+            [3],
+        ),
+    ],
+)
+def test_a_type_parameter_shadows_everything_the_statement_covers(
+    label: str, source: str, expected: list[int]
+) -> None:
+    """Review on the fix for #167, and both halves fail the dangerous way.
+
+    The first fix subtracted type parameter names while walking the bases and
+    bounds and then started the class body from the unfiltered map, so
+    `class C[conlist]` shadowed above the body and not inside it. And
+    `ast.TypeAlias` was never given a branch at all, so a `type A[conlist] = ...`
+    value was read under the module's names.
+
+    Both report a site that is not pydantic's, which is the direction that
+    edits somebody's unrelated code rather than the direction that misses a
+    migration. The last two cases are the controls.
+    """
+    assert _sites(source, items_keyword_sites) == expected, label

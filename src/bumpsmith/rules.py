@@ -889,10 +889,23 @@ def nodes_in_scope(
         # scope a nested function gets, not from `names`. And it binds top to
         # bottom rather than treating the whole body as static locals, so an
         # import written below a call must not reach back up to it.
-        body = inherited
+        # `outer_functions`, not `inherited`: a type parameter is bound for the
+        # whole statement, so `class C[conlist]` shadows the import inside the
+        # body and inside every method of it, not only in the bases above.
+        body = outer_functions
         for statement in node.body:
-            yield from nodes_in_scope(statement, body, inherited)
+            yield from nodes_in_scope(statement, body, outer_functions)
             body = _advanced(body, statement)
+        return
+
+    if isinstance(node, ast.TypeAlias):
+        # `type Alias[conlist] = conlist(int, min_items=1)` binds its parameters
+        # for the value as well as for the bounds, and the value is the half a
+        # generic walk would otherwise read under the module's names.
+        outer, outer_functions = _outside_type_params(node, names, inherited)
+        for part in _evaluated_outside(node):
+            yield from nodes_in_scope(part, outer, outer_functions)
+        yield from nodes_in_scope(node.value, outer, outer_functions)
         return
 
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
