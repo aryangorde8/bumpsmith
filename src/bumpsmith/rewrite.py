@@ -24,18 +24,20 @@ is what puts them on disk -- and takes them back by default.
 
 import ast
 import re
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from bumpsmith.apply import Edit
 from bumpsmith.failures import BreakClass
 from bumpsmith.rules import (
+    LENGTH_KEYWORDS,
     Match,
     Role,
     Rule,
     ScanResult,
     declares_root_field,
+    items_keyword_sites,
     pydantic_name,
     pydantic_names,
     regex_keyword_sites,
@@ -403,6 +405,30 @@ def _import_replacement(tree: ast.Module) -> _Replacement | None:
     return None
 
 
+_GONE = "the site the scan reported is not there any more"
+
+_MOVED = (
+    "the line holds more sites than the scan reported, so which of them it "
+    "meant cannot be told apart from the ones that arrived since"
+)
+"""Why a line that *gained* sites is left alone entirely.
+
+A line that lost one was already handled: the survivors are rewritten and the
+difference is reported skipped. A line that gained one was not, and review found
+the gap -- the planner took the first `wanted` of whatever the fresh parse
+returned, which on a line whose new site sorts first means rewriting a keyword
+the scan never saw and calling the plan complete.
+
+The remaining case is a site replaced by another at the same count, and nothing
+in `(path, line)` can tell those apart: the scan would have to carry the column,
+which is a wider change than the window it closes. That window needs a writer
+editing the tree between the scan and the plan of one run, and inside one run
+the file does not move. Both leftovers stay honest for the same reason: the
+finder re-ran, so anything rewritten is a real site, and a suite that goes red
+reverts the edit byte-for-byte regardless.
+"""
+
+
 def _plan_root_model_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, list[Skipped]]:
     """Build one file's edit from the sites the scan reported in it."""
     try:
@@ -722,12 +748,22 @@ def _plan_validator_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None,
     return (edit if edit.changes_anything else None), skipped
 
 
-def _plan_regex_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, list[Skipped]]:
-    """Rename `regex=` to `pattern=` at the sites the scan reported in one file.
+def _plan_keyword_rename(
+    path: Path,
+    lines: Sequence[int],
+    finder: Callable[[ast.Module], Iterator[tuple[int, ast.keyword]]],
+    rename: Mapping[str, str],
+) -> tuple[Edit | None, list[Skipped]]:
+    """Rename keyword arguments in place, at the sites the scan reported.
 
-    The whole break is one word, which is what makes it a good check on the
-    machinery: if the diff for this is bigger than one word per site, the
-    machinery is wrong.
+    Two break classes are this and nothing else -- `regex=` to `pattern=`, and
+    `min_items=`/`max_items=` to their `_length` spellings. They differ only in
+    which call the finder looks inside and what each keyword is renamed to, so
+    they share the part that is easy to get subtly wrong: matching reported
+    lines to keyword nodes when a line can hold more than one.
+
+    The whole break is one word per site, which is what makes it a good check on
+    the machinery: if the diff is bigger than that, the machinery is wrong.
     """
     try:
         source = read_source(path)
@@ -735,10 +771,10 @@ def _plan_regex_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, lis
     except _UNREADABLE as exc:
         return None, [Skipped(path, line, f"could not be read: {exc!r}") for line in lines]
 
-    # Grouped rather than keyed one-to-one: two `regex=` arguments can share a
+    # Grouped rather than keyed one-to-one: two renamable arguments can share a
     # line, and the scan reports a line per site, so the mapping is not unique.
     by_line: dict[int, list[ast.keyword]] = {}
-    for line, word in regex_keyword_sites(tree):
+    for line, word in finder(tree):
         by_line.setdefault(line, []).append(word)
 
     replacements: dict[tuple[int, int], _Replacement] = {}
@@ -750,12 +786,22 @@ def _plan_regex_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, lis
     for line in sorted(set(lines)):
         wanted = lines.count(line)
         words = by_line.get(line, [])
+        if len(words) > wanted:
+            skipped.extend(Skipped(path, line, _MOVED) for _ in range(wanted))
+            continue
         for word in words[:wanted]:
+            # `arg` is None for `**kwargs`, which has no name to rename. The
+            # finders never yield one -- they match on the name -- so this
+            # skips nothing today; it is here because the type says it can
+            # happen and a rewriter is the wrong place to be sure it cannot.
+            name = word.arg
+            if name is None:
+                continue
             replacements[(word.lineno, word.col_offset)] = _Replacement(
-                word.lineno, word.col_offset, _V1_REGEX, _V2_PATTERN
+                word.lineno, word.col_offset, name, rename[name]
             )
-        for _ in range(wanted - len(words[:wanted])):
-            skipped.append(Skipped(path, line, "the site the scan reported is not there any more"))
+        for _ in range(wanted - len(words)):
+            skipped.append(Skipped(path, line, _GONE))
 
     if not replacements:
         return None, skipped
@@ -767,6 +813,16 @@ def _plan_regex_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, lis
 
     edit = Edit(path=path, before=source.text, after=after, encoding=source.encoding)
     return (edit if edit.changes_anything else None), skipped
+
+
+def _plan_regex_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, list[Skipped]]:
+    """Rename `regex=` to `pattern=` at the sites the scan reported in one file."""
+    return _plan_keyword_rename(path, lines, regex_keyword_sites, {_V1_REGEX: _V2_PATTERN})
+
+
+def _plan_items_file(path: Path, lines: Sequence[int]) -> tuple[Edit | None, list[Skipped]]:
+    """Rename `min_items=`/`max_items=` to their v2 spellings in one file."""
+    return _plan_keyword_rename(path, lines, items_keyword_sites, LENGTH_KEYWORDS)
 
 
 _USES_LISTED = 5
@@ -781,6 +837,7 @@ _PLANNERS = {
     BreakClass.VALIDATOR_FIELD_CONFIG: _plan_validator_file,
     BreakClass.ROOT_MODEL: _plan_root_model_file,
     BreakClass.REGEX_KEYWORD: _plan_regex_file,
+    BreakClass.ITEMS_KEYWORD: _plan_items_file,
 }
 """The break classes that can be carried out, not the ones that can be named.
 
@@ -788,6 +845,16 @@ A rule is useful output on its own -- it says what is wrong and where, and a
 person can act on it. Only some of them reduce to an edit safe enough to write
 without asking.
 """
+
+
+def has_rewriter(break_class: BreakClass) -> bool:
+    """Whether this class reduces to an edit, rather than to a rule and a stop.
+
+    Public because the answer is documented -- the README's taxonomy table has a
+    rewriter column -- and a documented fact should be derivable rather than
+    retyped. :mod:`tests.test_docs` reads it.
+    """
+    return break_class in _PLANNERS
 
 
 def _by_path(matches: Sequence[Match]) -> dict[Path, list[int]]:

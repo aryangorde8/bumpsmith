@@ -5,13 +5,23 @@ match. A migration rule that fires on everything named `validator` would look
 productive and would corrupt any library that happens to define one.
 """
 
+import ast
 import textwrap
 from pathlib import Path
 
 import pytest
 
 from bumpsmith.failures import BreakClass, Failure, RunShape, parse_failures
-from bumpsmith.rules import Role, Rule, RuleKind, find_matches, write_rule
+from bumpsmith.rules import (
+    Role,
+    Rule,
+    RuleKind,
+    find_matches,
+    items_keyword_sites,
+    regex_keyword_sites,
+    validator_parameter_sites,
+    write_rule,
+)
 
 DATA = Path(__file__).parent / "data"
 
@@ -986,3 +996,203 @@ def test_a_use_is_a_use_only_where_the_import_is_what_binds_the_name(
     uses = sorted(match.line for match in find_matches(rule, root).uses)
 
     assert uses == expected, label
+
+
+# --------------------------------------------------------------------------
+# Scope, the second time
+#
+# Qodo raised this on #32 against the new constrained-collection rule, and it
+# was true of the merged `regex` rule, of `@root_validator`, and of `@validator`
+# as well: four consumers of one file-wide import map, three of which had been
+# green for twenty pull requests. A second consumer is what exposed it.
+#
+# Every case below was run against the code before the fix and reported a site.
+# The four rules are checked together on purpose -- the defect was shared, so a
+# test that covers one of them would go green again the next time a rule is
+# added beside it.
+# --------------------------------------------------------------------------
+
+
+def _sites(source: str, finder: object) -> list[int]:
+    tree = ast.parse(textwrap.dedent(source).lstrip("\n"))
+    return [found[0] for found in finder(tree)]  # type: ignore[operator]
+
+
+_ITEMS = (items_keyword_sites, "conlist", "conlist(str, min_items=1)")
+_REGEX = (regex_keyword_sites, "constr", "constr(regex='a')")
+
+
+@pytest.mark.parametrize(("finder", "name", "call"), [_ITEMS, _REGEX])
+@pytest.mark.parametrize(
+    ("label", "template"),
+    [
+        (
+            "rebound at module level after the import",
+            "from pydantic import {name}\n{name} = our_factory\nx = {call}\n",
+        ),
+        (
+            "shadowed by an assignment in the class body",
+            "from pydantic import {name}\nclass C:\n    {name} = ours\n    x = {call}\n",
+        ),
+        (
+            "shadowed by a comprehension target",
+            "from pydantic import {name}\nxs = [{call} for {name} in factories]\n",
+        ),
+        (
+            "imported inside a class, called outside it",
+            "class C:\n    from pydantic import {name}\nx = {call}\n",
+        ),
+        (
+            "imported inside a class, called inside a method",
+            "class C:\n    from pydantic import {name}\n    def m(self):\n        return {call}\n",
+        ),
+    ],
+)
+def test_a_shadowed_constructor_is_not_pydantics(
+    finder: object, name: str, call: str, label: str, template: str
+) -> None:
+    """A name pydantic bound and something else rebound is not pydantic's any more.
+
+    The dangerous half of getting scope wrong. Each of these renames a keyword
+    on a call the migration must not touch, and every one of them is silent:
+    the file still imports pydantic, so nothing downstream looks twice.
+    """
+    assert _sites(template.format(name=name, call=call), finder) == [], label
+
+
+@pytest.mark.parametrize(("finder", "name", "call"), [_ITEMS, _REGEX])
+@pytest.mark.parametrize(
+    ("label", "template"),
+    [
+        ("the plain module-level import", "from pydantic import {name}\nx = {call}\n"),
+        (
+            "an import inside the function that calls it",
+            "def f():\n    from pydantic import {name}\n    return {call}\n",
+        ),
+        (
+            "an import inside the class that calls it",
+            "class C:\n    from pydantic import {name}\n    x = {call}\n",
+        ),
+        (
+            "a call in the element of a comprehension that shadows nothing",
+            "from pydantic import {name}\nxs = [{call} for _ in rows]\n",
+        ),
+        (
+            "a call in the outermost iterable, evaluated outside the comprehension",
+            "from pydantic import {name}\nxs = [y for y in {call}]\n",
+        ),
+    ],
+)
+def test_a_real_constructor_is_still_found(
+    finder: object, name: str, call: str, label: str, template: str
+) -> None:
+    """The other direction, because narrowing a scope too far loses real sites.
+
+    The fifth case is the one worth naming: a comprehension's first iterable is
+    evaluated where the comprehension is *written*, before the target it is
+    about to bind exists, so it keeps the enclosing names.
+    """
+    found = _sites(template.format(name=name, call=call), finder)
+    assert len(found) == 1, label
+
+
+def test_a_shadowed_validator_is_not_pydantics() -> None:
+    """The same fix, on the rule that has been merged the longest."""
+    source = """
+    from pydantic import validator
+    validator = ours
+
+    class M:
+        @validator("x")
+        def v(cls, value, field): return value
+    """
+    assert _sites(source, validator_parameter_sites) == []
+
+
+# --------------------------------------------------------------------------
+# Scope, the third time
+#
+# The follow-up review on #32, against the walk the previous round introduced.
+# All three are the same class of mistake as the ones they replaced -- a scope
+# modelled *nearly* the way Python models it -- and all three were confirmed by
+# running them before the fix.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("label", "source", "expected"),
+    [
+        (
+            "a module-level walrus rebinds like an assignment",
+            """
+            from pydantic import conlist
+
+            (conlist := our_factory)
+            x = conlist(str, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "a walrus inside a comprehension binds outside it",
+            """
+            from pydantic import conlist
+
+            ys = [(conlist := factory) for factory in factories]
+            x = conlist(str, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "an inner class does not see the outer class namespace",
+            """
+            class Outer:
+                from pydantic import conlist
+
+                class Inner:
+                    x = conlist(str, min_items=1)
+            """,
+            [],
+        ),
+        (
+            "an import below a call does not reach back up to it",
+            """
+            class C:
+                x = conlist(str, min_items=1)
+                from pydantic import conlist
+            """,
+            [],
+        ),
+        (
+            "an import above a call still reaches it",
+            """
+            class C:
+                from pydantic import conlist
+                x = conlist(str, min_items=1)
+            """,
+            [3],
+        ),
+        (
+            "a shadow below a call does not reach back up either",
+            """
+            from pydantic import conlist
+
+            class C:
+                x = conlist(str, min_items=1)
+                conlist = ours
+            """,
+            [4],
+        ),
+    ],
+)
+def test_a_class_body_binds_in_order_and_inherits_like_a_function(
+    label: str, source: str, expected: list[int]
+) -> None:
+    """A class body is not a function body, in two ways this walk had wrong.
+
+    It executes top to bottom rather than treating its whole body as static
+    locals, and Python does not put an enclosing class on the lookup chain of a
+    class nested inside it. The last two cases are the ones that pin the
+    direction: an import above a call is still the same call's import, and a
+    shadow written below it was not in scope when the call ran.
+    """
+    assert _sites(source, items_keyword_sites) == expected, label

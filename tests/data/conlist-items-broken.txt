@@ -1,0 +1,15 @@
+
+==================================== ERRORS ====================================
+_________________________ ERROR collecting test_app.py _________________________
+test_app.py:1: in <module>
+    from app import Basket
+app.py:6: in <module>
+    class Basket(BaseModel):
+app.py:7: in Basket
+    items: conlist(str, min_items=1, max_items=5) = []
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: conlist() got an unexpected keyword argument 'min_items'
+=========================== short test summary info ============================
+ERROR test_app.py - TypeError: conlist() got an unexpected keyword argument '...
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.20s

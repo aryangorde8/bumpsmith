@@ -16,7 +16,7 @@ cannot.
 
 import ast
 import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Container, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -216,6 +216,20 @@ def write_rule(failure: Failure) -> Rule | None:
             ),
         )
 
+    if failure.break_class is BreakClass.ITEMS_KEYWORD:
+        return Rule(
+            break_class=failure.break_class,
+            kind=RuleKind.SOURCE,
+            summary="Rename `min_items=`/`max_items=` to `min_length=`/`max_length=`",
+            rationale=(
+                "v2 renamed both constraints on the constrained-collection constructors, "
+                "which reject the old spelling in Python's argument binding before pydantic "
+                "sees the call. `Field` is not part of this: it accepts either spelling in "
+                "v2 and warns, so the sites this rule reports are the ones that actually "
+                "stop the suite."
+            ),
+        )
+
     if failure.break_class is BreakClass.REMOVED_INTERNAL:
         symbol = _split_symbol(failure.symbol)
         if symbol is None:
@@ -309,29 +323,69 @@ def _is_pydantic_path(dotted: str) -> bool:
 
 
 def module_scope_nodes(tree: ast.Module) -> Iterator[ast.AST]:
-    """Yield every node reachable without entering a function body.
+    """Yield every node that binds a name in the module's own namespace.
 
-    A decorator resolves through module globals, and inside a class body through
-    the class namespace being built. An import inside a *function* binds a local
-    that neither can see, so collecting it would let an unrelated import three
-    functions down overrule `from mylib.decorators import validator` at the top
-    of the file.
+    Stops at every construct that opens a scope of its own -- functions,
+    lambdas, comprehensions, and class bodies. An import inside any of them
+    binds a local that module scope cannot see, so collecting it would let an
+    unrelated import three functions down overrule `from mylib.decorators import
+    validator` at the top of the file.
+
+    Class bodies used to be descended into, on the reasoning that a decorator
+    written inside a class resolves through the class namespace being built.
+    That is true and it is not this function's job: a class body is reached by
+    :func:`nodes_in_scope`, which adds its bindings on the way in. Folding them
+    in here instead made `from pydantic import conlist` inside one class rename
+    `min_items=` on an unrelated call at module level -- reported by review, and
+    the same defect the two directions below describe.
 
     `try`/`except ImportError` and `if TYPE_CHECKING:` are deliberately not
     skipped. An import wrapped in either is still a module-level binding, and
     both wrappings are common enough that ignoring them would trade this false
     positive for a false negative.
+
+    A walrus inside a module-level comprehension binds in the enclosing scope
+    and this walk does not see it. That is not a hole: `_walrus_targets` reads
+    the comprehension for exactly that, separately, because it wants the
+    binding without wanting the comprehension's own targets.
     """
     pending: list[ast.AST] = [tree]
     while pending:
         node = pending.pop()
         yield node
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        if isinstance(node, (*_NESTED_SCOPES, ast.ClassDef)):
             continue
         pending.extend(ast.iter_child_nodes(node))
 
 
 def pydantic_names(tree: ast.Module) -> PydanticNames:
+    """The pydantic names visible at module scope, rebindings taken off again.
+
+    A name the module binds by any other means is dropped, whatever the order:
+    `from pydantic import conlist` followed by `conlist = our_factory` leaves
+    nothing of pydantic's behind, and reporting `min_items=` on the second one
+    is this tool rewriting code that has nothing to do with the migration.
+
+    Only *unconditional* rebindings count, which is the difference between the
+    two idioms that look alike from here:
+
+        from pydantic import conlist      try:
+        conlist = our_factory                 from pydantic import conlist
+                                          except ImportError:
+                                              conlist = None
+
+    The left one leaves nothing of pydantic's behind. The right one is the
+    standard optional-dependency wrapping, the rebinding runs only when the
+    import failed, and treating it as a shadow loses every site in a file that
+    guards its imports -- a case this module has a named test for. So the
+    rebinding scan reads the module's own body and does not descend into `try`,
+    `if` or `with`, matching :func:`module_scope_nodes`, which counts an import
+    inside those for the same reason in reverse.
+
+    Order is not consulted. Deciding it properly means tracking control flow,
+    and the conservative reading loses a rewrite where the aggressive one
+    corrupts a file.
+    """
     direct: dict[str, str] = {}
     modules: set[str] = set()
     for node in module_scope_nodes(tree):
@@ -347,7 +401,68 @@ def pydantic_names(tree: ast.Module) -> PydanticNames:
                     continue
                 # `import pydantic.utils` binds `pydantic`; with `as` it binds the alias.
                 modules.add(alias.asname or alias.name.split(".")[0])
-    return PydanticNames(direct=direct, modules=frozenset(modules))
+    rebound = _unconditional_rebindings(tree)
+    return PydanticNames(
+        direct={name: real for name, real in direct.items() if name not in rebound},
+        modules=frozenset(module for module in modules if module not in rebound),
+    )
+
+
+_OWN_SCOPE = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+
+def _walrus_targets(statement: ast.AST) -> Iterator[str]:
+    """Names one module-level statement binds with `:=`.
+
+    Comprehensions *are* walked into, alone among the things this stops at: a
+    walrus inside one binds in the enclosing scope, which is the whole reason it
+    is worth looking there. Everything with a namespace of its own is skipped,
+    because a walrus inside a function binds in the function.
+    """
+    if isinstance(statement, _OWN_SCOPE):
+        return
+    pending: list[ast.AST] = [statement]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, ast.NamedExpr):
+            yield from _target_names(current.target)
+        if isinstance(current, _OWN_SCOPE):
+            continue
+        pending.extend(ast.iter_child_nodes(current))
+
+
+def _unconditional_rebindings(tree: ast.Module) -> set[str]:
+    """Names the module body binds by something other than a pydantic import.
+
+    Statements written directly in the module body only. Anything nested in a
+    `try`, an `if` or a `with` runs on a path that may not be taken, and the
+    import is the evidence actually in hand.
+    """
+    rebound: set[str] = set()
+    for node in tree.body:
+        rebound.update(_walrus_targets(node))
+        if isinstance(node, ast.ImportFrom):
+            if node.level == 0 and node.module is not None and _is_pydantic_path(node.module):
+                continue
+            rebound.update(alias.asname or alias.name for alias in node.names)
+        elif isinstance(node, ast.Import):
+            rebound.update(
+                alias.asname or alias.name.split(".")[0]
+                for alias in node.names
+                if not _is_pydantic_path(alias.name)
+            )
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            rebound.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                rebound.update(_target_names(target))
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign, ast.For, ast.AsyncFor)):
+            rebound.update(_target_names(node.target))
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    rebound.update(_target_names(item.optional_vars))
+    return rebound
 
 
 def pydantic_name(node: ast.expr, names: PydanticNames) -> str | None:
@@ -382,12 +497,7 @@ def validator_parameter_sites(
     the deletion has to be reasoned about: what separates one from the next is
     what gets removed with it.
     """
-    names = pydantic_names(tree)
-    if not names.direct and not names.modules:
-        return
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
+    for node, names in functions_in_scope(tree):
         decorated = any(
             (pydantic_name(decorator, names) or "") in _V1_VALIDATORS
             for decorator in node.decorator_list
@@ -458,6 +568,20 @@ matching on the keyword alone would report sites that were never broken.
 """
 
 
+_ITEMS_CALLABLES = frozenset({"conlist", "conset", "confrozenset"})
+"""The pydantic callables that *raise* on `min_items=`/`max_items=`.
+
+`Field` is the interesting omission. It took both spellings in v1 and still
+takes them in v2, where it renames them and warns -- so a `Field(min_items=1)`
+is deprecated rather than broken, and rewriting it would be this tool editing
+code that runs. `_REGEX_CALLABLES` includes `Field` for the opposite reason:
+there it raises.
+"""
+
+LENGTH_KEYWORDS = {"min_items": "min_length", "max_items": "max_length"}
+"""The v1 spelling of each constraint, and what v2 calls it."""
+
+
 def _locally_bound(node: ast.AST) -> tuple[dict[str, str], set[str], set[str]]:
     """What one function binds in its own scope.
 
@@ -466,20 +590,32 @@ def _locally_bound(node: ast.AST) -> tuple[dict[str, str], set[str], set[str]]:
     descended into -- their bindings are theirs, not this scope's -- though the
     name a nested `def` or `class` introduces is bound here and is collected.
     """
+    parameters: set[str] = set()
+    arguments = getattr(node, "args", None)
+    if isinstance(arguments, ast.arguments):
+        for argument in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]:
+            parameters.add(argument.arg)
+        for extra in (arguments.vararg, arguments.kwarg):
+            if extra is not None:
+                parameters.add(extra.arg)
+
+    body = getattr(node, "body", [])
+    statements = list(body) if isinstance(body, list) else [body]
+    direct, modules, bound = _bindings_of(statements)
+    return direct, modules, bound | parameters
+
+
+def _bindings_of(statements: Sequence[ast.AST]) -> tuple[dict[str, str], set[str], set[str]]:
+    """What a run of statements binds, without entering a scope of their own.
+
+    Split out of :func:`_locally_bound` so a class body can be advanced one
+    statement at a time, which is how Python executes it.
+    """
     direct: dict[str, str] = {}
     modules: set[str] = set()
     bound: set[str] = set()
 
-    arguments = getattr(node, "args", None)
-    if isinstance(arguments, ast.arguments):
-        for argument in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]:
-            bound.add(argument.arg)
-        for extra in (arguments.vararg, arguments.kwarg):
-            if extra is not None:
-                bound.add(extra.arg)
-
-    body = getattr(node, "body", [])
-    pending: list[ast.AST] = list(body) if isinstance(body, list) else [body]
+    pending: list[ast.AST] = list(statements)
     while pending:
         child = pending.pop()
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -524,32 +660,158 @@ def _target_names(target: ast.expr) -> Iterator[str]:
         yield from _target_names(target.value)
 
 
-def _inside(names: PydanticNames, node: ast.AST) -> PydanticNames:
-    """The names in scope inside one function, given the names outside it."""
-    direct, modules, bound = _locally_bound(node)
-    inherited = {name: real for name, real in names.direct.items() if name not in bound}
-    inherited.update(direct)
+def _without(names: PydanticNames, bound: Container[str]) -> PydanticNames:
+    """The same names, minus every one this scope binds for itself."""
     return PydanticNames(
-        direct=inherited,
-        modules=frozenset({m for m in names.modules if m not in bound} | modules),
+        direct={name: real for name, real in names.direct.items() if name not in bound},
+        modules=frozenset(module for module in names.modules if module not in bound),
     )
 
 
-def calls_in_scope(node: ast.AST, names: PydanticNames) -> Iterator[tuple[ast.Call, PydanticNames]]:
-    """Every call in the tree, paired with the names actually visible where it sits.
+def _inside(names: PydanticNames, node: ast.AST) -> PydanticNames:
+    """The names in scope inside one function or class body, given those outside."""
+    direct, modules, bound = _locally_bound(node)
+    inherited = dict(_without(names, bound).direct)
+    inherited.update(direct)
+    return PydanticNames(
+        direct=inherited,
+        modules=frozenset(_without(names, bound).modules | modules),
+    )
+
+
+def _advanced(names: PydanticNames, statement: ast.stmt) -> PydanticNames:
+    """The scope of a class body after one more of its statements has run."""
+    direct, modules, bound = _bindings_of([statement])
+    remaining = _without(names, bound)
+    grown = dict(remaining.direct)
+    grown.update(direct)
+    return PydanticNames(direct=grown, modules=frozenset(remaining.modules | modules))
+
+
+def _evaluated_outside(node: ast.AST) -> Iterator[ast.AST]:
+    """The parts of a scope-opening statement evaluated where it is *written*.
+
+    A decorator, a base class, a default and an annotation all run before the
+    scope they are attached to exists. Reading them under the new scope's names
+    lets a function that happens to assign `root_validator` in its own body hide
+    the decorator sitting above its own `def`.
+    """
+    yield from getattr(node, "decorator_list", [])
+    if isinstance(node, ast.ClassDef):
+        yield from node.bases
+        yield from node.keywords
+        return
+    arguments = getattr(node, "args", None)
+    if isinstance(arguments, ast.arguments):
+        yield from (default for default in arguments.defaults if default is not None)
+        yield from (default for default in arguments.kw_defaults if default is not None)
+        every = (
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+            arguments.vararg,
+            arguments.kwarg,
+        )
+        yield from (
+            argument.annotation
+            for argument in every
+            if argument is not None and argument.annotation is not None
+        )
+    returns = getattr(node, "returns", None)
+    if returns is not None:
+        yield returns
+
+
+def _comprehension_elements(node: ast.AST) -> Iterator[ast.AST]:
+    """The expression a comprehension evaluates per item, one or two of them."""
+    if isinstance(node, ast.DictComp):
+        yield node.key
+        yield node.value
+    elif isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+        yield node.elt
+
+
+def nodes_in_scope(
+    node: ast.AST, names: PydanticNames, functions_see: PydanticNames | None = None
+) -> Iterator[tuple[ast.AST, PydanticNames]]:
+    """Every node in the tree, paired with the pydantic names visible where it sits.
 
     One module-wide import map applied to the whole tree gets this wrong in both
     directions: it misses a pydantic import made inside a function, and -- the
     dangerous half -- it claims a *parameter* named `constr` is pydantic's and
     rewrites a call that has nothing to do with pydantic.
+
+    ``functions_see`` is what a nested *function* inherits, which differs from
+    ``names`` in exactly one place: inside a class body. Python does not put
+    class scope on the lookup chain of a method, so a `from pydantic import
+    conlist` written in a class body is invisible two lines further down inside
+    a method -- and treating it as visible there is the same wrong edit as
+    treating it as visible at module level.
     """
-    if isinstance(node, ast.Call):
-        yield node, names
+    inherited = names if functions_see is None else functions_see
+    yield node, names
+
+    if isinstance(node, ast.ClassDef):
+        for part in _evaluated_outside(node):
+            yield from nodes_in_scope(part, names, inherited)
+        # Two things a class body does that a function body does not, both found
+        # by review on the first version of this walk. It does not see an
+        # enclosing *class* namespace -- so it starts from `inherited`, the same
+        # scope a nested function gets, not from `names`. And it binds top to
+        # bottom rather than treating the whole body as static locals, so an
+        # import written below a call must not reach back up to it.
+        body = inherited
+        for statement in node.body:
+            yield from nodes_in_scope(statement, body, inherited)
+            body = _advanced(body, statement)
+        return
+
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        for part in _evaluated_outside(node):
+            yield from nodes_in_scope(part, names, inherited)
+        body = _inside(inherited, node)
+        # A lambda's body is a single expression, not a list of statements.
+        statements: list[ast.AST] = list(node.body) if isinstance(node.body, list) else [node.body]
+        for piece in statements:
+            yield from nodes_in_scope(piece, body)
+        return
+
+    if isinstance(node, _COMPREHENSIONS):
+        own = _without(inherited, _shadowed_in(node))
+        for index, generator in enumerate(node.generators):
+            # The outermost iterable is evaluated before the comprehension scope
+            # exists, out where the comprehension is written. Every later one is
+            # not, because the targets before it are bound by then.
+            yield from nodes_in_scope(generator.iter, names if index == 0 else own)
+            yield from nodes_in_scope(generator.target, own)
+            for condition in generator.ifs:
+                yield from nodes_in_scope(condition, own)
+        for element in _comprehension_elements(node):
+            yield from nodes_in_scope(element, own)
+        return
+
     for child in ast.iter_child_nodes(node):
-        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            yield from calls_in_scope(child, _inside(names, child))
-        else:
-            yield from calls_in_scope(child, names)
+        yield from nodes_in_scope(child, names, functions_see)
+
+
+def calls_in_scope(node: ast.AST, names: PydanticNames) -> Iterator[tuple[ast.Call, PydanticNames]]:
+    """Every call in the tree, paired with the names actually visible where it sits."""
+    for child, scope in nodes_in_scope(node, names):
+        if isinstance(child, ast.Call):
+            yield child, scope
+
+
+def functions_in_scope(
+    tree: ast.Module,
+) -> Iterator[tuple[ast.FunctionDef | ast.AsyncFunctionDef, PydanticNames]]:
+    """Every `def`, paired with the names visible *where its decorators run*.
+
+    Which is the scope the `def` is written in, not the one it opens -- so a
+    rule reading `node.decorator_list` gets the answer Python would give.
+    """
+    for node, scope in nodes_in_scope(tree, pydantic_names(tree)):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            yield node, scope
 
 
 def regex_keyword_sites(tree: ast.Module) -> Iterator[tuple[int, ast.keyword]]:
@@ -567,11 +829,31 @@ def regex_keyword_sites(tree: ast.Module) -> Iterator[tuple[int, ast.keyword]]:
                 yield word.lineno, word
 
 
+def items_keyword_sites(tree: ast.Module) -> Iterator[tuple[int, ast.keyword]]:
+    """Yield every `min_items=`/`max_items=` passed to a constrained collection.
+
+    Shaped like :func:`regex_keyword_sites`, and for the same reason: the
+    keyword node carries the column the rewrite needs, and a line can hold more
+    than one of these -- `conlist(int, min_items=1, max_items=3)` is two sites.
+    """
+    for node, scope in calls_in_scope(tree, pydantic_names(tree)):
+        if pydantic_name(node, scope) not in _ITEMS_CALLABLES:
+            continue
+        for word in node.keywords:
+            if word.arg in LENGTH_KEYWORDS:
+                yield word.lineno, word
+
+
 _COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 """Comprehensions run in a scope of their own, and their targets are local to it.
 
-`calls_in_scope` does not need to know this, because a call is not shadowed by an
-iteration variable. A *name* is.
+This used to say `calls_in_scope` did not need to know, "because a call is not
+shadowed by an iteration variable -- a *name* is". The sentence is true about
+the wrong node. A call is resolved *through* a name, and
+`[conlist(str, min_items=1) for conlist in factories]` is a call whose name the
+target shadows: review found it rewriting the element of that comprehension as
+though it were pydantic's. `nodes_in_scope` now narrows here for the same
+reason `_uses_in_scope` twenty lines down always did.
 """
 
 _NESTED_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, *_COMPREHENSIONS)
@@ -713,6 +995,8 @@ def _sites(rule: Rule, tree: ast.Module) -> Iterator[tuple[int, Role]]:
         return ((line, Role.SITE) for line in _root_model_sites(tree))
     if rule.break_class is BreakClass.REGEX_KEYWORD:
         return ((line, Role.SITE) for line, _ in regex_keyword_sites(tree))
+    if rule.break_class is BreakClass.ITEMS_KEYWORD:
+        return ((line, Role.SITE) for line, _ in items_keyword_sites(tree))
     if rule.break_class is BreakClass.REMOVED_INTERNAL and rule.module and rule.name:
         return _removed_symbol_sites(tree, rule.module, rule.name)
     return iter(())
