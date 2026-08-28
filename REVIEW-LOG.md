@@ -159,6 +159,14 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 137 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | `_tabled_modules()` returned a **set**, so both checks written for 134 compared sets and neither could see multiplicity. A table that had drifted into two rows for one module — one of them stale, which is how it happens — satisfied "nothing missing" and "nothing invented" while the one-row-per-module mapping it advertises was gone. The stale row is the one nobody updates, so this is the failure mode that actually occurs | **Fixed** — the helper returns a list, in order and with repeats, and `test_the_readme_module_table_names_each_module_once` is the third check. The two set-difference tests take `set(...)` explicitly at the call site rather than hiding it in the helper, so what each one is blind to is visible where it is used | this PR |
 | 138 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | **A third map, found while fixing 136.** `src/bumpsmith/__init__.py` — the docstring `help(bumpsmith)` prints — carries its own table of the package and listed **nine of eighteen** files, missing the same four the README's table missed plus `rootdir` and `sources`. Three hand-written maps of one package, and until this pull request not one of them was checked against the package. The reader it fails is the one at a REPL who never opens the repository — *self-found* | **Fixed** — the table is complete, and `test_the_package_docstring_maps_every_module_it_claims_to` derives the expectation from `src/bumpsmith/*.py`. Its three exemptions (`migrate`, `__main__`, `__init__`) are **named one at a time with the sentence in the docstring that covers each**, rather than matched by pattern, which is 136's lesson applied on the same afternoon it was learned | this PR |
 | 139 | [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | **Raised by the follow-up review**, on the fix for 137. The uniqueness check written for 137 was added to the README's table and not to the `__init__` table, which makes the same one-row-per-module claim. Worse, `_init_table_modules()` was written to preserve repeats and its docstring says so — and then all three of its callers took `set(...)` of it, so the multiplicity it was careful to keep was discarded by every reader it had. **Shape 11 — a guarantee enforced at one entrance of a building with two** | **Fixed** — `test_the_package_docstring_names_each_module_once` is the fourth check on that table. The lesson is not "add the test": 137 was fixed *where it was raised* rather than *wherever it applied*, and the second site was in the same file, added in the same commit, twenty lines below. A promise nothing consumes is not a guarantee | this PR |
+| 140 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | 135's fix corrected the trail counts and left the sentence in a form that **goes stale by construction**: *"Twenty-nine pull requests … 91 in total"* is a claim about *now*, and every subsequent merge falsifies it. There is no value that can be written there and stay right, which is why the same three numbers had already been wrong twice. Correcting them a third time would have been the third instance of a defect whose real shape is the sentence, not the digits — *self-found while performing the recount 135's own disposition promised* | **Fixed** — the sentence is anchored to a named event, *"as of the merge of #30"*, and carries the `gh api` command that re-derives it. Anchored, it ages instead of lying: a later merge makes it out of date and never false. Recounted live rather than incremented — 30 pull requests, Qodo on all 30, 26 with at least one inline finding, 94 findings. **Findings 64/65, fourth instance, and the first where the fix was to change the sentence's tense rather than its numbers** | this PR |
+| 141 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | The narrative for 140 quoted the stale sentence as *"twenty-nine … twenty-five … 90 in total"*, a combination that **never existed**: before 135 it read 28 / 24 / 90, after 135 it read 29 / 25 / 91, and the entry spliced the pull request counts from one state onto the finding count from the other. A fabricated quotation, in an audit narrative, about a sentence whose subject is quoting numbers accurately | **Fixed** — the entry quotes 29 / 25 / 91, the sentence 135 actually left behind, and says so explicitly. The check that would have caught it is the one 135 itself performed and this entry did not: read the value out of the file rather than out of the paragraph describing it. Nothing here is testable — a quotation of a sentence that no longer exists anywhere cannot be verified against anything — which is the argument for quoting from a diff rather than from memory | this PR |
+| 142 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | The `gh api` command offered as the way to re-derive the anchored counts queries **inline comments on one pull request**. Four of the thirty have zero of those, and zero from that query is the same answer for *Qodo reviewed this and found nothing* as for *Qodo never reviewed this* — while the sentence it is meant to verify asserts the first for all thirty. **The ninth shape — "I could not tell" reported as "it did not happen" — in the command supplied to check a claim.** The recount actually performed did query both, so the README documented a weaker check than the one that was run | **Fixed** — two queries, with the reason for there being two written between them: inline findings from `/pulls/N/comments`, coverage from `/issues/N/comments`, which Qodo posts whether or not it finds anything. Collapsing them into one number is the mistake, not an inconvenience | this PR |
+| 143 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Raised by the follow-up review, on the fix for 142.** The coverage query added to answer 142 was written without `--paginate`. GitHub returns thirty issue comments a page, so a Qodo summary posted after the thirtieth comment comes back as **zero** — which is the false *never reviewed* that 142 exists to prevent, reintroduced by the fix for it. **The ninth shape, inside the fix for the ninth shape.** Qodo also named the second-order defect: `gh api --paginate --jq '… | length'` evaluates the filter once per page and prints a count for each, so adding the flag alone would have replaced one wrong number with several | **Fixed** — both queries paginate, and both apply their filter with `jq -s 'add | map(…) | length'` over the concatenated pages rather than with `--jq`, so the aggregate is one number. Verified against #20 (15 findings), #26 (0 findings, 2 coverage — reviewed, found nothing, the case the single query could not distinguish) and #31. Latent rather than live today: no pull request here has yet exceeded one page, so nothing was wrong until somebody's thread got long | this PR |
+| 144 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Third round on the same paragraph.** The two queries answer for **one** pull request — the README literally substitutes `N` — while the sentence they are offered as the check for is an aggregate over thirty: *30 reviewed, 26 with at least one finding, 94 findings*. None of the three figures can be derived from either command, so the paragraph presented an incomplete procedure as a complete one, which is a claim about the check rather than about the counts | **Fixed** — replaced with the loop that actually produced the numbers, which prints the sentence: `30 pull requests, 30 reviewed by Qodo, 26 with at least one inline finding, 94 findings`. Run before committing it, output pasted above. The three earlier findings on this paragraph (142, 143, 144) are now each explained beside the detail of the command that answers them, so the reasons travel with the code rather than living only here | this PR |
+| 145 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Fourth round, and the sharpest.** 140 anchored the claim to a named merge; 144 replaced the check with a loop over *everything currently merged*. The two halves disagree: the moment #31 itself lands, the loop returns 31 / 31 / 27 / 97 and appears to **refute a sentence that is still true**. A verification procedure that contradicts a correct claim is worse than none, because the reader believes the procedure. Qodo also named the trap in the obvious fix — filtering by pull request *number* would be wrong, since creation order is not merge order | **Fixed** — the cutoff is #30's own `merged_at`, and the filter is on `mergedAt` rather than on the number. Verified both ways: against #30's timestamp the loop enumerates 30 pull requests and prints the sentence verbatim; against #29's it enumerates 29, which is the check that the cutoff is doing anything at all | this PR |
+| 146 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Fifth round.** `gh pr list --limit 200` returns the *most recent* two hundred and the #30 cutoff was applied to those, so once two hundred more pull requests have merged the anchored set falls out of the window and the loop reports a smaller total — silently, and about a claim written to be permanent. The verification procedure for a sentence that cannot expire had an expiry date | **Fixed** — the enumeration paginates `pulls?state=closed` and drops the unmerged ones, so there is no window. Verified by extracting the fenced block **out of the README** and running it verbatim rather than running a copy: it prints the sentence. Also renamed the loop's `c` to `cov`, because the enumeration's `jq --arg c` reads as shadowing even though the for-header is evaluated once, before the body ever assigns it | this PR |
+| 147 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | *"The count is not maintained by hand — `tests/test_docs.py` reads the log's own table and fails if this sentence and that table disagree."* The guards check the **total** against the row count and check that the three parts sum to it. **The split is unchecked**: moving ten findings from `self-found` to `automated review` passes both, while the sentence beside them says it cannot. A guarantee stated about a guard that the guard does not make — **prose stating a property is not the property, tenth instance**, and the first time it has landed on a claim about the tests rather than about the code | **Fixed** — the sentence now says which half is guarded and which is not, and why the second half **deliberately** is not: the log marks provenance in prose and only when a finding is *not* Qodo's, so a row with no marker is a row nobody marked. Inferring *Qodo raised this* from that is reading an absence as evidence — the ninth shape — and it would be most confident about exactly the rows nobody had thought about. Making the split derivable means marking all 147 rows, which is worth doing and is not a thing to do the day before a deadline | this PR |
 
 
 Every finding has a row here and a fuller account below. Findings that arrived
@@ -2883,6 +2891,233 @@ duplicating the `gate` row fails with `modules with more than one row in
 src/bumpsmith/__init__.py: gate.py`; no-op control green; file restored
 byte-identical.
 
+
+### 140 · the sentence, not the digits
+
+Finding 135's disposition said the recount belonged in the pre-submission pass
+rather than in a test. Doing that recount is what found this.
+
+*"Twenty-nine pull requests; Qodo reviewed every one; twenty-five raised at least
+one finding, 91 in total."* That is the sentence **135 left behind** — the one it
+had just corrected, from 28 / 24 / 90. But
+the sentence is a claim about **now**, and every merge after it falsifies it —
+including the merge of the pull request that corrected it. There is no value that
+can be written there and stay right. That is why the same three numbers had
+already been wrong twice, and correcting them a third time would have been the
+third instance of a defect whose actual shape is the sentence rather than the
+digits in it.
+
+So the fix is the tense. *"The whole trail, as of the merge of #30"* is true when
+written and stays true; a later merge makes it **out of date**, which is a
+different thing from **wrong**, and a reader can see which one they are looking
+at. The `gh api` incantation that re-derives the count sits beside it, because an
+anchored number nobody can check is only a better-dated assertion.
+
+Recounted live rather than incremented: thirty pull requests, Qodo on all thirty,
+twenty-six with at least one inline finding, ninety-four findings.
+
+**Findings 64/65, fourth instance** — and the first where the answer was not a
+guard and not a corrected value. The three before it were fixed by making the
+number derivable. This one could not be, because the truth lives on GitHub, so it
+was fixed by making the sentence honest about when it was true.
+
+### 141–142 · the audit entry misquoted, and its own check could not tell
+
+Qodo reviewed #31 and raised two. Both land on the entry for 140, which is an
+entry about quoting numbers accurately.
+
+**141 — the quotation never existed.** The narrative for 140 quoted the stale
+sentence as *"twenty-nine … twenty-five … 90 in total"*. Before 135 it read
+**28 / 24 / 90**; after 135 it read **29 / 25 / 91**. The entry took the pull
+request counts from the corrected state and the finding count from the stale one
+and presented the splice as a quotation.
+
+The check that would have caught it is the one 135 itself performed and this
+entry did not: read the value out of the file rather than out of the paragraph
+describing it. And nothing here is testable — a quotation of a sentence that no
+longer exists in any file cannot be verified against anything — which is the
+argument for quoting from the diff rather than from memory.
+
+**142 — the verification command could not tell.** The `gh api` incantation
+offered as the way to re-derive the anchored counts queries inline comments on
+one pull request. Four of the thirty have **zero** of those, and zero from that
+query is the same answer for two opposite facts:
+
+| what happened | what the query returns |
+|---|---|
+| Qodo reviewed it and found nothing | `0` |
+| Qodo never reviewed it | `0` |
+
+The sentence being verified asserts the *first* for all thirty. **This is the
+ninth shape — "I could not tell" reported as "it did not happen" — occurring in
+the command supplied to check a claim**, which is a worse place for it than the
+claim. The recount that produced the numbers did query both; the README
+documented the weaker half of what was actually run.
+
+Fixed with two queries and the reason for there being two written between them.
+Coverage comes from `/issues/N/comments`, which carries the summary Qodo posts
+whether or not it finds anything; findings come from `/pulls/N/comments`.
+Collapsing them into one number is the mistake, not an inconvenience.
+
+### 143 · the ninth shape, inside the fix for the ninth shape
+
+142 was that a query could not tell *reviewed and found nothing* from *never
+reviewed*. The fix added a second query, against the summary Qodo posts either
+way — and wrote it without `--paginate`.
+
+GitHub returns thirty issue comments a page. A Qodo summary posted after the
+thirtieth comment is on page two, and the query returns **zero**: the same false
+*never reviewed*, reintroduced by the fix for it, one commit later, in the
+paragraph explaining why that answer is dangerous.
+
+The follow-up review also named the second-order defect, which is the one worth
+keeping. Adding `--paginate` alone would not have fixed it:
+
+```
+gh api --paginate ... --jq '[...] | length'   # one count per page, printed in sequence
+```
+
+`--jq` is evaluated **per page**, so a two-page thread prints `30` then `4`
+rather than `34` — a different number that looks exactly like this one, and a
+line that would have read as a plausible answer forever. Both queries now
+concatenate first and filter once, with `jq -s 'add | map(…) | length'`.
+
+Latent rather than live: no pull request in this repository has yet exceeded one
+page, so nothing here was ever wrong. Verified against #20 (15 findings), #26
+(0 findings and 2 coverage comments — reviewed, found nothing, which is the case
+the single query could not distinguish) and #31.
+
+**This is the third time in two pull requests that a fix has carried the defect
+it was fixing** — 131→132, 133→136, and now 142→143 — and every one was caught by
+review rather than by the fix's own author. That is not a coincidence about these
+three; it is what the fourth shape says. *The fix is not automatically safer than
+the defect.*
+
+### 144 · and the procedure answered for one of thirty
+
+Third round on the same paragraph, and the finding is not in the commands — both
+are now correct — but in what they are offered as.
+
+The sentence they check is an aggregate: *thirty pull requests, thirty reviewed
+by Qodo, twenty-six with at least one inline finding, ninety-four findings.* Each
+command answers for **one** pull request; the README substitutes `N`. Not one of
+the four figures is derivable from either of them. So the paragraph presented an
+incomplete procedure as a complete one — a claim about the *check*, which is the
+harder kind to notice, because every part of it was true.
+
+Replaced with the loop that actually produced the numbers in the first place. It
+was run before being committed, and it prints the sentence:
+
+```
+30 pull requests, 30 reviewed by Qodo, 26 with at least one inline finding, 94 findings
+```
+
+**Three rounds on one paragraph, and every round was the previous round's fix.**
+
+| finding | what was offered | what was wrong with it |
+|---|---|---|
+| **142** | one query, inline findings | zero could not be told from never reviewed |
+| **143** | a second query, for coverage | no `--paginate`; and `--jq` would have counted per page |
+| **144** | both queries, correct | they answer for one pull request out of thirty |
+
+Each fix was right about the thing it fixed and silent about the next layer out,
+which is the argument for the follow-up review being a separate review rather
+than a re-read. The reasons now live beside the detail of the command that
+answers each one, so somebody editing the command finds out why it is shaped that
+way before they simplify it.
+
+### 145 · the claim was anchored and its check was not
+
+140 anchored the sentence to a named merge so it would age instead of lying.
+144 replaced its check with a loop over **every currently merged pull request**.
+Each was right on its own and together they contradict each other: the moment
+#31 lands, the loop returns
+
+```
+31 pull requests, 31 reviewed by Qodo, 27 with at least one inline finding, 97 findings
+```
+
+and appears to refute a sentence that is still perfectly true.
+
+**A verification procedure that contradicts a correct claim is worse than no
+procedure**, because a reader who runs it believes it over the prose. The claim
+would have looked stale to everybody who checked, and only to them.
+
+Qodo also named the trap sitting in the obvious fix: filter by pull request
+*number* and it breaks quietly, because creation order is not merge order. The
+cutoff is #30's `merged_at` and the comparison is against `mergedAt`.
+
+Verified in both directions, which for a filter means showing it excludes
+something:
+
+| cutoff | pull requests enumerated |
+|---|---|
+| #30's `merged_at` — `2026-08-28T04:52:58Z` | **30**, and the loop prints the sentence verbatim |
+| #29's `merged_at` — `2026-08-27T20:11:19Z` | **29** |
+
+**Four rounds on one paragraph**, and each round was the previous round's fix.
+The paragraph is eleven lines of shell. What it is *about* is a sentence
+containing four numbers.
+
+### 146 · the check for a permanent claim had an expiry date
+
+`gh pr list --state merged --limit 200` returns the **most recent** two hundred,
+and the #30 cutoff was applied to what came back. So the procedure works today,
+works for the next hundred and seventy pull requests, and then starts quietly
+reporting a smaller total — because the pull requests the snapshot is *about*
+have fallen out of the window before the filter ever sees them.
+
+The sentence it checks was deliberately written so it could never expire. Its
+check expires.
+
+Nothing about it would look wrong when it happened. It would return a plausible
+smaller number, which is the ninth shape wearing its fifth coat on this
+paragraph: *a limit reported as a result.*
+
+Fixed by paginating `pulls?state=closed` and dropping the unmerged ones, which
+has no window at all. Verified by extracting the fenced block **out of the
+README** and running that, rather than running a copy of it — the block prints:
+
+```
+30 pull requests, 30 reviewed by Qodo, 26 with at least one inline finding, 94 findings
+```
+
+**Five rounds on one paragraph.** Worth stating plainly, because it is the
+strongest thing this log has to say about review: every one of the five was found
+by the reviewer, on the fix for the previous one, and not one was found by the
+person who wrote the fix. The author was satisfied five times.
+
+### 147 · a guarantee about the guard that the guard does not make
+
+Not the trail paragraph this time — the one above it, and the one that has been
+held up throughout as the example of a number that *cannot* go stale.
+
+> *"The count is not maintained by hand — `tests/test_docs.py` reads the log's own
+> table and fails if this sentence and that table disagree."*
+
+Two guards stand behind it. One compares the stated total to the number of rows.
+The other checks that the three parts sum to the total. **Neither looks at the
+split.** Move ten findings from *self-found* to *automated review* and both stay
+green while the sentence beside them says they cannot.
+
+**Prose stating a property is not the property, tenth instance** — and the first
+time it has landed on a claim about the *tests* rather than about the code. That
+is a worse place for it: a reader who distrusts prose can check code, and a
+reader told the code checks the prose has nowhere left to stand.
+
+The split **could** be derived, and deliberately is not. The log marks provenance
+in prose, and only when a finding is not Qodo's — *found by audit*, *self-found
+while…*, *raised by the live harness*. A row with no marker is a row **nobody
+marked**, which is a different fact from a row Qodo raised. A test inferring the
+second from the first would be the ninth shape again, reading an absence as
+evidence, and it would be most confident about precisely the rows nobody had
+thought about. It would also be wrong today: writing that inference is what
+produced two false exclusions the last time it was tried, on rows 5 and 35.
+
+So the sentence now says which half is guarded and which is a claim by the
+author. Making the split derivable means giving all 147 rows an explicit
+provenance field. That is worth doing and it is not a thing to start the day
+before a deadline.
 
 ## How this stays honest
 

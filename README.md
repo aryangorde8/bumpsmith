@@ -658,11 +658,24 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **139 findings**: 94 raised by automated review, 4
-that only a live run against the harness could have raised, and 41 the author
-found rather than review. The count is not maintained by hand -- `tests/test_docs.py`
-reads the log's own table and fails if this sentence and that table disagree,
-because this paragraph has been the stale number twice already. The log also names the recurring *shapes* those
+As of 28 August 2026 it holds **147 findings**: 101 raised by automated review, 4
+that only a live run against the harness could have raised, and 42 the author
+found rather than review. **The total** is not maintained by hand —
+`tests/test_docs.py` reads the log's own table and fails if this sentence and
+that table disagree, and separately fails if the three parts do not sum to it,
+because this paragraph has been the stale number twice already.
+
+**The split between those three is maintained by hand, and is not checked.** It
+could be, and deliberately is not: the log marks a finding's provenance in prose,
+and only when it is *not* Qodo's — a row with no marker is a row nobody marked,
+which is not the same fact as a row Qodo raised. A test inferring the first from
+the second would be the log's own ninth shape, reading an absence as evidence,
+and it would be most confident about exactly the rows nobody had thought about.
+So the arithmetic is guarded, the totals are guarded, and the classification is a
+claim by the author. This paragraph used to say the whole sentence was checked;
+review pointed out that it was not.
+
+The log also names the recurring *shapes* those
 findings fall into — a guarantee true only in the cases the tests covered, an
 answer good enough for reporting reused for mutating, "I could not tell" reported
 as "it did not happen" — because naming a class of mistake is cheaper than
@@ -712,9 +725,96 @@ all. The point of keeping this paragraph is that the follow-up review is not a
 formality — it found real defects in merged code, which is the argument for
 requiring one.
 
-**The whole trail.** Twenty-nine pull requests; Qodo reviewed every one;
-twenty-five raised at least one finding, **91 in total**. Every finding is in
-[`REVIEW-LOG.md`](REVIEW-LOG.md) with what happened to it and why.
+**The whole trail, as of the merge of #30.** Thirty pull requests; Qodo reviewed
+every one; twenty-six raised at least one inline finding, **94 in total**. Every
+finding is in [`REVIEW-LOG.md`](REVIEW-LOG.md) with what happened to it and why.
+
+That sentence is anchored to a named merge on purpose. The finding total two
+paragraphs above cannot go stale — a test reads the log's own table and fails
+when the two disagree — but these numbers live on GitHub, not in the repository,
+and the first version of this sentence went stale the moment the next pull
+request merged. A count with no date is a claim about now, and it was wrong about
+now within a day, twice. Anchored, it ages instead of lying.
+
+Re-deriving it is one loop, anchored to the same merge the sentence is, and it
+prints the sentence:
+
+```
+repo=aryangorde8/bumpsmith
+cutoff=$(gh api repos/$repo/pulls/30 --jq .merged_at)
+for n in $(gh api --paginate "repos/$repo/pulls?state=closed&per_page=100" \
+           | jq -s --arg c "$cutoff" \
+               'add | map(select(.merged_at != null and .merged_at <= $c)) | .[].number'); do
+  f=$(gh api --paginate repos/$repo/pulls/$n/comments \
+      | jq -s 'add | map(select(.user.login | startswith("qodo"))
+                       | select(.in_reply_to_id == null)) | length')
+  cov=$(gh api --paginate repos/$repo/issues/$n/comments \
+        | jq -s 'add | map(select(.user.login | startswith("qodo"))) | length')
+  echo "$n $f $cov"
+done | awk '{ prs++; findings += $2; if ($2 > 0) withf++; if ($2 + $3 > 0) reviewed++ }
+            END { printf "%d pull requests, %d reviewed by Qodo, %d with at least one inline finding, %d findings\n",
+                         prs, reviewed, withf, findings }'
+```
+
+```
+30 pull requests, 30 reviewed by Qodo, 26 with at least one inline finding, 94 findings
+```
+
+Five details in there were each raised as a finding on the version of this
+paragraph that lacked them, and they are five coats on one mistake.
+
+**It asks twice per pull request.** Four of the thirty have zero inline findings,
+and zero from `/pulls/N/comments` is the same answer for *Qodo reviewed this and
+found nothing* as for *Qodo never reviewed this* — opposite facts, and the
+sentence above asserts the first for all thirty. Coverage comes from
+`/issues/N/comments`, where Qodo posts a summary either way. Collapsing the two
+is `REVIEW-LOG.md`'s ninth shape, *"I could not tell" reported as "it did not
+happen"*.
+
+**Both queries paginate, and both filter with `jq -s` rather than `--jq`.**
+GitHub returns thirty comments a page, so a summary on page two came back as
+zero — the same false *never reviewed*, reintroduced by the fix for it. And
+`--paginate --jq '… | length'` evaluates the filter once per page and prints a
+count for each, so a two-page thread prints `30` then `4` rather than `34`: a
+different number that looks exactly like the right one.
+
+**It loops.** The claim is an aggregate over thirty pull requests, and a command
+that answers for one of them is not a procedure for checking it.
+
+**It stops where the sentence stops.** Anchoring the claim to a merge and then
+checking it against *everything merged since* is two halves that disagree: the
+moment the next pull request lands, the loop returns a larger number and appears
+to refute a sentence that is still true. The cutoff is #30's own `merged_at`, and
+the filter is on **merge time** rather than pull request number, because those
+are not the same order.
+
+**It enumerates the whole history rather than a recent window.** `gh pr list
+--limit 200` returns the *most recent* two hundred and then the cutoff is applied
+to those, so once two hundred more pull requests have merged the anchored set
+falls out of the window and the loop reports a smaller total — silently, and
+about a claim written to be permanent. Paginating `pulls?state=closed` and
+dropping the unmerged ones has no window at all.
+
+A test that ran this in CI was considered and rejected: it would fail when the
+network is down and pass when a cache is stale — wrong in both directions, and
+reassuringly wrong in the second.
+
+**A second representative pull request, for the loop rather than the depth.**
+[#30 — *The README understated the project*](https://github.com/aryangorde8/bumpsmith/pull/30)
+is smaller than #20 and shows the whole cycle inside one pull request. Three
+findings were self-found by reading this README cold against the criteria it is
+judged on: a stale claim that survived the pull request which fixed its twin
+elsewhere, a module table listing twelve of eighteen files, and the counts above.
+Qodo then raised two findings **on the fix** — the completeness guard filtered
+`__*.py` while the sentence it defends says *everything*, so it enforced a
+narrower claim than the README makes; and the helper returned a set, so neither
+check could see a duplicate row. Both were fixed, and fixing the first turned up
+a third map of the package inside `__init__.py` listing nine of eighteen. The
+follow-up `/agentic_review` then found that the uniqueness check had been added
+to one of the two tables that make the claim, and the second `/agentic_review`
+against `026d73c` came back **Bugs (0)** with every finding marked ✓ Resolved.
+Six findings, three rounds, and the defect the pull request is *about* recurred
+twice inside its own fix.
 
 **What was intentionally dismissed.** Three findings were rejected rather than
 fixed, each with the measurement that rejected it rather than an opinion. The
