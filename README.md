@@ -754,9 +754,35 @@ all. The point of keeping this paragraph is that the follow-up review is not a
 formality — it found real defects in merged code, which is the argument for
 requiring one.
 
-**The whole trail, as of the merge of #30.** Thirty pull requests; Qodo reviewed
-every one; twenty-six raised at least one inline finding, **94 in total**. Every
-finding is in [`REVIEW-LOG.md`](REVIEW-LOG.md) with what happened to it and why.
+**Two rounds against the final code:
+[#32](https://github.com/aryangorde8/bumpsmith/pull/32) and
+[#33](https://github.com/aryangorde8/bumpsmith/pull/33)**, the last two merges.
+Qodo raised **nine** findings between them on its first pass. Three on #32 were
+one defect wearing three faces: every rule resolved names against a single
+file-wide import map, so a `conlist` shadowed in a class body, bound by a
+comprehension, or imported inside a class was still read as pydantic's. The same
+map was behind an already-merged rule and a third that review never mentioned —
+fixed at the root, for all four consumers, which is finding 139's lesson applied.
+The worst was on #33: `@root_validator(skip_on_failure=False)` was handed a
+*second* `skip_on_failure=True` rather than having the first one changed. That
+one is worth saying plainly, because `ast.parse` accepts a repeated keyword
+argument and `compile` does not — so the tool's own re-parse could not see it,
+and the migration would have written a file that does not import.
+
+Asked for a second review against the fix, Qodo returned **five more findings,
+every one of them inside the first round's own fix**: a walrus rebinding it did
+not count, a nested class handed its enclosing class's namespace, sequential
+class-body binding — raised on both pull requests, from opposite directions —
+and `global`/`nonlocal` misread as shadowing. All fourteen are fixed, each
+reproduced before it was accepted; Qodo marked the first round's threads resolved
+on the re-review. The pair is the clearest evidence in this repository that a
+follow-up review is not a formality: the second round found real defects in code
+whose only purpose was to fix the first.
+
+**The whole trail, as of the merge of #33.** Thirty-three pull requests; Qodo
+reviewed every one; twenty-nine raised at least one inline finding, **117 in
+total**. Every finding is in [`REVIEW-LOG.md`](REVIEW-LOG.md) with what happened
+to it and why.
 
 That sentence is anchored to a named merge on purpose. The finding total two
 paragraphs above cannot go stale — a test reads the log's own table and fails
@@ -770,7 +796,7 @@ prints the sentence:
 
 ```
 repo=aryangorde8/bumpsmith
-cutoff=$(gh api repos/$repo/pulls/30 --jq .merged_at)
+cutoff=$(gh api repos/$repo/pulls/33 --jq .merged_at)
 for n in $(gh api --paginate "repos/$repo/pulls?state=closed&per_page=100" \
            | jq -s --arg c "$cutoff" \
                'add | map(select(.merged_at != null and .merged_at <= $c)) | .[].number'); do
@@ -786,7 +812,7 @@ done | awk '{ prs++; findings += $2; if ($2 > 0) withf++; if ($2 + $3 > 0) revie
 ```
 
 ```
-30 pull requests, 30 reviewed by Qodo, 26 with at least one inline finding, 94 findings
+33 pull requests, 33 reviewed by Qodo, 29 with at least one inline finding, 117 findings
 ```
 
 Five details in there were each raised as a finding on the version of this
