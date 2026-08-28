@@ -556,6 +556,30 @@ The harness's own `tool.approval_required` is answered by that same gate, and
 including that the MCP server it would have called reports zero tool calls
 served. The claim is about the effect, not the paperwork.
 
+## No model decides the rewrite
+
+There is no model inference anywhere in the migration loop. bumpsmith runs the
+suite, reads the failure text the suite actually printed, matches it against a
+closed set of eight break classes, resolves the affected names in the scope they
+are read in, and rewrites those sites. Every one of those steps is deterministic,
+and every one of them is tested.
+
+That is a decision rather than an omission, and the reason is the argument this
+README opens with. A model asked to transform code will produce a
+transformation. What it will rarely do is say *I do not recognise this failure* —
+it will write something plausible, the file will still import, the suite may even
+pass, and the wrong edit will sit in a diff nobody reads line by line. The
+failure this tool exists to prevent is exactly a change that looks finished and
+is not, so the rewrite path is the last place to put a component whose
+characteristic failure is confident invention. Where the tool cannot narrow a
+failure to one rule it stops and reverts, and that is only a meaningful promise
+if nothing in the path is willing to guess on its behalf.
+
+What the harness *is* for is the next section: running the suite somewhere safe,
+stopping for a person before anything irreversible happens, reaching a real tool
+over MCP, and holding a session together while it does. Those are the jobs where
+the harness does the work rather than sitting underneath a thin wrapper.
+
 ## Where TrueForge fits
 
 The harness is not sitting underneath this project as a model call. Five things
@@ -585,9 +609,21 @@ the document this project's review log exists to catch.
   has subagent threads of its own — `harness.py` reads their `thread_id`s, and
   learned to, because reading one as a session id produced a live 404 — but no
   work is handed to them.
-- A session is created once per runner and reused, and `SandboxRunner` will
-  accept one that already exists. Nothing yet proves a session **surviving a
-  reconnect**; that is the one item here with a seam and no test behind it.
+- A session is created once per runner and reused, and `SandboxExec` will accept
+  one that already exists. That seam now has a proof against it:
+  [`session_reconnect.py`](proofs/session_reconnect.py) opens a session, writes a
+  marker into its sandbox, **throws the client away**, comes back with nothing but
+  the session id, and reads the marker back — with a brand-new session as the
+  control, which must *not* see it. `tests/test_session_reconnect.py` runs it
+  against stand-in harnesses that share one sandbox, forget one, keep nothing at
+  all, and fail the read outright, and requires it to fail against every one of
+  them, naming the leg — so the control is known to be a control. Two ways that
+  control could have passed while proving nothing — a marker whose contents
+  impersonated absence, and a read that reported its own errors as absence —
+  were Qodo findings on [#39](https://github.com/aryangorde8/bumpsmith/pull/39),
+  both reproduced before they were accepted. **What is still missing is a
+  recorded run against a live harness**, which is why this is a bullet here
+  rather than a row in the table above.
 
 ## Verifying it yourself
 
@@ -729,7 +765,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **177 findings**: 129 raised by automated review, 4
+As of 28 August 2026 it holds **180 findings**: 132 raised by automated review, 4
 that only a live run against the harness could have raised, and 44 the author
 found rather than review. **The total** is not maintained by hand —
 `tests/test_docs.py` reads the log's own table and fails if this sentence and
@@ -871,14 +907,17 @@ reviewed every one; thirty-two raised at least one inline finding, **129 in
 total**. Every finding is in [`REVIEW-LOG.md`](REVIEW-LOG.md) with what happened
 to it and why.
 
-**Two numbers in this README are now both 129, and they do not check each
-other.** One is threads on GitHub, counted by the loop below; the other is rows
-in a file, attributed to automated review by hand in a split this README already
-says is not verified. Neither is derived from the other, so their agreeing is a
-coincidence and not a reconciliation — and reading it as one would be the log's
-recurring **shape 3**, an answer good enough for one question reused to settle a
-stronger one. Said here because the next reader to notice the match will
-otherwise have to work out for themselves which of the two it was.
+**Two numbers in this README were both 129, and they never checked each other.**
+One is threads on GitHub, anchored to #37's merge and counted by the loop below;
+the other is rows in a file, attributed to automated review by hand in a split
+this README already says is not verified. They have since come apart — the three
+findings Qodo raised on #39 took the second to 132, while the first, being
+anchored, stayed where it was. That is what a coincidence does and a
+reconciliation does not, and it is why reading the match as a cross-check would
+have been the log's recurring **shape 3**: an answer good enough for one question
+reused to settle a stronger one. The paragraph is kept, rather than deleted with
+the coincidence, because a reader who saw those two numbers agree is owed the
+reason they no longer do.
 
 The trail sentence is anchored to a named merge on purpose. The log's total
 cannot go stale — a test reads [`REVIEW-LOG.md`](REVIEW-LOG.md)'s own table and
