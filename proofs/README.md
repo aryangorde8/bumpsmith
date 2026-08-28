@@ -41,8 +41,8 @@ could do it. Findings 35 and 39 both said so. What is left is four lines of
 ## Running them
 
 Install the package first (`pip install -e .`) so the imports resolve.
-`sandbox.py` and `deny.py` need a TrueForge on `http://localhost:8790`; pass
-`--base-url` for anywhere else. `pull_request.py`, `validator.py` and `fanout.py`
+`sandbox.py`, `deny.py` and `session_reconnect.py` need a TrueForge on
+`http://localhost:8790`; pass `--base-url` for anywhere else. `pull_request.py`, `validator.py` and `fanout.py`
 need no harness at all — those are the ones a reader without one can run.
 `validator.py` wants an interpreter with pydantic v2; `fanout.py` wants pydantic
 v2 and pytest, and says so before it starts.
@@ -67,6 +67,39 @@ The setup step writes the project with `printf` because the harness offers a way
 to download a file from a sandbox and no way to put one in. That limitation is
 also why `python -m bumpsmith --sandbox` refuses — the loop's edits cannot be
 carried across, so a suite run there would not be testing them.
+
+### `session_reconnect.py` — a session outlives the client that made it
+
+```
+python proofs/session_reconnect.py
+```
+
+Needs a sandbox provider, like `sandbox.py`. Three legs:
+
+1. Open a session and write a marker, carrying a fresh nonce, into its sandbox.
+2. **Discard the client entirely** and build a new one from nothing but the
+   session id. Read the marker back. This is the reconnect: a second process
+   holding a stored id has exactly this much and no more.
+3. Open a **brand-new** session and look for the same marker. It has to be
+   absent.
+
+Leg 3 is the proof. Legs 1 and 2 on their own are also what you would see if the
+path were shared, if sandboxes were pooled, or if the harness ignored the session
+id — "the file is there" is not evidence about the session until something
+establishes that it is *not* there for everyone. Without leg 3, leg 2 is an
+observation; with it, leg 2 is a measurement.
+
+The script exits non-zero on each of those failing separately, and says which,
+because "leg 1 never wrote its marker" and "the session did not hold" are
+different facts and only the second is about the harness.
+
+`tests/test_session_reconnect.py` runs the whole script against three stand-in
+harnesses on a real socket — sandboxes kept per session, one sandbox shared by
+all of them, and a sandbox that forgets after the first leg — and requires it to
+pass against the first and **fail** against the other two. Removing the leg-3
+check makes the script print *"the session held"* against the shared harness,
+which is a false sentence; one test catches it. A control nobody has watched fail
+is not known to be a control.
 
 ### `deny.py` — nothing irreversible happens without a human
 

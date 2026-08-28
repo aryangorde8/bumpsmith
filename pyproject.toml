@@ -77,7 +77,9 @@ files = ["src", "tests", "proofs", "pages"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# `pages/` is not a package and is not installed, so the site generator is
-# reachable from the suite by path rather than by installation.
-pythonpath = ["pages"]
+# Neither `pages/` nor `proofs/` is a package, and neither is installed, so the
+# site generator and the proofs are reachable from the suite by path rather than
+# by installation. A proof that needs a live harness still cannot be *run* here;
+# what the suite checks is that it would notice the claim being false.
+pythonpath = ["pages", "proofs"]
 addopts = "-ra --strict-markers --strict-config"
