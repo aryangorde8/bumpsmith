@@ -1623,3 +1623,51 @@ def test_global_resolves_in_the_module_whatever_shadowed_it(
     The last two cases are the controls.
     """
     assert _sites(source, items_keyword_sites) == expected, label
+
+
+@pytest.mark.parametrize(
+    ("label", "source", "expected"),
+    [
+        (
+            "a function's own pydantic import wins over the module snapshot",
+            """
+            def f():
+                global conlist
+                from pydantic import conlist
+                return conlist(str, min_items=1)
+            """,
+            [4],
+        ),
+        (
+            "the restore still happens when the body imports nothing",
+            """
+            from pydantic import conlist
+
+            class C[conlist]:
+                def m(self):
+                    global conlist
+                    return conlist(str, min_items=1)
+            """,
+            [6],
+        ),
+    ],
+)
+def test_a_global_import_is_still_the_function_s_own(
+    label: str, source: str, expected: list[int]
+) -> None:
+    """Fourth round, and an ordering bug in the fix for 170.
+
+    Restoring the module namespace *after* `_inside` overwrote the function's
+    own `from pydantic import conlist` with a snapshot taken before the body
+    was read -- and under `global` that import writes the very module name the
+    snapshot was of. Restoring first and letting the body's own bindings land
+    on top is the order that models both.
+
+    A neighbouring case is deliberately not asserted here: `global conlist`
+    followed by a *non*-pydantic local import or assignment still reports the
+    call. That is finding 163's recorded decision rather than this change --
+    it behaves identically on the commit before this branch -- and it is
+    order-dependent inside a function body in a way this walk does not model.
+    See `REVIEW-LOG.md` #171.
+    """
+    assert _sites(source, items_keyword_sites) == expected, label

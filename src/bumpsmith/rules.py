@@ -963,7 +963,10 @@ def nodes_in_scope(
         outer, outer_functions = _outside_type_params(node, names, inherited)
         for part in _evaluated_outside(node):
             yield from nodes_in_scope(part, outer, outer_functions, outermost)
-        body = _restored(_inside(outer_functions, node), outermost, _declared_global(node))
+        # Restore *before* `_inside`, not after: the declaration sends the name
+        # to the module, and then the function's own `from pydantic import` --
+        # which under `global` writes that very module name -- has to win.
+        body = _inside(_restored(outer_functions, outermost, _declared_global(node)), node)
         # A lambda's body is a single expression, not a list of statements.
         statements: list[ast.AST] = list(node.body) if isinstance(node.body, list) else [node.body]
         for piece in statements:
