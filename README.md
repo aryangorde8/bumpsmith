@@ -658,7 +658,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **144 findings**: 98 raised by automated review, 4
+As of 28 August 2026 it holds **145 findings**: 99 raised by automated review, 4
 that only a live run against the harness could have raised, and 42 the author
 found rather than review. The count is not maintained by hand -- `tests/test_docs.py`
 reads the log's own table and fails if this sentence and that table disagree,
@@ -723,11 +723,13 @@ and the first version of this sentence went stale the moment the next pull
 request merged. A count with no date is a claim about now, and it was wrong about
 now within a day, twice. Anchored, it ages instead of lying.
 
-Re-deriving it is one loop over the merged pull requests, and it prints the whole
-sentence:
+Re-deriving it is one loop, anchored to the same merge the sentence is, and it
+prints the sentence:
 
 ```
-for n in $(gh pr list --state merged --limit 100 --json number --jq '.[].number'); do
+cutoff=$(gh api repos/aryangorde8/bumpsmith/pulls/30 --jq .merged_at)
+for n in $(gh pr list --state merged --limit 200 --json number,mergedAt \
+           --jq "[.[] | select(.mergedAt <= \"$cutoff\")] | .[].number"); do
   f=$(gh api --paginate repos/aryangorde8/bumpsmith/pulls/$n/comments \
       | jq -s 'add | map(select(.user.login | startswith("qodo"))
                        | select(.in_reply_to_id == null)) | length')
@@ -739,8 +741,12 @@ done | awk '{ prs++; findings += $2; if ($2 > 0) withf++; if ($2 + $3 > 0) revie
                          prs, reviewed, withf, findings }'
 ```
 
-Three details in there were each raised as a finding on the paragraph that
-preceded them, and each is the same mistake in a different coat.
+```
+30 pull requests, 30 reviewed by Qodo, 26 with at least one inline finding, 94 findings
+```
+
+Four details in there were each raised as a finding on the version of this
+paragraph that lacked them, and they are four coats on one mistake.
 
 **It asks twice per pull request.** Four of the thirty have zero inline findings,
 and zero from `/pulls/N/comments` is the same answer for *Qodo reviewed this and
@@ -751,14 +757,21 @@ is `REVIEW-LOG.md`'s ninth shape, *"I could not tell" reported as "it did not
 happen"*.
 
 **Both queries paginate, and both filter with `jq -s` rather than `--jq`.**
-GitHub returns thirty comments a page, so a summary on page two came back as zero
-— the same false *never reviewed*, reintroduced by the fix for it. And
+GitHub returns thirty comments a page, so a summary on page two came back as
+zero — the same false *never reviewed*, reintroduced by the fix for it. And
 `--paginate --jq '… | length'` evaluates the filter once per page and prints a
 count for each, so a two-page thread prints `30` then `4` rather than `34`: a
 different number that looks exactly like the right one.
 
 **It loops.** The claim is an aggregate over thirty pull requests, and a command
 that answers for one of them is not a procedure for checking it.
+
+**It stops where the sentence stops.** Anchoring the claim to a merge and then
+checking it against *everything merged since* is two halves that disagree: the
+moment the next pull request lands, the loop returns a larger number and appears
+to refute a sentence that is still true. The cutoff is #30's own `merged_at`, and
+the filter is on **merge time** rather than pull request number, because those
+are not the same order.
 
 A test that ran this in CI was considered and rejected: it would fail when the
 network is down and pass when a cache is stale — wrong in both directions, and

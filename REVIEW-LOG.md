@@ -164,6 +164,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 142 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | The `gh api` command offered as the way to re-derive the anchored counts queries **inline comments on one pull request**. Four of the thirty have zero of those, and zero from that query is the same answer for *Qodo reviewed this and found nothing* as for *Qodo never reviewed this* — while the sentence it is meant to verify asserts the first for all thirty. **The ninth shape — "I could not tell" reported as "it did not happen" — in the command supplied to check a claim.** The recount actually performed did query both, so the README documented a weaker check than the one that was run | **Fixed** — two queries, with the reason for there being two written between them: inline findings from `/pulls/N/comments`, coverage from `/issues/N/comments`, which Qodo posts whether or not it finds anything. Collapsing them into one number is the mistake, not an inconvenience | this PR |
 | 143 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Raised by the follow-up review, on the fix for 142.** The coverage query added to answer 142 was written without `--paginate`. GitHub returns thirty issue comments a page, so a Qodo summary posted after the thirtieth comment comes back as **zero** — which is the false *never reviewed* that 142 exists to prevent, reintroduced by the fix for it. **The ninth shape, inside the fix for the ninth shape.** Qodo also named the second-order defect: `gh api --paginate --jq '… | length'` evaluates the filter once per page and prints a count for each, so adding the flag alone would have replaced one wrong number with several | **Fixed** — both queries paginate, and both apply their filter with `jq -s 'add | map(…) | length'` over the concatenated pages rather than with `--jq`, so the aggregate is one number. Verified against #20 (15 findings), #26 (0 findings, 2 coverage — reviewed, found nothing, the case the single query could not distinguish) and #31. Latent rather than live today: no pull request here has yet exceeded one page, so nothing was wrong until somebody's thread got long | this PR |
 | 144 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Third round on the same paragraph.** The two queries answer for **one** pull request — the README literally substitutes `N` — while the sentence they are offered as the check for is an aggregate over thirty: *30 reviewed, 26 with at least one finding, 94 findings*. None of the three figures can be derived from either command, so the paragraph presented an incomplete procedure as a complete one, which is a claim about the check rather than about the counts | **Fixed** — replaced with the loop that actually produced the numbers, which prints the sentence: `30 pull requests, 30 reviewed by Qodo, 26 with at least one inline finding, 94 findings`. Run before committing it, output pasted above. The three earlier findings on this paragraph (142, 143, 144) are now each explained beside the detail of the command that answers them, so the reasons travel with the code rather than living only here | this PR |
+| 145 | [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | **Fourth round, and the sharpest.** 140 anchored the claim to a named merge; 144 replaced the check with a loop over *everything currently merged*. The two halves disagree: the moment #31 itself lands, the loop returns 31 / 31 / 27 / 97 and appears to **refute a sentence that is still true**. A verification procedure that contradicts a correct claim is worse than none, because the reader believes the procedure. Qodo also named the trap in the obvious fix — filtering by pull request *number* would be wrong, since creation order is not merge order | **Fixed** — the cutoff is #30's own `merged_at`, and the filter is on `mergedAt` rather than on the number. Verified both ways: against #30's timestamp the loop enumerates 30 pull requests and prints the sentence verbatim; against #29's it enumerates 29, which is the check that the cutoff is doing anything at all | this PR |
 
 
 Every finding has a row here and a fuller account below. Findings that arrived
@@ -3022,6 +3023,39 @@ which is the argument for the follow-up review being a separate review rather
 than a re-read. The reasons now live beside the detail of the command that
 answers each one, so somebody editing the command finds out why it is shaped that
 way before they simplify it.
+
+### 145 · the claim was anchored and its check was not
+
+140 anchored the sentence to a named merge so it would age instead of lying.
+144 replaced its check with a loop over **every currently merged pull request**.
+Each was right on its own and together they contradict each other: the moment
+#31 lands, the loop returns
+
+```
+31 pull requests, 31 reviewed by Qodo, 27 with at least one inline finding, 97 findings
+```
+
+and appears to refute a sentence that is still perfectly true.
+
+**A verification procedure that contradicts a correct claim is worse than no
+procedure**, because a reader who runs it believes it over the prose. The claim
+would have looked stale to everybody who checked, and only to them.
+
+Qodo also named the trap sitting in the obvious fix: filter by pull request
+*number* and it breaks quietly, because creation order is not merge order. The
+cutoff is #30's `merged_at` and the comparison is against `mergedAt`.
+
+Verified in both directions, which for a filter means showing it excludes
+something:
+
+| cutoff | pull requests enumerated |
+|---|---|
+| #30's `merged_at` — `2026-08-28T04:52:58Z` | **30**, and the loop prints the sentence verbatim |
+| #29's `merged_at` — `2026-08-27T20:11:19Z` | **29** |
+
+**Four rounds on one paragraph**, and each round was the previous round's fix.
+The paragraph is eleven lines of shell. What it is *about* is a sentence
+containing four numbers.
 
 ## How this stays honest
 
