@@ -821,24 +821,79 @@ on the re-review. The pair is the clearest evidence in this repository that a
 follow-up review is not a formality: the second round found real defects in code
 whose only purpose was to fix the first.
 
-**The whole trail, as of the merge of #33.** Thirty-three pull requests; Qodo
-reviewed every one; twenty-nine raised at least one inline finding, **117 in
+**Four rounds on one resolver:
+[#35](https://github.com/aryangorde8/bumpsmith/pull/35).** The scope walk #32
+and #33 rebuilt turned out never to have traversed **PEP 695 type parameters**,
+so `class C[T: conlist(str, min_items=1)]` lost a site that the `ast.walk` it
+replaced had found. The fix for that raised two findings on the next review, the
+fix for those raised one more, and the fix for that one raised another — four
+rounds, each against the previous round's own change, and each one real. The
+middle pair fail in the direction that costs the most: the type parameter names
+were subtracted while walking the bases and then the class body was started from
+the *unfiltered* map, so `class C[conlist]` shadowed the import above the body
+and nowhere inside it. The tool would have reported a call that is not
+pydantic's and rewritten code that has nothing to do with the migration.
+
+Half of one report is recorded as **rejected**, and that half is why this
+paragraph is here rather than a line in the log. The third round offered
+`nonlocal` as the case analogous to `global`; Python refuses it outright —
+`nonlocal binding not allowed for type parameter` — so the code being described
+cannot be written and there is no test to write for it. The `global` half was
+right, and its fix came out *wider* than the report: an ordinary class-body
+shadow with no type parameter anywhere was wrong in exactly the same way and is
+fixed by the same change, which is the tell that the defect was the missing
+model rather than the type-parameter code. Both halves are answered in the
+thread on the pull request as well as in the log.
+
+**Three rounds on the code that publishes this evidence:
+[#36](https://github.com/aryangorde8/bumpsmith/pull/36).** Qodo raised **four
+findings** on the first pass — three in the generator and one on the manifest it
+reads, none anywhere near the migration loop. The worst was not subtle: `build()` recursively removed whatever
+path `--out` named before recreating it, so `--out .` typed once would have
+destroyed the repository rather than failed. Reproduced before it was accepted —
+a directory holding `source.py` came back holding five HTML files and no
+`source.py`.
+
+The second review returned **two more, and both were inside the first round's
+own fixes.** The guard added for the `rmtree` writes a `.bumpsmith-site` marker
+and refuses a directory that has none — but `Path.is_file()` follows symlinks,
+so a link named `.bumpsmith-site` pointing at any regular file anywhere
+satisfied it, and the guard written to stop `rmtree` reaching a directory it did
+not create handed over exactly such a directory. The slug pattern added to stop
+a run escaping the output directory accepts `index`, so a run named that
+overwrites the gallery's own page and leaves a site whose only entry point is
+the page that replaced it. Both are one shape — **a guard asking a question
+whose answer it does not control** — and naming the shape is what the log is
+for. The third review came back with nothing.
+
+**The whole trail, as of the merge of #37.** Thirty-seven pull requests; Qodo
+reviewed every one; thirty-two raised at least one inline finding, **129 in
 total**. Every finding is in [`REVIEW-LOG.md`](REVIEW-LOG.md) with what happened
 to it and why.
 
-That sentence is anchored to a named merge on purpose. The finding total two
-paragraphs above cannot go stale — a test reads the log's own table and fails
-when the two disagree — but these numbers live on GitHub, not in the repository,
-and the first version of this sentence went stale the moment the next pull
-request merged. A count with no date is a claim about now, and it was wrong about
-now within a day, twice. Anchored, it ages instead of lying.
+**Two numbers in this README are now both 129, and they do not check each
+other.** One is threads on GitHub, counted by the loop below; the other is rows
+in a file, attributed to automated review by hand in a split this README already
+says is not verified. Neither is derived from the other, so their agreeing is a
+coincidence and not a reconciliation — and reading it as one would be the log's
+recurring **shape 3**, an answer good enough for one question reused to settle a
+stronger one. Said here because the next reader to notice the match will
+otherwise have to work out for themselves which of the two it was.
+
+The trail sentence is anchored to a named merge on purpose. The log's total
+cannot go stale — a test reads [`REVIEW-LOG.md`](REVIEW-LOG.md)'s own table and
+fails when the README and the table disagree — but these numbers live on GitHub,
+not in the repository, and the first version of that sentence went stale the
+moment the next pull request merged. A count with no date is a claim about now,
+and it was wrong about now within a day, twice. Anchored, it ages instead of
+lying.
 
 Re-deriving it is one loop, anchored to the same merge the sentence is, and it
 prints the sentence:
 
 ```
 repo=aryangorde8/bumpsmith
-cutoff=$(gh api repos/$repo/pulls/33 --jq .merged_at)
+cutoff=$(gh api repos/$repo/pulls/37 --jq .merged_at)
 for n in $(gh api --paginate "repos/$repo/pulls?state=closed&per_page=100" \
            | jq -s --arg c "$cutoff" \
                'add | map(select(.merged_at != null and .merged_at <= $c)) | .[].number'); do
@@ -854,16 +909,19 @@ done | awk '{ prs++; findings += $2; if ($2 > 0) withf++; if ($2 + $3 > 0) revie
 ```
 
 ```
-33 pull requests, 33 reviewed by Qodo, 29 with at least one inline finding, 117 findings
+37 pull requests, 37 reviewed by Qodo, 32 with at least one inline finding, 129 findings
 ```
 
 Five details in there were each raised as a finding on the version of this
 paragraph that lacked them, and they are five coats on one mistake.
 
-**It asks twice per pull request.** Four of the thirty-three have zero inline
+**It asks twice per pull request.** Five of the thirty-seven have zero inline
 findings, and zero from `/pulls/N/comments` is the same answer for *Qodo
 reviewed this and found nothing* as for *Qodo never reviewed this* — opposite
-facts, and the sentence above asserts the first for all thirty-three. Coverage
+facts, and the sentence above asserts the first for all thirty-seven. That five
+was four through two earlier re-anchorings, which is finding 164's whole point:
+a figure that survives a change it should have moved with reads as confirmation
+and is nothing of the kind. Coverage
 comes from `/issues/N/comments`, where Qodo posts a summary either way.
 Collapsing the two is `REVIEW-LOG.md`'s ninth shape, *"I could not tell"
 reported as "it did not happen"*.
@@ -875,13 +933,13 @@ zero — the same false *never reviewed*, reintroduced by the fix for it. And
 count for each, so a two-page thread prints `30` then `4` rather than `34`: a
 different number that looks exactly like the right one.
 
-**It loops.** The claim is an aggregate over thirty-three pull requests, and a
+**It loops.** The claim is an aggregate over thirty-seven pull requests, and a
 command that answers for one of them is not a procedure for checking it.
 
 **It stops where the sentence stops.** Anchoring the claim to a merge and then
 checking it against *everything merged since* is two halves that disagree: the
 moment the next pull request lands, the loop returns a larger number and appears
-to refute a sentence that is still true. The cutoff is #33's own `merged_at`, and
+to refute a sentence that is still true. The cutoff is #37's own `merged_at`, and
 the filter is on **merge time** rather than pull request number, because those
 are not the same order.
 
