@@ -28,6 +28,9 @@ cannot classify, one finds a site and refuses to rewrite it, and one classifies 
 break it has no rewriter for and says so. See
 [the recorded runs](#the-recorded-runs).
 
+**A demo of the tool is at
+[youtu.be/ZCy5vY44ZAE](https://youtu.be/ZCy5vY44ZAE).**
+
 ---
 
 ## Exit code 0 is not a migration
@@ -1033,7 +1036,8 @@ because trimming an audit trail drops the oldest denial first.
 
 Entry for the **TrueForge Agent Harness Hackathon** (WeMakeDevs × TrueFoundry ×
 Qodo), 24–30 August 2026. The build window opened at 08:00 London on 24 August
-and closes at 20:00 London on 30 August.
+and closes at 20:00 London on 30 August. The submission video is
+[youtu.be/ZCy5vY44ZAE](https://youtu.be/ZCy5vY44ZAE).
 
 Everything committed before the window is tooling only — licence, code-review
 integration, and CI plumbing, committed 19–21 August. The rules require that "the
