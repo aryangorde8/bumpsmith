@@ -477,9 +477,8 @@ def test_every_finding_names_a_pr_the_coverage_table_lists() -> None:
         for n in found:
             if int(n) not in coverage:
                 missing.append(int(n))
-    assert not missing, (
-        "findings name pull requests the coverage table does not: "
-        + ", ".join(f"#{n}" for n in missing)
+    assert not missing, "findings name pull requests the coverage table does not: " + ", ".join(
+        f"#{n}" for n in missing
     )
 
 
