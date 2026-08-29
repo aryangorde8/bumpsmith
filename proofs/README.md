@@ -267,7 +267,17 @@ through `bumpsmith.fanout.fan_out`.
 What a test suite cannot reach is *simultaneity*: this runs the real loop — real
 breaks, real edits, real pytest runs — against several subjects at once, and
 checks that four concurrent migrations reach the verdicts four sequential ones
-would. Measured on the recorded run: **2.1s at one worker, 1.1s at four.**
+would. Both worker counts are recorded, and each recording holds its own clock:
+**1.85s at one worker** in `recorded/fanout-one-worker.json`, **0.87s at four** in
+`recorded/fanout.json`. Two runs on one machine is not a benchmark, and the number
+is not the point — the point is that the same four verdicts come back either way.
+The clock is recorded and never asserted, because a proof that fails when a laptop
+is busy is a proof nobody runs twice.
+
+This sentence used to read *"measured on the recorded run: 2.1s at one worker, 1.1s
+at four"*, and the recorded run had never contained a clock — there was no
+one-worker recording either. The numbers were probably right and they were
+uncheckable, which in this repository is the same as wrong (finding 182).
 
 The fourth subject is the point of the module. It raises the exception a refused
 connection actually produces, and the proof fails unless the report keeps it
@@ -342,8 +352,9 @@ a proof that costs an afternoon the first time it fails.
 
 `recorded/` holds the output of every script, verbatim — `sandbox.py` and
 `deny.py` against TrueForge 0.1.4 with `bedrock-mantle/qwen-3-coder-480b`, and
-`validator.py` against pydantic 2.12.5, all from 26 August 2026; `fanout.py` and
-`sandbox_fanout.py` against pydantic 2.12.5 from 27 August; and
+`validator.py` against pydantic 2.12.5, all from 26 August 2026;
+`sandbox_fanout.py` against pydantic 2.12.5 from 27 August; `fanout.py` against
+the same pydantic, re-recorded at both worker counts on 29 August; and
 `session_reconnect.py`, against the harness again, from 28 August. They are committed
 because a judge without a harness cannot run any of the ones that need one, and a
 claim nobody can check is worth what it costs to make.
@@ -352,7 +363,8 @@ claim nobody can check is worth what it costs to make.
 |---|---|
 | `sandbox.log` / `sandbox.json` | pytest ran in Daytona and came back `rc=2`; `bumpsmith.failures` read it as `[REGEX_KEYWORD] \`regex\` is removed. use \`pattern\` instead` |
 | `validator.log` / `validator.json` | pydantic 2.12.5, eight signatures, all eight as documented — `field`/`config` raise, `values` survives, and `info` is refused under `@validator` |
-| `fanout.log` / `fanout.json` | four subjects migrated at once against pydantic 2.12.5 — two migrated, one already green and unedited, and one never reached, reported as `unreached` with the reason rather than folded into the zero |
+| `fanout.log` / `fanout.json` | four subjects migrated at once against pydantic 2.12.5 — two migrated, one already green and unedited, and one never reached, reported as `unreached` with the reason rather than folded into the zero — **0.87s wall clock at four workers** |
+| `fanout-one-worker.log` / `fanout-one-worker.json` | the same four subjects, the same four verdicts, one worker — **1.85s wall clock**. It exists so that the comparison the prose draws has a second artefact under it instead of a remembered number |
 | `sandbox_fanout.log` / `sandbox_fanout.json` | two real third-party repositories put through the whole loop at the same time, each in its own Daytona sandbox by a `bumpsmith` installed there — **44.3s wall clock**; B reverted after peeling three breaks and reaching one it could not classify, C came back `already-green` with `git status` clean **in the sandbox that ran it**, and the third subject was never reached |
 | `deny.log` / `deny.json` | a real `tool.approval_required` on thread `main`, denied through `TurnChannel`; the session then run to rest — 2 turns, both `done` — and the harness's own MCP server reports **0 tool calls served during the run** |
 | `session_reconnect.log` / `session_reconnect.json` | session `01m14qmf52117zchr5g5z2n7vc` wrote a marker, and read the same nonce back after the client that opened it was discarded; the control session `01m14qmv5racxqtf6v71c7bdrc` read `absent` — so the marker was reachable from the session that wrote it and from nowhere else |

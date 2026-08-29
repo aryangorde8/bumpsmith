@@ -203,6 +203,9 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 179 | [#39](https://github.com/aryangorde8/bumpsmith/pull/39) | **The marker's contents could answer for the marker's absence.** Absence was a reserved *value*, so `--nonce __ABSENT__` wrote that string into the marker and leg 3 read it back as absence. Against a shared sandbox — the exact world leg 3 exists to catch — the proof printed *"the session held: sess-1 kept its sandbox across a new client, and a fresh session (sess-2) could not see the marker"*, which is false | **Fixed** — absence is a position, not a value: the prefix comes first and the payload after, so a marker holding `ABSENT:` reads back `PRESENT:ABSENT:` and parses as present. No contents can imitate the answer. Reproduced against the shared-sandbox fake, where the proof exited 0. `test_a_nonce_shaped_like_the_absence_answer_cannot_forge_the_control` now runs that same case; restoring the value-sentinel makes it, and only it, fail | this PR |
 | 180 | [#39](https://github.com/aryangorde8/bumpsmith/pull/39) | **The proof normalised the evidence before comparing it.** `_ran()` stripped whitespace from every command's output, but `_write()` uses `printf %s` and preserves the nonce exactly. A marker of `"  spaced  "` was written and read back correctly by the sandbox and leg 1 still failed, because the value compared was not the value observed | **Fixed** — `_ran()` returns output verbatim and only the *error* message strips, since that is prose for a human. Checked against the recorded evidence first: `sandbox.json` holds `"...\nready\n"`, so the harness is byte-faithful and there is nothing to normalise. Re-adding `.strip()` fails `test_marker_bytes_are_compared_exactly` alone | this PR |
 | 181 | [#40](https://github.com/aryangorde8/bumpsmith/pull/40) | **A positional reference, written into the same commit that made it wrong.** The paragraph beside the TrueForge table opened *"The last of those has a control"* — but the row it describes is the fifth of six, and the last is the fan-out. The same commit inserted that row, so unlike findings 164 and 165, where prose aged into being wrong, this prose was false the moment it was written. **Third instance of a positional reference going stale**, and the second time this session after I replaced two others with named ones for exactly this reason | **Fixed** — the paragraph names `session_reconnect.py` instead of pointing at a position, which is correct under any future ordering of the table. The finding total moved 180 → 181 with it, and the sentence recording the 129/129 divergence no longer quotes a split value that keeps drifting | this PR |
+| 182 | [#41](https://github.com/aryangorde8/bumpsmith/pull/41) | **High. A wall clock cited to a recording that never held one.** The README's TrueForge table and `proofs/README.md` both stated *"2.1s at one worker, 1.1s at four, measured on the recorded run"*. `proofs/recorded/fanout.json` held five keys — `pydantic`, `pytest`, `workers`, `fanout`, `problems` — and no clock anywhere in the file; `fanout.log` recorded outcomes only; `proofs/fanout.py` never called one; and the committed run was `workers: 4`, so the one-worker half of the comparison had no artefact behind it at all. The numbers were almost certainly observed — commit `82c1838` states them in its own message — which is what makes this the repository's own shape rather than an invention: a remembered number promoted to a cited one, in the file whose whole argument is that claims are anchored to artefacts | **Fixed** — `proofs/fanout.py` measures the fan-out with `perf_counter` and records `wall_seconds`; both worker counts were re-run and committed, and the prose now cites the file each number lives in. Measured 29 August: **1.85s at one worker** (`fanout-one-worker.json`), **0.87s at four** (`fanout.json`). The clock is recorded and never asserted — a proof that fails because a laptop was busy is a proof nobody runs twice | this PR |
+| 183 | [#41](https://github.com/aryangorde8/bumpsmith/pull/41) | **A property stated in three places and enforced in none.** `report.py`'s module docstring said values are *"only ever placed in text nodes -- never in an attribute"*; the README repeated it; and `tests/test_report.py` gave it as the reason its sweep was sufficient. `page()` interpolated the run's outcome into `<div class="end {_e(outcome)}">` — a payload value, in an attribute. `_e` quotes, so nothing was executable and no XSS follows from it; the defect is that escaping was the only thing holding a line three documents claimed was held by construction, and all 27 tests in the file passed either way | **Fixed** — the class is taken from the closed `_OUTCOME_BADGE` map, so an outcome nobody defined contributes no class, which is what it styled as anyway. Two tests added: one parses the document with `HTMLParser` and `convert_charrefs=True` and asserts no payload value reaches any attribute value *escaped or not*, and one pins the closed-set fallback. Verified by breaking — restoring the interpolation fails those two and nothing else. The three sentences were then narrowed to the two attributes that do vary, both computed here rather than quoted | this PR |
+| 184 | [#41](https://github.com/aryangorde8/bumpsmith/pull/41) | **The packaging one-liner sold the optional half as the product.** `pyproject.toml`, `src/bumpsmith/__init__.py` and `publish.py`'s header all described the tool as *"an agent that turns a failing pydantic v1-to-v2 migration into a reviewed pull request"* — the sentence `pip show bumpsmith` and `help(bumpsmith)` print. Opening a pull request needs `--open-pr` and a typed `yes`; the default run never approaches it. The README's own opening line has always been accurate, which is how three copies of a stronger claim went on living beside it | **Fixed** — all three say the tool migrates a repository and keeps the change only once its suite has come back green, which is what the default does. `publish.py` quoted the old description in its header, so the quote moved with it: **fourth instance of a sentence corrected in one file and left standing in others** | this PR |
 
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
@@ -3215,6 +3218,41 @@ Both were reproduced before being accepted and verified by removal afterwards:
 | --- | --- |
 | the reserved-name check | `test_a_run_cannot_claim_a_name_the_build_writes_itself` |
 | the symlink check | `test_a_symlinked_marker_does_not_unlock_the_guard` |
+
+## An outside audit of `main` — 182 to 184
+
+The first review here that was not a pull request. An external AI code audit
+(Cursor, Grok 4.6) was pointed at the tree at `f6ff5e0` and asked for security
+findings and claim findings in one pass. Its report is committed verbatim at
+[`reviews/2026-08-29-outside-audit.md`](reviews/2026-08-29-outside-audit.md) —
+unedited, including the parts rejected below, because a summary of a review that
+nobody else can read is the thing this file exists to stop. The severities in it
+are the auditor's own and are not endorsed by being stored. Recorded as their own batch because
+their provenance is neither Qodo nor a live run, and the README's split counts
+"automated review" as one column that now has two sources in it.
+
+It reported fourteen security findings. **None was accepted as a vulnerability**,
+and that is the honest summary rather than a defensive one: the tree was
+re-inspected for each, and every one either described a trust boundary this
+README already states out loud (`LocalRunner` runs a stranger's suite on your
+machine), an architectural limit already written down (a sandbox `exec` the model
+issues is weaker evidence than a local argv), or a hardening idea with no
+demonstrated failure behind it (`git push` without a `--`, an unvalidated
+`--pr-branch`). Several are worth doing and are not done here; a finding logged
+as fixed on the day before a deadline, in the module that performs the
+irreversible action, would be the worst possible trade this repository could make.
+
+What it did find was three claims, and those are the three above. All three are
+the same defect wearing different clothes — **prose asserting a property nothing
+checks**, which is this log's recurring shape and the reason the log exists. One
+quoted a measurement no file contained. One described an invariant the code did
+not have. One advertised a gated, optional path as the default. Two of the three
+had a test file sitting next to them that passed regardless.
+
+The audit also listed a dozen things as "unverifiable" that are better described
+as not attempted — the live site was not fetched, `git log` was not read, the
+fixtures were not cloned. Those are scope notes, and they are not counted here.
+A finding is something somebody can act on.
 
 ## How this stays honest
 

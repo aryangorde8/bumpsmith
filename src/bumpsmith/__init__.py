@@ -1,4 +1,5 @@
-"""bumpsmith — turn a failing pydantic v1-to-v2 migration into a reviewed pull request.
+"""bumpsmith — migrate a repository from pydantic v1 to v2, and keep the change
+only once its test suite has come back green.
 
 Start at :mod:`bumpsmith.migrate`. It is the loop, and every other module is a
 part it uses:

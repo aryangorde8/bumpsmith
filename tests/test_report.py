@@ -12,6 +12,7 @@ the repository it was migrating would be a remarkable way to lose.
 import html
 import json
 import re
+from html.parser import HTMLParser
 from typing import Any
 
 from bumpsmith.report import page
@@ -300,6 +301,12 @@ def _assert_inert(out: str, attack: str, escaped: str, where: str) -> None:
     A value with no HTML-special characters escapes to itself, and that is fine:
     `javascript:alert(1)` in a text node is six words, because nothing here ever
     puts a payload value in an attribute or a URL.
+
+    That last clause was false when it was written. The outcome was interpolated
+    into `class="end {outcome}"` -- escaped, so this sweep still passed, but for
+    a reason the docstring did not give (finding 183). `report.page` now takes
+    that class from a closed map, and the test below asserts the clause rather
+    than leaving it as something a reader has to take on faith.
     """
     if escaped != attack:
         assert attack not in out, f"{where} rendered {attack!r} unescaped"
@@ -329,6 +336,59 @@ def test_no_field_of_the_report_can_inject_markup() -> None:
 
         out = page(_run(steps=[{**_STEP, "skipped": [attack]}]))
         _assert_inert(out, attack, escaped, "a skipped reason")
+
+
+class _AttributeValues(HTMLParser):
+    """Every attribute value the document actually has, as a parser resolves it.
+
+    `convert_charrefs=True` matters: it undoes the escaping on the way out, so a
+    value that reached an attribute *escaped* is still caught. Asserting on the
+    raw source instead would pass on exactly the case worth failing on.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.values: list[str] = []
+
+    def handle_starttag(self, _tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.values.extend(value for _, value in attrs if value is not None)
+
+
+def test_no_payload_value_reaches_an_attribute() -> None:
+    """The module's docstring says it; this is the part that checks it.
+
+    Swept over the same fields as the markup test, because the guarantee is the
+    same guarantee: what a repository wrote goes into a text node or it does not
+    go into the page. An attribute is the one place where escaping is the only
+    thing standing between inert and executed, so the rule here is that nothing
+    from the payload gets that far in the first place.
+    """
+    fields = ("repository", "outcome", "stop", "reason")
+    step_fields = ("where", "break_class", "message", "culprit", "rule")
+
+    for attack in _ATTACKS:
+        for field in fields:
+            parser = _AttributeValues()
+            parser.feed(page(_run(**{field: attack})))
+            for value in parser.values:
+                assert attack not in value, f"{field} reached the attribute {value!r}"
+
+        for field in step_fields:
+            parser = _AttributeValues()
+            parser.feed(page(_run(steps=[{**_STEP, field: attack}])))
+            for value in parser.values:
+                assert attack not in value, f"step.{field} reached the attribute {value!r}"
+
+
+def test_an_outcome_the_page_does_not_know_styles_as_nothing() -> None:
+    """The closed map is the whole mechanism, so the fallback is worth pinning.
+
+    An outcome nobody defined has no CSS rule either way -- only `migrated` and
+    `reverted` are styled -- so dropping it costs the page nothing and buys the
+    docstring back.
+    """
+    assert '<div class="end migrated">' in page(_run(outcome="migrated"))
+    assert '<div class="end">' in page(_run(outcome="not-an-outcome"))
 
 
 def test_the_document_has_no_stray_tags_after_a_hostile_value() -> None:
