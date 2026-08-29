@@ -24,9 +24,17 @@ Everything here is somebody else's text
 Repository paths, pytest's output, exception messages, file names, the rule's own
 summary: all of it originates in a repository this process did not write, and all
 of it lands in a document somebody opens in a browser. So every value is escaped
-on the way in, and values are only ever placed in text nodes -- never in an
-attribute, a ``<script>``, a ``<style>``, or a URL. A migration report that
+on the way in, and no value from the payload is placed in an attribute, a
+``<script>``, a ``<style>``, or a URL -- it reaches a text node or it does not
+reach the page. The two attributes that vary are computed here and never quoted
+from the payload: the outcome's CSS class, which comes from a closed map, and a
+bar width, which is an integer derived from two integers. A migration report that
 executed a repository's error message would be a remarkable way to lose.
+
+This paragraph used to say values were "only ever placed in text nodes" while the
+outcome was interpolated into a ``class`` -- escaped, and so inert, but there.
+Rather than soften the sentence, the code was changed to meet it, because prose
+stating a property is not the property (finding 183).
 
 The page needs no network, no fonts and no scripts: it is one file that opens
 from ``file://``, which is the only form that can be attached to a review, mailed
@@ -342,8 +350,15 @@ def page(payload: Mapping[str, Any], *, title: str = "bumpsmith run") -> str:
         _tile(applied, _changes_label(applied, kept=payload.get("kept") is True)),
     ]
 
+    # The one payload value that reached an attribute. `_e` quotes, so it was
+    # inert -- but "inert" is weaker than "never there", and both this module's
+    # docstring and the test that swept this field claimed the stronger one
+    # (finding 183). The class comes from the closed map now: an outcome nobody
+    # defined contributes no class, which is what it styled as anyway.
+    end_class = f"end {outcome}" if outcome in _OUTCOME_BADGE else "end"
+
     ending = [
-        f'<div class="end {_e(outcome)}">',
+        f'<div class="{end_class}">',
         f"<p><strong>{_e(_OUTCOME_SENTENCE.get(outcome, 'The run ended.'))}</strong></p>",
     ]
     if stop:

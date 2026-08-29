@@ -1,8 +1,8 @@
 {
   "pydantic": "2.12.5",
   "pytest": "9.1.1",
-  "workers": 4,
-  "wall_seconds": 0.87,
+  "workers": 1,
+  "wall_seconds": 1.85,
   "fanout": {
     "subjects": 4,
     "reached": 3,

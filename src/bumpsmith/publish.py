@@ -1,9 +1,14 @@
 """Propose the migration as a pull request, and open it only if a human says yes.
 
-This is the noun in the project's own description of itself -- *turns a failing
-pydantic v1→v2 migration into a reviewed pull request* -- and until now the tool
-did not have it. What it had was the refusal: :mod:`bumpsmith.gate` proves that
-``open_pull_request`` is denied, and :mod:`bumpsmith.harness` proves the denial
+Opening the pull request is the optional end of the loop. The project's one-line
+description used to promise it as the product -- *turns a failing pydantic v1→v2
+migration into a reviewed pull request* -- which announced as the default a path
+that needs ``--open-pr`` and a typed ``yes`` to run at all. The description now
+says what the default does, and this module is the noun it dropped (finding 184).
+
+Until this module existed what the project had was the refusal:
+:mod:`bumpsmith.gate` proves that ``open_pull_request`` is denied, and
+:mod:`bumpsmith.harness` proves the denial
 travels back through a live harness with the tool never called. That is a real
 guarantee and it is the wrong half to have alone. A gate with nothing behind it
 guards a door into an empty room.

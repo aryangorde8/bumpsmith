@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "bumpsmith"
 version = "0.1.0"
-description = "An agent that turns a failing pydantic v1-to-v2 migration into a reviewed pull request."
+description = "An agent that rewrites the pydantic v1 breaks a test suite reports, keeps the edits only once that suite comes back green, and names whatever it could not do."
 readme = "README.md"
 requires-python = ">=3.13"
 license = { file = "LICENSE" }

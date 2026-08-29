@@ -11,6 +11,10 @@ all, and the proof fails unless the report keeps that apart from the subject
 that was reached and needed nothing. Both contribute zero migrations. Only one
 of them is good news.
 
+The run's wall clock is recorded and never checked. It is the one number here
+that belongs to the machine rather than to the code, so it is written into
+``recorded/`` where anything quoting it can be held against it.
+
 Needs an interpreter with **pydantic v2 and pytest** on it -- the subjects are
 migrated by running their own suites through it, so both are prerequisites and
 both are checked before anything is built. This package deliberately depends on
@@ -23,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -201,9 +206,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         jobs = build(where, args.python)
         print(
             f"pydantic {version}, pytest {pytest_version}, "
-            f"{len(jobs)} subjects + one unreachable, {args.workers} workers"
+            f"{len(jobs)} subjects + one unreachable, {args.workers} "
+            f"worker{'' if args.workers == 1 else 's'}"
         )
+        # Recorded, not asserted. How long this takes is a fact about the machine
+        # that ran it, and a proof that fails because a laptop was busy is a proof
+        # nobody runs twice. It is written down because the alternative already
+        # happened: two wall clocks were quoted in the README as "measured on the
+        # recorded run" while the recording held no clock at all (finding 182).
+        # `check()` still decides whether the run passed. This only says what it cost.
+        started = time.perf_counter()
         result = fan_out([*jobs, Unreachable()], workers=args.workers)
+        wall_seconds = round(time.perf_counter() - started, 2)
 
         for attempt in result.attempts:
             what = attempt.outcome.value if attempt.outcome else f"unreached ({attempt.result})"
@@ -211,7 +225,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(
             f"\nreached {len(result.reached)}/{len(result.attempts)}, "
             f"complete={result.complete}, "
-            f"migrated={result.counting(Outcome.MIGRATED)}"
+            f"migrated={result.counting(Outcome.MIGRATED)}, "
+            f"{wall_seconds}s wall clock at {args.workers} "
+            f"worker{'' if args.workers == 1 else 's'}"
         )
 
         problems = check(result.attempts, jobs)
@@ -219,6 +235,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "pydantic": version,
             "pytest": pytest_version,
             "workers": args.workers,
+            "wall_seconds": wall_seconds,
             "fanout": result.as_dict(),
             "problems": problems,
         }

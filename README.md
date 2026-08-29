@@ -1,7 +1,8 @@
 # bumpsmith
 
-**An agent that migrates a repository from pydantic v1 to v2 and keeps the
-change only once the test suite has come back green.**
+**An agent that rewrites the pydantic v1 breaks a test suite reports, keeps the
+edits only once that suite has come back green, and names whatever it could not
+do.**
 
 It runs the suite, reads the break out of the failure, writes the migration rule
 that break implies, finds every site the rule applies to, plans the smallest edit
@@ -232,9 +233,13 @@ than a patch, and it is easier to see than to read.
 Everything on it — repository paths, pytest's output, exception messages, file
 names — originates in a repository this process did not write, so every value is
 escaped and placed in a text node, never in an attribute, a script, a style block
-or a URL. There is no network access and no JavaScript: one file that opens from
-`file://`, which is the only form that can be attached to a review or committed
-as evidence.
+or a URL. The page's two varying attributes are computed rather than quoted: a
+CSS class taken from a closed set of outcomes, and a bar width that is an
+integer. That distinction is not pedantry — this sentence was false until
+[finding 183](REVIEW-LOG.md), because the outcome was being interpolated into a
+`class`, escaped and inert but there, and no test disagreed. There is no network
+access and no JavaScript: one file that opens from `file://`, which is the only
+form that can be attached to a review or committed as evidence.
 
 ## The recorded runs
 
@@ -592,7 +597,7 @@ it does here, each with the code that does it and a run that was recorded:
 | **Stops for a person.** `tool.approval_required` is answered by the same gate that guards this tool's own effects, and a call that cannot be read is denied | [`harness.py`](src/bumpsmith/harness.py), [`gate.py`](src/bumpsmith/gate.py) | [`deny.py`](proofs/deny.py) — paused, denied, and the MCP server reports **0 tool calls served** |
 | **Reaches a real tool over MCP.** The tool is registered with the harness and annotated `destructiveHint`; TrueForge's own default `require_approval_for_tools` selects it with no configuration from us at all | [`mcp_stub.py`](proofs/mcp_stub.py) | the same run, checked against the server the harness would have called rather than one this repository chose |
 | **Keeps a session across a reconnect.** `SandboxExec` will adopt a `session_id` it did not create, so a second process holding a stored id reaches the sandbox that session opened, not a fresh one | [`trueforge.py`](src/bumpsmith/trueforge.py) | [`session_reconnect.py`](proofs/session_reconnect.py) — one session read its marker back after the client was **thrown away**; a brand-new session found nothing |
-| **Hands work out in parallel.** Several subjects migrated at once, each in a tree — or a sandbox — of its own | [`fanout.py`](src/bumpsmith/fanout.py) | [`fanout.py`](proofs/fanout.py) — 2.1s at one worker, 1.1s at four |
+| **Hands work out in parallel.** Several subjects migrated at once, each in a tree — or a sandbox — of its own | [`fanout.py`](src/bumpsmith/fanout.py) | [`fanout.py`](proofs/fanout.py) — **1.85s at one worker, 0.87s at four**, each number from the recording that holds it |
 
 Every one of those has its output committed verbatim in
 [`proofs/recorded/`](proofs/recorded), session and turn ids kept, because a judge
@@ -762,9 +767,12 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 28 August 2026 it holds **181 findings**: 133 raised by automated review, 4
+As of 29 August 2026 it holds **185 findings**: 137 raised by automated review, 4
 that only a live run against the harness could have raised, and 44 the author
-found rather than review. **The total** is not maintained by hand —
+found rather than review. "Automated review" is two sources now, not one: Qodo on
+every pull request, and a single outside audit of `main` that raised the last
+three — logged as its own batch, because a column that quietly changes what it
+counts is the same defect as a number that quietly goes stale. **The total** is not maintained by hand —
 `tests/test_docs.py` reads the log's own table and fails if this sentence and
 that table disagree, and separately fails if the three parts do not sum to it,
 because this paragraph has been the stale number twice already.
