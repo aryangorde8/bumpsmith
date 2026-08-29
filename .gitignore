@@ -32,3 +32,8 @@ pr-calls.log
 # The generated site. Built from `pages/runs.toml` on demand; never committed,
 # because a stale copy of a generated page is worse than no copy.
 pages/_site/
+
+# The screen recording the submission video was cut from. The video is published
+# at youtu.be/ZCy5vY44ZAE; a copy of the source file in the history would be
+# carried by every clone of this repository forever.
+*.mp4
