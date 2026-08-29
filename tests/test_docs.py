@@ -322,7 +322,10 @@ def test_the_readme_module_table_names_each_module_once() -> None:
 
 REVIEW_LOG = Path(__file__).resolve().parent.parent / "REVIEW-LOG.md"
 
-_ROW = re.compile(r"^\|\s*(\d+)\s*\|", re.MULTILINE)
+_FINDING_TABLE_HEADER = "| # | PR | Finding | Disposition | Where |"
+_PR_COVERAGE_HEADER = "| PR | Qodo | Inline findings | Coverage comments |"
+_PR_LINK = re.compile(r"\[#(\d+)\]")
+_ROW = re.compile(r"^\|\s*(\d+)\s*\|")
 _README_SNAPSHOT_DATE = re.compile(
     r"As of (\d{1,2}) (January|February|March|April|May|June|July|August|September"
     r"|October|November|December) (\d{4}) it holds"
@@ -353,8 +356,43 @@ def _review_log() -> str:
     return REVIEW_LOG.read_text(encoding="utf-8")
 
 
+def _table_body(text: str, header: str) -> list[str]:
+    """Body rows of one table, scoped the way :func:`_stop_table` is.
+
+    A second table in REVIEW-LOG.md with a leading ``| 1 |`` would otherwise
+    be counted as finding 1. The finding index is the table whose header is
+    ``# | PR | Finding``; the pull-request table is the other one.
+    """
+    lines = text.splitlines()
+    starts = [i for i, line in enumerate(lines) if line.startswith(header)]
+    assert len(starts) == 1, (
+        f"expected exactly one table header starting {header!r}, found {len(starts)}"
+    )
+    rows: list[str] = []
+    for line in lines[starts[0] + 1 :]:
+        if not line.startswith("|"):
+            break
+        rows.append(line)
+    assert rows, f"{header!r} is not followed by any rows"
+    return rows[1:]  # drop the separator
+
+
 def _logged_ids() -> list[int]:
-    return [int(match.group(1)) for match in _ROW.finditer(_review_log())]
+    ids: list[int] = []
+    for row in _table_body(_review_log(), _FINDING_TABLE_HEADER):
+        match = _ROW.match(row)
+        assert match is not None, f"finding row is not numbered: {row[:80]!r}"
+        ids.append(int(match.group(1)))
+    return ids
+
+
+def _coverage_pr_numbers() -> list[int]:
+    """Merged PRs named in the coverage table, in order, excluding `this PR`."""
+    numbers: list[int] = []
+    for row in _table_body(_review_log(), _PR_COVERAGE_HEADER):
+        found = _PR_LINK.findall(row.split("|")[1])
+        numbers.extend(int(n) for n in found)
+    return numbers
 
 
 def _index_note(text: str) -> str:
@@ -387,6 +425,49 @@ def test_the_log_index_numbers_every_finding_from_one_with_no_gaps() -> None:
         f"the review log's index is not 1..{len(ids)} in order. "
         f"Missing: {missing or 'none'}. First disagreement at position "
         f"{next((i for i, (a, b) in enumerate(zip(ids, expected, strict=False)) if a != b), len(ids))}."
+    )
+
+
+def test_the_pr_coverage_table_names_each_pr_once_through_the_open_one() -> None:
+    """Every pull request, including the open one that carries this file.
+
+    Finding 186: `this PR` as a placeholder hid the number a reader looks for.
+    The table is 1..N with no gaps, and N is the last row.
+    """
+    named = _coverage_pr_numbers()
+    assert named, "the pull-request table names no pull requests"
+    expected = list(range(1, max(named) + 1))
+    assert named == expected, (
+        f"the pull-request table is not 1..{max(named)} in order. "
+        f"Missing: {sorted(set(expected) - set(named)) or 'none'}."
+    )
+    rows = _table_body(_review_log(), _PR_COVERAGE_HEADER)
+    last = rows[-1].split("|")[1]
+    assert f"#{max(named)}" in last, (
+        f"the last coverage row must name #{max(named)}, not a placeholder. Got {last!r}."
+    )
+
+
+def test_every_finding_names_a_pr_the_coverage_table_lists() -> None:
+    """The finding index is allowed to skip a PR; the coverage table is not.
+
+    #26 and #42 are the cases: Qodo reviewed them, raised nothing, and the
+    finding table never named them. That is not a gap in the finding table.
+    It is a gap if the coverage table does not name them either.
+    """
+    coverage = set(_coverage_pr_numbers())
+    missing: list[int] = []
+    for row in _table_body(_review_log(), _FINDING_TABLE_HEADER):
+        cells = row.split("|")
+        pr_cell = cells[2] if len(cells) > 2 else ""
+        if pr_cell.strip() in {"this PR", "—", "-"}:
+            continue
+        found = _PR_LINK.findall(pr_cell)
+        for n in found:
+            if int(n) not in coverage:
+                missing.append(int(n))
+    assert not missing, "findings name pull requests the coverage table does not: " + ", ".join(
+        f"#{n}" for n in missing
     )
 
 

@@ -760,14 +760,15 @@ This repository's review trail is a deliverable, not a byproduct.
 [`REVIEW.md`](REVIEW.md) is the standard it is reviewed against, by people and by
 automated review alike — a priority order in which a finding lower on the list
 never outranks one above it. [`REVIEW-LOG.md`](REVIEW-LOG.md) is what that review
-has actually produced: every finding raised and what happened to it, including
+has actually produced: every pull request Qodo reviewed (including the ones it
+found nothing on), then every finding raised and what happened to it, including
 the ones that were **rejected with the measurement that rejected them**, the ones
 **deferred with a reason and a link**, and the one that was **missed**.
 
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 29 August 2026 it holds **185 findings**: 137 raised by automated review, 4
+As of 29 August 2026 it holds **186 findings**: 138 raised by automated review, 4
 that only a live run against the harness could have raised, and 44 the author
 found rather than review. "Automated review" is two sources now, not one: Qodo on
 every pull request, and a single outside audit of `main` that raised the last
