@@ -25,11 +25,9 @@ and reviews live in the other table.**
 
 ### Pull requests
 
-Every pull request, including this one. Qodo reviewed all of 1–42; the two
-count columns are the two queries the README already documents (inline comments
-versus coverage comments). The last row is the open pull request that carries
-this file. The next pull request replaces that row with the review that landed
-and adds itself. An empty review is a row here, not a new finding.
+Every pull request. The two count columns are the two queries the README already
+documents (inline comments versus coverage comments). The next pull request adds
+its own row. An empty review is a row here, not a new finding.
 
 | PR | Qodo | Inline findings | Coverage comments |
 |----|------|-----------------|-------------------|
@@ -75,7 +73,7 @@ and adds itself. An empty review is a row here, not a new finding.
 | [#40](https://github.com/aryangorde8/bumpsmith/pull/40) | reviewed | 1 | 3 |
 | [#41](https://github.com/aryangorde8/bumpsmith/pull/41) | reviewed | 1 | 2 |
 | [#42](https://github.com/aryangorde8/bumpsmith/pull/42) | reviewed | 0 | 2 |
-| this PR | this PR | — | — |
+| [#43](https://github.com/aryangorde8/bumpsmith/pull/43) | reviewed | 1 | 2 |
 
 ### Findings
 
@@ -266,7 +264,7 @@ and adds itself. An empty review is a row here, not a new finding.
 | 183 | [#41](https://github.com/aryangorde8/bumpsmith/pull/41) | **A property stated in three places and enforced in none.** `report.py`'s module docstring said values are *"only ever placed in text nodes -- never in an attribute"*; the README repeated it; and `tests/test_report.py` gave it as the reason its sweep was sufficient. `page()` interpolated the run's outcome into `<div class="end {_e(outcome)}">` — a payload value, in an attribute. `_e` quotes, so nothing was executable and no XSS follows from it; the defect is that escaping was the only thing holding a line three documents claimed was held by construction, and all 27 tests in the file passed either way | **Fixed** — the class is taken from the closed `_OUTCOME_BADGE` map, so an outcome nobody defined contributes no class, which is what it styled as anyway. Two tests added: one parses the document with `HTMLParser` and `convert_charrefs=True` and asserts no payload value reaches any attribute value *escaped or not*, and one pins the closed-set fallback. Verified by breaking — restoring the interpolation fails those two and nothing else. The three sentences were then narrowed to the two attributes that do vary, both computed here rather than quoted | this PR |
 | 184 | [#41](https://github.com/aryangorde8/bumpsmith/pull/41) | **The packaging one-liner sold the optional half as the product.** `pyproject.toml`, `src/bumpsmith/__init__.py` and `publish.py`'s header all described the tool as *"an agent that turns a failing pydantic v1-to-v2 migration into a reviewed pull request"* — the sentence `pip show bumpsmith` and `help(bumpsmith)` print. Opening a pull request needs `--open-pr` and a typed `yes`; the default run never approaches it. The README's own opening line has always been accurate, which is how three copies of a stronger claim went on living beside it | **Fixed** — all three say the tool migrates a repository and keeps the change only once its suite has come back green, which is what the default does. `publish.py` quoted the old description in its header, so the quote moved with it: **fourth instance of a sentence corrected in one file and left standing in others** | this PR |
 | 185 | [#41](https://github.com/aryangorde8/bumpsmith/pull/41) | **Second round, on the fix for 184.** The replacement description — *"migrates a repository from pydantic v1 to v2 and keeps the change only once its test suite has come back green"* — traded one overclaim for another. `Migration.complete` is false when a candidate file could not be parsed or a rewriter declined a site it matched, and `migrate()` keeps the edits anyway whenever the outcome is `MIGRATED`, because a green suite is real evidence and refusing to help a repository over one vendored file would be worse. So `pip show bumpsmith` would advertise a migrated repository for a run the CLI itself prints as `NOT COMPLETE`. `Migration.complete`'s own docstring had already written the rule I broke: *"'the suite passes' and 'the migration is finished' are different claims, and a report that ran them together would let the first quietly stand in for the second."* Qodo also found the precedent — **#16 fixed a misleading completion claim once already** | **Fixed** — all three copies now say the agent rewrites the breaks a suite reports, keeps the edits only once that suite comes back green, and **names whatever it could not do**, which is the clause that stops the sentence implying an ending. The README's own opening line carried the completeness wording before this PR touched anything; finding 184 moved a sentence out of the packaging metadata and this one moved the sentence's other half out of all three at once | this PR |
-| 186 | [#42](https://github.com/aryangorde8/bumpsmith/pull/42) | **The index stopped one pull request short of the review.** After #42 merged, the last PR this table named was #41. Qodo had already reviewed #42 — Bugs (0), two coverage comments — and a reader of the finding index would conclude it had not been reviewed. **The ninth shape**: an absence of findings read as an absence of a review. Recording that as a *finding* is how the next pull request goes missing: this row is why #43 exists, and an empty review of #43 would have demanded #44 | **Fixed** — a pull-request table, not a finding per empty review. Every merged PR is a row there, this open PR is the last row, and the next PR replaces that row and adds itself. #26 and #42 (both reviewed, both zero inline findings) now appear without minting findings 187 and 188 | this PR |
+| 186 | [#43](https://github.com/aryangorde8/bumpsmith/pull/43) | **High.** The first version of this pull request counted #42's empty review as a log finding — Qodo raised nothing on #42, and the README's author-found total went up anyway. That inflates the finding index while review coverage already has its own table. **A finding is something somebody can act on**; an empty review is not one | **Fixed** — #42 stays in the pull-request table (0 inline, 2 coverage) and is not a finding. This row is the one Qodo actually raised, on #43 | [#43](https://github.com/aryangorde8/bumpsmith/pull/43) |
 
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
@@ -3283,7 +3281,7 @@ Both were reproduced before being accepted and verified by removal afterwards:
 ## An outside audit of `main` — 182 to 184
 
 The first review here that was not a pull request. An external AI code audit
-(Cursor, Grok 4.6) was pointed at the tree at `f6ff5e0` and asked for security
+was pointed at the tree at `f6ff5e0` and asked for security
 findings and claim findings in one pass. Its report is committed verbatim at
 [`reviews/2026-08-29-outside-audit.md`](reviews/2026-08-29-outside-audit.md) —
 unedited, including the parts rejected below, because a summary of a review that
@@ -3315,25 +3313,16 @@ as not attempted — the live site was not fetched, `git log` was not read, the
 fixtures were not cloned. Those are scope notes, and they are not counted here.
 A finding is something somebody can act on.
 
-## 186 · The index stopped one pull request short of the review
+## 186 · An empty review is not a finding
 
-[#42](https://github.com/aryangorde8/bumpsmith/pull/42) merged at
-`2026-08-29T15:08:06Z` after Qodo posted its summary and then its review:
-Bugs (0), Rule violations (0), Requirement gaps (0). The queries the README
-already documents return the same split they return for #26 — `0` from
-`/pulls/42/comments` for inline findings, `2` from `/issues/42/comments` for
-coverage — which is *reviewed and found nothing*, not *never reviewed*.
+Raised on [#43](https://github.com/aryangorde8/bumpsmith/pull/43). The first
+commit on this branch added a finding for #42 even though Qodo's review of #42
+was Bugs (0). That raised the README's author-found count for something nobody
+could act on.
 
-The finding table still ended at #41. Under a strict reading that table is
-findings, Qodo raised none, and there was nothing to add. That reading is the
-ninth shape: the index was also how a reader saw that a review happened.
-
-The first version of this entry tried to close the gap by *becoming* the row
-for #42. That is how #43 exists, and it is a process that cannot terminate:
-every empty review mints a pull request whose own empty review mints another.
-The fix is the other table at the top of this file. #26 and #42 are both in
-it. This pull request is the last row, as `this PR`, so it does not need
-finding 187.
+The pull-request table already records that #42 was reviewed (0 inline findings,
+2 coverage comments). Finding 186 is this report, not that empty review. #43 is
+row 43 in the pull-request table.
 
 ## How this stays honest
 
@@ -3345,6 +3334,5 @@ finding 187.
   is the work" commit and a "here is what review changed" commit, and squashing
   would destroy the evidence that the second one exists.
 - An empty Qodo review is a row in the pull-request table, not a new finding.
-  The next pull request replaces `this PR` with the review that landed and adds
-  itself. A finding whose only job is to name the last pull request is how the
-  next one goes missing.
+  The next pull request adds its own numbered row. A finding whose only job is
+  to name the last pull request is how the next one goes missing.

@@ -428,34 +428,23 @@ def test_the_log_index_numbers_every_finding_from_one_with_no_gaps() -> None:
     )
 
 
-def test_the_pr_coverage_table_ends_with_this_pr() -> None:
-    """Finding 186: an empty review is a row here, not a new finding.
+def test_the_pr_coverage_table_names_each_pr_once_through_the_open_one() -> None:
+    """Every pull request, including the open one that carries this file.
 
-    The last row is the open pull request that carries this file. Replacing
-    `this PR` with a named PR and not adding the next one is how the table
-    falls one behind again; a second `this PR` in the middle is a row nobody
-    will update.
+    Finding 186: `this PR` as a placeholder hid the number a reader looks for.
+    The table is 1..N with no gaps, and N is the last row.
     """
-    rows = _table_body(_review_log(), _PR_COVERAGE_HEADER)
-    this_pr = [i for i, row in enumerate(rows) if "| this PR |" in row]
-    assert this_pr, (
-        "the pull-request table has no `this PR` row. The open pull request "
-        "has to be in the table before it merges, or the next one will exist "
-        "only to name it."
-    )
-    assert this_pr == [len(rows) - 1], (
-        "there must be exactly one `this PR` row, and it must be last. "
-        f"Found at 0-based positions {this_pr} of {len(rows)} rows."
-    )
-
-
-def test_the_pr_coverage_table_names_each_merged_pr_once() -> None:
     named = _coverage_pr_numbers()
-    assert named, "the pull-request table names no merged pull requests"
+    assert named, "the pull-request table names no pull requests"
     expected = list(range(1, max(named) + 1))
     assert named == expected, (
         f"the pull-request table is not 1..{max(named)} in order. "
         f"Missing: {sorted(set(expected) - set(named)) or 'none'}."
+    )
+    rows = _table_body(_review_log(), _PR_COVERAGE_HEADER)
+    last = rows[-1].split("|")[1]
+    assert f"#{max(named)}" in last, (
+        f"the last coverage row must name #{max(named)}, not a placeholder. Got {last!r}."
     )
 
 
