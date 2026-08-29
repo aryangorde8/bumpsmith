@@ -204,6 +204,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 183 | [#41](https://github.com/aryangorde8/bumpsmith/pull/41) | **A property stated in three places and enforced in none.** `report.py`'s module docstring said values are *"only ever placed in text nodes -- never in an attribute"*; the README repeated it; and `tests/test_report.py` gave it as the reason its sweep was sufficient. `page()` interpolated the run's outcome into `<div class="end {_e(outcome)}">` — a payload value, in an attribute. `_e` quotes, so nothing was executable and no XSS follows from it; the defect is that escaping was the only thing holding a line three documents claimed was held by construction, and all 27 tests in the file passed either way | **Fixed** — the class is taken from the closed `_OUTCOME_BADGE` map, so an outcome nobody defined contributes no class, which is what it styled as anyway. Two tests added: one parses the document with `HTMLParser` and `convert_charrefs=True` and asserts no payload value reaches any attribute value *escaped or not*, and one pins the closed-set fallback. Verified by breaking — restoring the interpolation fails those two and nothing else. The three sentences were then narrowed to the two attributes that do vary, both computed here rather than quoted | this PR |
 | 184 | [#41](https://github.com/aryangorde8/bumpsmith/pull/41) | **The packaging one-liner sold the optional half as the product.** `pyproject.toml`, `src/bumpsmith/__init__.py` and `publish.py`'s header all described the tool as *"an agent that turns a failing pydantic v1-to-v2 migration into a reviewed pull request"* — the sentence `pip show bumpsmith` and `help(bumpsmith)` print. Opening a pull request needs `--open-pr` and a typed `yes`; the default run never approaches it. The README's own opening line has always been accurate, which is how three copies of a stronger claim went on living beside it | **Fixed** — all three say the tool migrates a repository and keeps the change only once its suite has come back green, which is what the default does. `publish.py` quoted the old description in its header, so the quote moved with it: **fourth instance of a sentence corrected in one file and left standing in others** | this PR |
 | 185 | [#41](https://github.com/aryangorde8/bumpsmith/pull/41) | **Second round, on the fix for 184.** The replacement description — *"migrates a repository from pydantic v1 to v2 and keeps the change only once its test suite has come back green"* — traded one overclaim for another. `Migration.complete` is false when a candidate file could not be parsed or a rewriter declined a site it matched, and `migrate()` keeps the edits anyway whenever the outcome is `MIGRATED`, because a green suite is real evidence and refusing to help a repository over one vendored file would be worse. So `pip show bumpsmith` would advertise a migrated repository for a run the CLI itself prints as `NOT COMPLETE`. `Migration.complete`'s own docstring had already written the rule I broke: *"'the suite passes' and 'the migration is finished' are different claims, and a report that ran them together would let the first quietly stand in for the second."* Qodo also found the precedent — **#16 fixed a misleading completion claim once already** | **Fixed** — all three copies now say the agent rewrites the breaks a suite reports, keeps the edits only once that suite comes back green, and **names whatever it could not do**, which is the clause that stops the sentence implying an ending. The README's own opening line carried the completeness wording before this PR touched anything; finding 184 moved a sentence out of the packaging metadata and this one moved the sentence's other half out of all three at once | this PR |
+| 186 | [#42](https://github.com/aryangorde8/bumpsmith/pull/42) | **The index stopped one pull request short of the review.** After #42 merged, the last PR this table named was #41. Qodo had already reviewed #42 — Bugs (0), Rule violations (0), Requirement gaps (0) — and posted two coverage comments on the issue thread (`0` inline findings, `2` coverage). A reader of the index, which is how this file answers *was this reviewed?*, would conclude it had not been. **The ninth shape**: an absence of findings read as an absence of a review. Same case as #26, which the trail paragraph already uses as the control for that distinction, and which this table also never named | **Recorded** — nothing to fix in the change Qodo looked at; the review found none. The row exists so the index names the pull request. The work of #42 (three blank lines that ended this table after row 131) is already on `main`; this entry is the coverage, not a second pass at the same edit | this PR |
 
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
@@ -3251,6 +3252,25 @@ The audit also listed a dozen things as "unverifiable" that are better described
 as not attempted — the live site was not fetched, `git log` was not read, the
 fixtures were not cloned. Those are scope notes, and they are not counted here.
 A finding is something somebody can act on.
+
+## 186 · The index stopped one pull request short of the review
+
+[#42](https://github.com/aryangorde8/bumpsmith/pull/42) merged at
+`2026-08-29T15:08:06Z` after Qodo posted its summary and then its review:
+Bugs (0), Rule violations (0), Requirement gaps (0). The queries the README
+already documents return the same split they return for #26 — `0` from
+`/pulls/42/comments` for inline findings, `2` from `/issues/42/comments` for
+coverage — which is *reviewed and found nothing*, not *never reviewed*.
+
+This table still ended at #41. The log records findings, and Qodo raised none,
+so under a strict reading there was nothing to add. That reading is the ninth
+shape again: the index is also how a reader sees that a review happened, and an
+empty review is the case the coverage query exists to distinguish. #26 is the
+control written into the trail paragraph for exactly that distinction, and it
+is not in this table either; #42 is the instance that made the gap visible
+because it was the last merge.
+
+Nothing in the code of #42 changes. The row is the record.
 
 ## How this stays honest
 
