@@ -1,5 +1,5 @@
-"""bumpsmith — migrate a repository from pydantic v1 to v2, and keep the change
-only once its test suite has come back green.
+"""bumpsmith — rewrite the pydantic v1 breaks a test suite reports, keep the edits
+only once that suite comes back green, and name whatever is left.
 
 Start at :mod:`bumpsmith.migrate`. It is the loop, and every other module is a
 part it uses:

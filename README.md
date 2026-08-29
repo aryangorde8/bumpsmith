@@ -1,7 +1,8 @@
 # bumpsmith
 
-**An agent that migrates a repository from pydantic v1 to v2 and keeps the
-change only once the test suite has come back green.**
+**An agent that rewrites the pydantic v1 breaks a test suite reports, keeps the
+edits only once that suite has come back green, and names whatever it could not
+do.**
 
 It runs the suite, reads the break out of the failure, writes the migration rule
 that break implies, finds every site the rule applies to, plans the smallest edit
@@ -766,7 +767,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 29 August 2026 it holds **184 findings**: 136 raised by automated review, 4
+As of 29 August 2026 it holds **185 findings**: 137 raised by automated review, 4
 that only a live run against the harness could have raised, and 44 the author
 found rather than review. "Automated review" is two sources now, not one: Qodo on
 every pull request, and a single outside audit of `main` that raised the last
