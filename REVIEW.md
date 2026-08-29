@@ -109,6 +109,9 @@ above it.
 ## Documentation
 
 - A user-facing behaviour change updates the README in the same PR.
+- A pull request adds itself to the pull-request table in `REVIEW-LOG.md` in
+  the same change (the last row is `this PR` until it merges). An empty Qodo
+  review is a row in that table, not a new finding.
 - Public functions that are not self-evident get a docstring stating what they
   do, what they raise, and what they return.
 

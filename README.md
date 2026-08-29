@@ -760,7 +760,8 @@ This repository's review trail is a deliverable, not a byproduct.
 [`REVIEW.md`](REVIEW.md) is the standard it is reviewed against, by people and by
 automated review alike — a priority order in which a finding lower on the list
 never outranks one above it. [`REVIEW-LOG.md`](REVIEW-LOG.md) is what that review
-has actually produced: every finding raised and what happened to it, including
+has actually produced: every pull request Qodo reviewed (including the ones it
+found nothing on), then every finding raised and what happened to it, including
 the ones that were **rejected with the measurement that rejected them**, the ones
 **deferred with a reason and a link**, and the one that was **missed**.
 

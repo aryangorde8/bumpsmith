@@ -17,6 +17,68 @@ existing.
 
 Findings are recorded whether they were accepted, rejected, or partly both.
 
+The table of findings names a pull request when a finding was raised on it.
+A pull request Qodo reviewed and found nothing on has no row there. That is
+correct for a *finding* index and fatal for a *review* index: recording #42 as
+finding 186 is how #43 then needs a finding, and #44 after that. **Pull requests
+and reviews live in the other table.**
+
+### Pull requests
+
+Every pull request, including this one. Qodo reviewed all of 1–42; the two
+count columns are the two queries the README already documents (inline comments
+versus coverage comments). The last row is the open pull request that carries
+this file. The next pull request replaces that row with the review that landed
+and adds itself. An empty review is a row here, not a new finding.
+
+| PR | Qodo | Inline findings | Coverage comments |
+|----|------|-----------------|-------------------|
+| [#1](https://github.com/aryangorde8/bumpsmith/pull/1) | reviewed | 0 | 1 |
+| [#2](https://github.com/aryangorde8/bumpsmith/pull/2) | reviewed | 1 | 2 |
+| [#3](https://github.com/aryangorde8/bumpsmith/pull/3) | reviewed | 1 | 2 |
+| [#4](https://github.com/aryangorde8/bumpsmith/pull/4) | reviewed | 3 | 3 |
+| [#5](https://github.com/aryangorde8/bumpsmith/pull/5) | reviewed | 2 | 2 |
+| [#6](https://github.com/aryangorde8/bumpsmith/pull/6) | reviewed | 0 | 2 |
+| [#7](https://github.com/aryangorde8/bumpsmith/pull/7) | reviewed | 2 | 2 |
+| [#8](https://github.com/aryangorde8/bumpsmith/pull/8) | reviewed | 5 | 2 |
+| [#9](https://github.com/aryangorde8/bumpsmith/pull/9) | reviewed | 5 | 2 |
+| [#10](https://github.com/aryangorde8/bumpsmith/pull/10) | reviewed | 3 | 2 |
+| [#11](https://github.com/aryangorde8/bumpsmith/pull/11) | reviewed | 5 | 2 |
+| [#12](https://github.com/aryangorde8/bumpsmith/pull/12) | reviewed | 4 | 2 |
+| [#13](https://github.com/aryangorde8/bumpsmith/pull/13) | reviewed | 4 | 2 |
+| [#14](https://github.com/aryangorde8/bumpsmith/pull/14) | reviewed | 4 | 2 |
+| [#15](https://github.com/aryangorde8/bumpsmith/pull/15) | reviewed | 3 | 2 |
+| [#16](https://github.com/aryangorde8/bumpsmith/pull/16) | reviewed | 8 | 2 |
+| [#17](https://github.com/aryangorde8/bumpsmith/pull/17) | reviewed | 2 | 2 |
+| [#18](https://github.com/aryangorde8/bumpsmith/pull/18) | reviewed | 4 | 2 |
+| [#19](https://github.com/aryangorde8/bumpsmith/pull/19) | reviewed | 5 | 2 |
+| [#20](https://github.com/aryangorde8/bumpsmith/pull/20) | reviewed | 15 | 3 |
+| [#21](https://github.com/aryangorde8/bumpsmith/pull/21) | reviewed | 5 | 2 |
+| [#22](https://github.com/aryangorde8/bumpsmith/pull/22) | reviewed | 1 | 2 |
+| [#23](https://github.com/aryangorde8/bumpsmith/pull/23) | reviewed | 1 | 2 |
+| [#24](https://github.com/aryangorde8/bumpsmith/pull/24) | reviewed | 2 | 2 |
+| [#25](https://github.com/aryangorde8/bumpsmith/pull/25) | reviewed | 3 | 2 |
+| [#26](https://github.com/aryangorde8/bumpsmith/pull/26) | reviewed | 0 | 2 |
+| [#27](https://github.com/aryangorde8/bumpsmith/pull/27) | reviewed | 0 | 2 |
+| [#28](https://github.com/aryangorde8/bumpsmith/pull/28) | reviewed | 2 | 4 |
+| [#29](https://github.com/aryangorde8/bumpsmith/pull/29) | reviewed | 1 | 3 |
+| [#30](https://github.com/aryangorde8/bumpsmith/pull/30) | reviewed | 3 | 4 |
+| [#31](https://github.com/aryangorde8/bumpsmith/pull/31) | reviewed | 7 | 8 |
+| [#32](https://github.com/aryangorde8/bumpsmith/pull/32) | reviewed | 11 | 3 |
+| [#33](https://github.com/aryangorde8/bumpsmith/pull/33) | reviewed | 5 | 3 |
+| [#34](https://github.com/aryangorde8/bumpsmith/pull/34) | reviewed | 2 | 3 |
+| [#35](https://github.com/aryangorde8/bumpsmith/pull/35) | reviewed | 4 | 5 |
+| [#36](https://github.com/aryangorde8/bumpsmith/pull/36) | reviewed | 6 | 4 |
+| [#37](https://github.com/aryangorde8/bumpsmith/pull/37) | reviewed | 0 | 2 |
+| [#38](https://github.com/aryangorde8/bumpsmith/pull/38) | reviewed | 0 | 3 |
+| [#39](https://github.com/aryangorde8/bumpsmith/pull/39) | reviewed | 3 | 3 |
+| [#40](https://github.com/aryangorde8/bumpsmith/pull/40) | reviewed | 1 | 3 |
+| [#41](https://github.com/aryangorde8/bumpsmith/pull/41) | reviewed | 1 | 2 |
+| [#42](https://github.com/aryangorde8/bumpsmith/pull/42) | reviewed | 0 | 2 |
+| this PR | this PR | — | — |
+
+### Findings
+
 | # | PR | Finding | Disposition | Where |
 |---|----|---------|-------------|-------|
 | 1 | [#2](https://github.com/aryangorde8/bumpsmith/pull/2) | Unverified `.pr_agent.toml` key name | **Rejected** — the file already carried the citation | — |
@@ -204,7 +266,7 @@ Findings are recorded whether they were accepted, rejected, or partly both.
 | 183 | [#41](https://github.com/aryangorde8/bumpsmith/pull/41) | **A property stated in three places and enforced in none.** `report.py`'s module docstring said values are *"only ever placed in text nodes -- never in an attribute"*; the README repeated it; and `tests/test_report.py` gave it as the reason its sweep was sufficient. `page()` interpolated the run's outcome into `<div class="end {_e(outcome)}">` — a payload value, in an attribute. `_e` quotes, so nothing was executable and no XSS follows from it; the defect is that escaping was the only thing holding a line three documents claimed was held by construction, and all 27 tests in the file passed either way | **Fixed** — the class is taken from the closed `_OUTCOME_BADGE` map, so an outcome nobody defined contributes no class, which is what it styled as anyway. Two tests added: one parses the document with `HTMLParser` and `convert_charrefs=True` and asserts no payload value reaches any attribute value *escaped or not*, and one pins the closed-set fallback. Verified by breaking — restoring the interpolation fails those two and nothing else. The three sentences were then narrowed to the two attributes that do vary, both computed here rather than quoted | this PR |
 | 184 | [#41](https://github.com/aryangorde8/bumpsmith/pull/41) | **The packaging one-liner sold the optional half as the product.** `pyproject.toml`, `src/bumpsmith/__init__.py` and `publish.py`'s header all described the tool as *"an agent that turns a failing pydantic v1-to-v2 migration into a reviewed pull request"* — the sentence `pip show bumpsmith` and `help(bumpsmith)` print. Opening a pull request needs `--open-pr` and a typed `yes`; the default run never approaches it. The README's own opening line has always been accurate, which is how three copies of a stronger claim went on living beside it | **Fixed** — all three say the tool migrates a repository and keeps the change only once its suite has come back green, which is what the default does. `publish.py` quoted the old description in its header, so the quote moved with it: **fourth instance of a sentence corrected in one file and left standing in others** | this PR |
 | 185 | [#41](https://github.com/aryangorde8/bumpsmith/pull/41) | **Second round, on the fix for 184.** The replacement description — *"migrates a repository from pydantic v1 to v2 and keeps the change only once its test suite has come back green"* — traded one overclaim for another. `Migration.complete` is false when a candidate file could not be parsed or a rewriter declined a site it matched, and `migrate()` keeps the edits anyway whenever the outcome is `MIGRATED`, because a green suite is real evidence and refusing to help a repository over one vendored file would be worse. So `pip show bumpsmith` would advertise a migrated repository for a run the CLI itself prints as `NOT COMPLETE`. `Migration.complete`'s own docstring had already written the rule I broke: *"'the suite passes' and 'the migration is finished' are different claims, and a report that ran them together would let the first quietly stand in for the second."* Qodo also found the precedent — **#16 fixed a misleading completion claim once already** | **Fixed** — all three copies now say the agent rewrites the breaks a suite reports, keeps the edits only once that suite comes back green, and **names whatever it could not do**, which is the clause that stops the sentence implying an ending. The README's own opening line carried the completeness wording before this PR touched anything; finding 184 moved a sentence out of the packaging metadata and this one moved the sentence's other half out of all three at once | this PR |
-| 186 | [#42](https://github.com/aryangorde8/bumpsmith/pull/42) | **The index stopped one pull request short of the review.** After #42 merged, the last PR this table named was #41. Qodo had already reviewed #42 — Bugs (0), Rule violations (0), Requirement gaps (0) — and posted two coverage comments on the issue thread (`0` inline findings, `2` coverage). A reader of the index, which is how this file answers *was this reviewed?*, would conclude it had not been. **The ninth shape**: an absence of findings read as an absence of a review. Same case as #26, which the trail paragraph already uses as the control for that distinction, and which this table also never named | **Recorded** — nothing to fix in the change Qodo looked at; the review found none. The row exists so the index names the pull request. The work of #42 (three blank lines that ended this table after row 131) is already on `main`; this entry is the coverage, not a second pass at the same edit | this PR |
+| 186 | [#42](https://github.com/aryangorde8/bumpsmith/pull/42) | **The index stopped one pull request short of the review.** After #42 merged, the last PR this table named was #41. Qodo had already reviewed #42 — Bugs (0), two coverage comments — and a reader of the finding index would conclude it had not been reviewed. **The ninth shape**: an absence of findings read as an absence of a review. Recording that as a *finding* is how the next pull request goes missing: this row is why #43 exists, and an empty review of #43 would have demanded #44 | **Fixed** — a pull-request table, not a finding per empty review. Every merged PR is a row there, this open PR is the last row, and the next PR replaces that row and adds itself. #26 and #42 (both reviewed, both zero inline findings) now appear without minting findings 187 and 188 | this PR |
 
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
@@ -3262,15 +3324,16 @@ already documents return the same split they return for #26 — `0` from
 `/pulls/42/comments` for inline findings, `2` from `/issues/42/comments` for
 coverage — which is *reviewed and found nothing*, not *never reviewed*.
 
-This table still ended at #41. The log records findings, and Qodo raised none,
-so under a strict reading there was nothing to add. That reading is the ninth
-shape again: the index is also how a reader sees that a review happened, and an
-empty review is the case the coverage query exists to distinguish. #26 is the
-control written into the trail paragraph for exactly that distinction, and it
-is not in this table either; #42 is the instance that made the gap visible
-because it was the last merge.
+The finding table still ended at #41. Under a strict reading that table is
+findings, Qodo raised none, and there was nothing to add. That reading is the
+ninth shape: the index was also how a reader saw that a review happened.
 
-Nothing in the code of #42 changes. The row is the record.
+The first version of this entry tried to close the gap by *becoming* the row
+for #42. That is how #43 exists, and it is a process that cannot terminate:
+every empty review mints a pull request whose own empty review mints another.
+The fix is the other table at the top of this file. #26 and #42 are both in
+it. This pull request is the last row, as `this PR`, so it does not need
+finding 187.
 
 ## How this stays honest
 
@@ -3281,3 +3344,7 @@ Nothing in the code of #42 changes. The row is the record.
 - Pull requests are merged with `--merge`, never `--squash`. Each carries a "here
   is the work" commit and a "here is what review changed" commit, and squashing
   would destroy the evidence that the second one exists.
+- An empty Qodo review is a row in the pull-request table, not a new finding.
+  The next pull request replaces `this PR` with the review that landed and adds
+  itself. A finding whose only job is to name the last pull request is how the
+  next one goes missing.
