@@ -735,3 +735,173 @@ def test_the_readme_taxonomy_prose_counts_its_own_table() -> None:
     assert _NUMBER_WORDS[match["rewriters"]] == with_rewriter, (
         f"the README says {match['rewriters']} have rewriters; the table marks {with_rewriter}"
     )
+
+
+# --------------------------------------------------------------------------
+# Finding 187. The two checks below are about the documents as they are *read*
+# rather than as they are parsed. Everything above this line reads a table by
+# splitting on `|` in Python, which is a more forgiving parser than the one a
+# reader actually gets, and every one of those checks passed while two rows of
+# REVIEW-LOG.md displayed no disposition at all on github.com.
+# --------------------------------------------------------------------------
+
+_SEPARATOR_CELL = re.compile(r"^:?-+:?$")
+_AUDIT_HEADING = re.compile(r"^## An outside audit of `main` — (\d+) to (\d+)$", re.MULTILINE)
+_README_AUDIT_RANGE = re.compile(
+    r"outside audit of `main` that raised findings\s+(\d+) to (\d+)", re.DOTALL
+)
+
+
+def _delimiters(row: str) -> list[int]:
+    """Offsets of the pipes GitHub reads as cell boundaries.
+
+    A pipe is escaped by an **odd** run of backslashes before it. `\\|` is a
+    literal pipe; `\\\\|` is a literal backslash followed by a delimiter. The
+    first version of this asked only whether the previous character was a
+    backslash, which reads the second as escaped -- finding 190.
+    """
+    at: list[int] = []
+    for index, char in enumerate(row):
+        if char != "|":
+            continue
+        backslashes = 0
+        while index - backslashes - 1 >= 0 and row[index - backslashes - 1] == "\\":
+            backslashes += 1
+        if backslashes % 2 == 0:
+            at.append(index)
+    return at
+
+
+def _cells(row: str) -> list[str]:
+    """One row's cells. The outer pipes are optional in GitHub's grammar."""
+    text = row.strip()
+    at = _delimiters(text)
+    parts: list[str] = []
+    start = 0
+    for offset in at:
+        parts.append(text[start:offset])
+        start = offset + 1
+    parts.append(text[start:])
+    if at and at[0] == 0:  # a leading pipe opens no cell
+        parts = parts[1:]
+    if at and at[-1] == len(text) - 1:  # nor does a trailing one close a real cell
+        parts = parts[:-1]
+    return parts
+
+
+def _is_separator(row: str) -> bool:
+    cells = _cells(row)
+    return bool(cells) and all(_SEPARATOR_CELL.match(cell.strip()) for cell in cells)
+
+
+def _table_rows_against_their_width(text: str) -> list[tuple[int, int, int, str]]:
+    """Every table row, with the column count its separator declared.
+
+    A table is found by its `---` line rather than by rows starting with `|`,
+    because outer pipes are optional and a table written without them was
+    invisible to the first version of this -- finding 189. The separator fixes
+    the width; the header above it and the rows below it are measured against
+    that. A row offering more cells does not wrap: the surplus is dropped,
+    silently, from the right.
+    """
+    lines = text.splitlines()
+    found: list[tuple[int, int, int, str]] = []
+    for index, line in enumerate(lines):
+        if not line.strip() or not _is_separator(line):
+            continue
+        width = len(_cells(line))
+        rows: list[tuple[int, str]] = [(index, lines[index - 1])] if index else []
+        for offset in range(index + 1, len(lines)):
+            row = lines[offset]
+            if not row.strip() or not _delimiters(row.strip()):
+                break
+            rows.append((offset + 1, row))
+        found.extend((number, len(_cells(row)), width, row.strip()) for number, row in rows)
+    return found
+
+
+def test_no_table_row_loses_a_column_to_an_unescaped_pipe() -> None:
+    """Finding 187: a `|` inside a code span still ends the cell.
+
+    Rows 143 and 178 carried shell -- `... || echo __ABSENT__`, `jq 'add | map(…)'`
+    -- in inline code, which does not protect the character. Both rendered with
+    more cells than the header declares, so GitHub dropped the surplus: the
+    **Disposition** column and everything right of it. A `High` finding read
+    online as one nobody had closed, in the table whose stated promise is that
+    this cannot happen.
+
+    Nothing above this test could see it. They all split on `|` in Python, which
+    keeps the extra cells rather than discarding them. This one counts instead,
+    and covers the README because nothing about the mistake is particular to the
+    log.
+    """
+    wrong = [
+        (name, number, got, want, row)
+        for name, text in (("REVIEW-LOG.md", _review_log()), ("README.md", _readme()))
+        for number, got, want, row in _table_rows_against_their_width(text)
+        if got != want
+    ]
+    assert not wrong, "table rows whose surplus cells GitHub will drop:\n" + "\n".join(
+        f"  {name}:{number} offers {got} cells, the header declares {want} -- "
+        f"escape the pipes as `\\|`: {row[:100]}..."
+        for name, number, got, want, row in wrong
+    )
+
+
+def test_the_readme_names_the_same_audit_findings_the_log_does() -> None:
+    """Finding 188: the README said the audit "raised the last three".
+
+    It raised 182 to 184. 185 was Qodo's second round on the fix for 184 and
+    landed in the same pull request, so the sentence was false in the commit
+    that wrote it, and every finding added since has moved it further. A reader
+    following it lands on rows the audit never saw and credits them to it.
+
+    The fix was to name the range, and naming it is only worth more than
+    counting it if the two files cannot drift apart -- so the README's numbers
+    are read against the heading of the log's own section for that batch. This
+    is finding 181's lesson, which is that a row is identified by its number and
+    never by where it sits.
+    """
+    heading = _AUDIT_HEADING.search(_review_log())
+    assert heading is not None, (
+        "REVIEW-LOG.md no longer has a section headed 'An outside audit of `main` — N to M'. "
+        "If the batch was renamed, update this anchor and the README sentence together."
+    )
+    stated = _README_AUDIT_RANGE.search(_readme())
+    assert stated is not None, (
+        "the README no longer says the outside audit 'raised findings N to M'. "
+        "If the wording changed, update this anchor -- but do not go back to a "
+        "positional reference; that is finding 188."
+    )
+    assert stated.groups() == heading.groups(), (
+        f"the README says the outside audit raised {stated.group(1)} to {stated.group(2)}; "
+        f"the log's section for that batch is headed {heading.group(1)} to {heading.group(2)}."
+    )
+
+
+def test_the_table_guard_sees_the_two_shapes_it_first_could_not() -> None:
+    """Findings 189 and 190, both raised on the guard added for 187.
+
+    Neither shape occurs in either document today, and that is the reason they
+    are pinned against literals rather than left to the files: a check whose
+    blind spots are visible only in the text it currently happens to read is
+    one nobody can trust the next time that text changes. 189 was accepted with
+    its stated evidence corrected -- it named the README's recorded-runs table
+    as an existing leadingless one, and that table has outer pipes like every
+    other here.
+    """
+    leadingless = "Run | Ends\n--- | ---\none | `a || b`\n"
+    assert [(got, want) for _, got, want, _ in _table_rows_against_their_width(leadingless)] == [
+        (2, 2),  # the header, which is fine
+        (4, 2),  # the row whose `||` GitHub would truncate
+    ], "a table written without outer pipes is not being measured"
+
+    literal_backslash = "| a | b |\n|---|---|\n| a\\\\| x | b |\n"
+    assert [(got, want) for _, got, want, _ in _table_rows_against_their_width(literal_backslash)][
+        -1
+    ] == (3, 2), "a pipe after an even run of backslashes is a delimiter, not an escape"
+
+    escaped = "| a | b |\n|---|---|\n| a \\| x | b |\n"
+    assert all(got == want for _, got, want, _ in _table_rows_against_their_width(escaped)), (
+        "an odd run of backslashes does escape the pipe, and this row is fine"
+    )

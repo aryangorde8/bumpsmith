@@ -771,12 +771,12 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 29 August 2026 it holds **186 findings**: 138 raised by automated review, 4
-that only a live run against the harness could have raised, and 44 the author
+As of 29 August 2026 it holds **190 findings**: 140 raised by automated review, 4
+that only a live run against the harness could have raised, and 46 the author
 found rather than review. "Automated review" is two sources now, not one: Qodo on
-every pull request, and a single outside audit of `main` that raised the last
-three — logged as its own batch, because a column that quietly changes what it
-counts is the same defect as a number that quietly goes stale. **The total** is not maintained by hand —
+every pull request, and a single outside audit of `main` that raised findings
+182 to 184 — logged as its own batch, because a column that quietly changes
+what it counts is the same defect as a number that quietly goes stale. **The total** is not maintained by hand —
 `tests/test_docs.py` reads the log's own table and fails if this sentence and
 that table disagree, and separately fails if the three parts do not sum to it,
 because this paragraph has been the stale number twice already.
