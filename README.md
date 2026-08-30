@@ -771,7 +771,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 29 August 2026 it holds **190 findings**: 140 raised by automated review, 4
+As of 30 August 2026 it holds **190 findings**: 140 raised by automated review, 4
 that only a live run against the harness could have raised, and 46 the author
 found rather than review. "Automated review" is two sources now, not one: Qodo on
 every pull request, and a single outside audit of `main` that raised findings
@@ -1018,6 +1018,25 @@ to one of the two tables that make the claim, and the second `/agentic_review`
 against `026d73c` came back **Bugs (0)** with every finding marked ✓ Resolved.
 Six findings, three rounds, and the defect the pull request is *about* recurred
 twice inside its own fix.
+
+**The review reads the guards too.**
+[#45 — *Two rows that did not render, and a sentence that pointed at the wrong
+ones*](https://github.com/aryangorde8/bumpsmith/pull/45) fixed two rows of
+`REVIEW-LOG.md` that GitHub had been truncating. An unescaped `|` ends a table
+cell even inside a code span, so a `High` finding had been displaying with no
+disposition at all — in the table whose stated promise is that nothing closes
+silently — and the check added with the fix counts each row's escaped pipes
+against the width its separator declares. Qodo reviewed **the check** rather
+than the rows and raised two findings, both inside it: it skipped tables written
+without the outer pipes, which GitHub's grammar permits, and its lookbehind read
+any pipe after a backslash as escaped when only an *odd* run escapes one — so a
+row GitHub truncates measured as matching. **The guard passed the exact failure
+it was written to catch.** Both were reproduced before they were accepted, and
+half of the first was rejected with the measurement that rejected it: it offered
+the README's recorded-runs table as an existing table without outer pipes, and
+every table in both files has them. The re-review returned **Bugs (0)** with both
+threads resolved — which is worth reporting only because the rounds on #33 and
+#35 did not.
 
 **What was intentionally dismissed.** Three findings were rejected rather than
 fixed, each with the measurement that rejected it rather than an opinion. The
