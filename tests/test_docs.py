@@ -735,3 +735,101 @@ def test_the_readme_taxonomy_prose_counts_its_own_table() -> None:
     assert _NUMBER_WORDS[match["rewriters"]] == with_rewriter, (
         f"the README says {match['rewriters']} have rewriters; the table marks {with_rewriter}"
     )
+
+
+# --------------------------------------------------------------------------
+# Finding 187. The two checks below are about the documents as they are *read*
+# rather than as they are parsed. Everything above this line reads a table by
+# splitting on `|` in Python, which is a more forgiving parser than the one a
+# reader actually gets, and every one of those checks passed while two rows of
+# REVIEW-LOG.md displayed no disposition at all on github.com.
+# --------------------------------------------------------------------------
+
+_UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
+_SEPARATOR_ROW = re.compile(r"^\|[\s:|-]+\|$")
+_AUDIT_HEADING = re.compile(r"^## An outside audit of `main` — (\d+) to (\d+)$", re.MULTILINE)
+_README_AUDIT_RANGE = re.compile(
+    r"outside audit of `main` that raised findings\s+(\d+) to (\d+)", re.DOTALL
+)
+
+
+def _table_rows_against_their_width(text: str) -> list[tuple[int, int, int, str]]:
+    """Every table row, with the column count its separator declared.
+
+    A GitHub table is fixed in width by the `|---|---|` line under its header.
+    A row offering more cells than that does not wrap: the surplus is dropped,
+    silently, starting from the right.
+    """
+    found: list[tuple[int, int, int, str]] = []
+    width: int | None = None
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            width = None
+            continue
+        if _SEPARATOR_ROW.match(stripped):
+            width = len(_UNESCAPED_PIPE.split(stripped))
+            continue
+        if width is None:  # the header line, before the separator is known
+            continue
+        found.append((number, len(_UNESCAPED_PIPE.split(stripped)), width, stripped))
+    return found
+
+
+def test_no_table_row_loses_a_column_to_an_unescaped_pipe() -> None:
+    """Finding 187: a `|` inside a code span still ends the cell.
+
+    Rows 143 and 178 carried shell -- `... || echo __ABSENT__`, `jq 'add | map(…)'`
+    -- in inline code, which does not protect the character. Both rendered with
+    more cells than the header declares, so GitHub dropped the surplus: the
+    **Disposition** column and everything right of it. A `High` finding read
+    online as one nobody had closed, in the table whose stated promise is that
+    this cannot happen.
+
+    Nothing above this test could see it. They all split on `|` in Python, which
+    keeps the extra cells rather than discarding them. This one counts instead,
+    and covers the README because nothing about the mistake is particular to the
+    log.
+    """
+    wrong = [
+        (name, number, got, want, row)
+        for name, text in (("REVIEW-LOG.md", _review_log()), ("README.md", _readme()))
+        for number, got, want, row in _table_rows_against_their_width(text)
+        if got != want
+    ]
+    assert not wrong, "table rows whose surplus cells GitHub will drop:\n" + "\n".join(
+        f"  {name}:{number} offers {got} cells, the header declares {want} -- "
+        f"escape the pipes as `\\|`: {row[:100]}..."
+        for name, number, got, want, row in wrong
+    )
+
+
+def test_the_readme_names_the_same_audit_findings_the_log_does() -> None:
+    """Finding 188: the README said the audit "raised the last three".
+
+    It raised 182 to 184. 185 was Qodo's second round on the fix for 184 and
+    landed in the same pull request, so the sentence was false in the commit
+    that wrote it, and every finding added since has moved it further. A reader
+    following it lands on rows the audit never saw and credits them to it.
+
+    The fix was to name the range, and naming it is only worth more than
+    counting it if the two files cannot drift apart -- so the README's numbers
+    are read against the heading of the log's own section for that batch. This
+    is finding 181's lesson, which is that a row is identified by its number and
+    never by where it sits.
+    """
+    heading = _AUDIT_HEADING.search(_review_log())
+    assert heading is not None, (
+        "REVIEW-LOG.md no longer has a section headed 'An outside audit of `main` — N to M'. "
+        "If the batch was renamed, update this anchor and the README sentence together."
+    )
+    stated = _README_AUDIT_RANGE.search(_readme())
+    assert stated is not None, (
+        "the README no longer says the outside audit 'raised findings N to M'. "
+        "If the wording changed, update this anchor -- but do not go back to a "
+        "positional reference; that is finding 188."
+    )
+    assert stated.groups() == heading.groups(), (
+        f"the README says the outside audit raised {stated.group(1)} to {stated.group(2)}; "
+        f"the log's section for that batch is headed {heading.group(1)} to {heading.group(2)}."
+    )
