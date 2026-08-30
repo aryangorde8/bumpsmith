@@ -3410,6 +3410,14 @@ them against literals rather than against the files: a check whose blind spots
 happen to be unreachable in the current text is one whose guarantee expires
 quietly the next time somebody writes a table.
 
+Asked for a second review against the fix, Qodo returned **no findings** and
+marked both threads resolved. A round with nothing in it is a fact about this
+pull request and not a row of its own -- finding 186's rule -- so the coverage
+table carries it as #45's two inline findings and there is no 191. It is worth
+saying which way that cuts: the two rounds before this one, on #33 and #35, each
+found real defects inside the previous round's fix. An empty second round is
+evidence only because those were not.
+
 ## How this stays honest
 
 - A finding is recorded when it is raised, not when it is resolved.
