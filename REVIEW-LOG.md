@@ -75,7 +75,7 @@ its own row. An empty review is a row here, not a new finding.
 | [#42](https://github.com/aryangorde8/bumpsmith/pull/42) | reviewed | 0 | 2 |
 | [#43](https://github.com/aryangorde8/bumpsmith/pull/43) | reviewed | 1 | 2 |
 | [#44](https://github.com/aryangorde8/bumpsmith/pull/44) | reviewed | 0 | 2 |
-| [#45](https://github.com/aryangorde8/bumpsmith/pull/45) | reviewed | 0 | 2 |
+| [#45](https://github.com/aryangorde8/bumpsmith/pull/45) | reviewed | 2 | 2 |
 
 ### Findings
 
@@ -269,6 +269,8 @@ its own row. An empty review is a row here, not a new finding.
 | 186 | [#43](https://github.com/aryangorde8/bumpsmith/pull/43) | **High.** The first version of this pull request counted #42's empty review as a log finding — Qodo raised nothing on #42, and the README's author-found total went up anyway. That inflates the finding index while review coverage already has its own table. **A finding is something somebody can act on**; an empty review is not one | **Fixed** — #42 stays in the pull-request table (0 inline, 2 coverage) and is not a finding. This row is the one Qodo actually raised, on #43 | [#43](https://github.com/aryangorde8/bumpsmith/pull/43) |
 | 187 | [#45](https://github.com/aryangorde8/bumpsmith/pull/45) | **Two dispositions rendered as empty cells.** GitHub ends a table cell at every `\|` that is not backslash-escaped, **including inside an inline code span**. Row 178 held `cat MARKER 2>/dev/null \|\| echo __ABSENT__` and row 143 held `--jq '… \| length'` and `jq -s 'add \| map(…) \| length'`, so each offered more cells than its header declares and github.com dropped the surplus — the **Disposition** column and everything after it. Both read online as a finding nobody closed, one of them a `High`, in the file whose second sentence is that nothing here closes silently. The source was complete throughout; only the rendering was lossy, which is why every check over this table passed. Row 178 escapes the same operator correctly twelve words later, inside the cell that was being hidden | **Fixed** — four pipes escaped, no wording changed. `test_no_table_row_loses_a_column_to_an_unescaped_pipe` counts each row's unescaped pipes against the width its separator declares, over every table in this file and the README. Verified by breaking: un-escaping any one of the four fails it and nothing else. What is worth keeping is what the existing checks were — `test_docs.py` already read this table, numbered its rows, summed its provenance and matched the README's total, and all of it passed while two rows displayed no disposition at all. The table was checked for what it says and never for whether it can be read | [#45](https://github.com/aryangorde8/bumpsmith/pull/45) |
 | 188 | [#45](https://github.com/aryangorde8/bumpsmith/pull/45) | **A positional reference to a set it no longer describes — the second time.** The README's review paragraph said the outside audit *"raised the last three"* findings. The audit raised **182 to 184**; 185 is Qodo's second round on the fix for 184 and landed in the same pull request, so the sentence was already false in the commit that introduced it, and 186 and 187 have since put two more rows behind it. A reader following it lands on 186 — an empty-review report — and attributes it to an audit that never saw it. This is finding **181's own shape**: *"a positional reference, written into the same commit that made it wrong"*, logged eight rows earlier and then written again | **Fixed** — the sentence names 182 to 184, which is what the log's own section heading calls them, and `test_the_readme_names_the_same_audit_findings_the_log_does` reads the two against each other so the pair cannot drift. A count is not enough here: the numbers stay correct while findings accumulate, and *"the last three"* could not. The lesson 181 recorded was to stop describing a row by where it sits; applying it to one paragraph and not to the paragraph beside it is how it came back | [#45](https://github.com/aryangorde8/bumpsmith/pull/45) |
+| 189 | [#45](https://github.com/aryangorde8/bumpsmith/pull/45) | **The guard could not see a table whose rows omit the outer pipes.** Qodo, on the check added for 187. `_table_rows_against_their_width` skipped every line that did not begin with a pipe, and GitHub's grammar makes the outer ones optional — a header, a dash row and body rows with delimiters only between the cells is a table. A stray delimiter in one of those rows truncates it exactly as 178 was truncated, with the guard green. Reproduced before accepting: the helper returned **zero rows** for a three-line table in that form whose body row carried a live delimiter inside a code span | **Fixed** — a table is found by its separator row now rather than by a leading pipe, and the header above it is measured too, which the first version skipped as well. **Half the report is rejected**: it offered the README's recorded-runs table as an existing table in that form, and that table has outer pipes, as does every other table in both files. Checked rather than assumed. Since the shape is unreachable in today's text, the case is pinned against a literal in `test_the_table_guard_sees_the_two_shapes_it_first_could_not` — a guard whose blind spots are visible only in the text it currently reads is one nobody can trust after the next edit | [#45](https://github.com/aryangorde8/bumpsmith/pull/45) |
+| 190 | [#45](https://github.com/aryangorde8/bumpsmith/pull/45) | **Backslash parity: an even run of backslashes leaves the delimiter live.** Qodo, on the same check. The lookbehind asked only whether the previous character was a backslash, but a delimiter is escaped by an **odd** run of them — the first backslash of a pair escapes the second, and the delimiter after it is live. The guard read that as escaped, counted one cell too few, and so **passed a row GitHub truncates**: the exact failure the check exists to catch, occurring inside the code written to catch it. Reproduced before accepting, against a two-column header, and measured as matching while GitHub renders three cells and drops one | **Fixed** — `_delimiters()` counts the backslash run before each pipe and treats the pipe as a boundary when that count is even, which is what CommonMark specifies and what the first version approximated. Both forms are pinned: the escaped one must pass and the live one must fail. The second round finding a defect *inside the first round's own fix* is by now this repository's most repeated shape | [#45](https://github.com/aryangorde8/bumpsmith/pull/45) |
 
 Every finding has a row here and a fuller account below. Findings that arrived
 in groups keep a shared section, because the group is often the unit that makes
@@ -3375,6 +3377,38 @@ landed in one place and left standing in another. The sentence now names 182 to
 184, and a test reads those numbers against the log's own section heading,
 because a range that stays correct as the log grows is the only version of this
 sentence that can.
+
+## 189–190 · The guard's own blind spots
+
+Both raised by Qodo on the check added for 187, and both real. A guard against
+rows that do not render, which itself could not see two kinds of row: this is
+the second round finding defects inside the first round's fix, which is by now
+the most repeated shape in this file.
+
+**189 — a table without outer pipes.** GitHub's grammar makes them optional, so
+`Run | Ends` over `--- | ---` is a table, and the helper skipped every line that
+did not start with one. A stray pipe there would truncate a row exactly as 178
+was truncated, with the suite green. Tables are now found by their separator
+row, and the header above it is measured too — the first version skipped that as
+well, silently, because it only started counting after the separator.
+
+Half of the report is rejected, and the half is worth naming: it gave the
+README's recorded-runs table as an existing example of the leadingless form. It
+is not one. Every table in both files has outer pipes, which was checked rather
+than assumed. The defect is real and the evidence offered for it was wrong, and
+those are two different facts about one report.
+
+**190 — backslash parity.** A pipe is escaped by an *odd* run of backslashes.
+`(?<!\\)\|` asks only about the character immediately before, so it read the live
+pipe in `a\\| b` as escaped, counted a cell too few, and passed a row GitHub
+truncates. That is the failure the check exists to catch, occurring inside the
+check. Reproduced first: `| a\\| x | b |` under a two-column header measured as
+matching, while GitHub renders three cells and drops one.
+
+Neither shape occurs in either document today. That is the argument for pinning
+them against literals rather than against the files: a check whose blind spots
+happen to be unreachable in the current text is one whose guarantee expires
+quietly the next time somebody writes a table.
 
 ## How this stays honest
 

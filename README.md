@@ -771,7 +771,7 @@ the ones that were **rejected with the measurement that rejected them**, the one
 Nothing there closes silently. A finding closed without a visible disposition is
 indistinguishable from one nobody read.
 
-As of 29 August 2026 it holds **188 findings**: 138 raised by automated review, 4
+As of 29 August 2026 it holds **190 findings**: 140 raised by automated review, 4
 that only a live run against the harness could have raised, and 46 the author
 found rather than review. "Automated review" is two sources now, not one: Qodo on
 every pull request, and a single outside audit of `main` that raised findings
