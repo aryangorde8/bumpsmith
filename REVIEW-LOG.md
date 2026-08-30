@@ -76,6 +76,8 @@ its own row. An empty review is a row here, not a new finding.
 | [#43](https://github.com/aryangorde8/bumpsmith/pull/43) | reviewed | 1 | 2 |
 | [#44](https://github.com/aryangorde8/bumpsmith/pull/44) | reviewed | 0 | 2 |
 | [#45](https://github.com/aryangorde8/bumpsmith/pull/45) | reviewed | 2 | 2 |
+| [#46](https://github.com/aryangorde8/bumpsmith/pull/46) | reviewed | 0 | 2 |
+| [#47](https://github.com/aryangorde8/bumpsmith/pull/47) | reviewed | 0 | 2 |
 
 ### Findings
 
