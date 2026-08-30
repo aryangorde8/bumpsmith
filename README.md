@@ -29,7 +29,7 @@ break it has no rewriter for and says so. See
 [the recorded runs](#the-recorded-runs).
 
 **A demo of the tool is at
-[youtu.be/ZCy5vY44ZAE](https://youtu.be/ZCy5vY44ZAE).**
+[youtu.be/Eb-URyCtBPY](https://youtu.be/Eb-URyCtBPY).**
 
 ---
 
@@ -1056,7 +1056,15 @@ because trimming an audit trail drops the oldest denial first.
 Entry for the **TrueForge Agent Harness Hackathon** (WeMakeDevs × TrueFoundry ×
 Qodo), 24–30 August 2026. The build window opened at 08:00 London on 24 August
 and closes at 20:00 London on 30 August. The submission video is
-[youtu.be/ZCy5vY44ZAE](https://youtu.be/ZCy5vY44ZAE).
+[youtu.be/Eb-URyCtBPY](https://youtu.be/Eb-URyCtBPY).
+
+- [0:00](https://youtu.be/Eb-URyCtBPY?t=0) — The problem — `bump-pydantic` rewrites 442 lines and exits 0
+- [0:31](https://youtu.be/Eb-URyCtBPY?t=31) — What the agent does
+- [0:50](https://youtu.be/Eb-URyCtBPY?t=50) — **A run that reverts.** Four edits applied, a break it cannot classify, all four taken back
+- [1:50](https://youtu.be/Eb-URyCtBPY?t=110) — **A run that is kept**, and the diff it leaves
+- [2:10](https://youtu.be/Eb-URyCtBPY?t=130) — Where TrueForge fits — the sandbox, and the call that was denied
+- [2:45](https://youtu.be/Eb-URyCtBPY?t=165) — What Qodo review changed, and the log that records it
+- [3:21](https://youtu.be/Eb-URyCtBPY?t=201) — No model decides the rewrite
 
 Everything committed before the window is tooling only — licence, code-review
 integration, and CI plumbing, committed 19–21 August. The rules require that "the
